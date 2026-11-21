@@ -13,10 +13,13 @@ const NO_SEEK: usize = std.math.maxInt(usize);
 
 const ch_decoder = opaque {};
 
-extern fn ch_audio_create(render: RenderFn, user: ?*anyopaque, sample_rate: u32, channels: u32) ?*anyopaque;
+extern fn ch_audio_create(render: RenderFn, user: ?*anyopaque, sample_rate: u32, channels: u32, device_index: i32) ?*anyopaque;
 extern fn ch_audio_destroy(audio: ?*anyopaque) void;
 extern fn ch_audio_start(audio: ?*anyopaque) i32;
 extern fn ch_audio_stop(audio: ?*anyopaque) i32;
+extern fn ch_audio_device_count() i32;
+extern fn ch_audio_device_name(index: i32) [*c]const u8;
+extern fn ch_audio_default_device() i32;
 extern fn ch_audio_last_error() [*c]const u8;
 
 extern fn ch_decode_open(path: [*c]const u8, out_rate: u32, out_channels: u32) ?*ch_decoder;
@@ -26,6 +29,7 @@ extern fn ch_decode_duration(decoder: *ch_decoder) f64;
 extern fn ch_decode_title(decoder: *ch_decoder) [*c]const u8;
 extern fn ch_decode_artist(decoder: *ch_decoder) [*c]const u8;
 extern fn ch_decode_album(decoder: *ch_decoder) [*c]const u8;
+extern fn ch_decode_tag(decoder: *ch_decoder, key: [*c]const u8) [*c]const u8;
 extern fn ch_decode_cover(decoder: *ch_decoder, size: *u64) [*c]const u8;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
@@ -46,6 +50,20 @@ fn sleepMs(ms: u32) void {
     _ = std.posix.poll(&.{}, @intCast(ms)) catch {};
 }
 
+fn parseLeadingFloat(text: []const u8) ?f32 {
+    var end: usize = 0;
+    var digits: usize = 0;
+    while (end < text.len) : (end += 1) {
+        switch (text[end]) {
+            '0'...'9' => digits += 1,
+            '-', '+', '.' => {},
+            else => break,
+        }
+    }
+    if (digits == 0) return null;
+    return std.fmt.parseFloat(f32, text[0..end]) catch null;
+}
+
 const Ring = struct {
     buf: []f32 = undefined,
     cap: usize = 0,
@@ -57,6 +75,7 @@ const Ring = struct {
 pub const Engine = struct {
     allocator: Allocator,
     audio: ?*anyopaque = null,
+    output_device: i32 = -1,
     decoder: ?*ch_decoder = null,
 
     ring: Ring = .{},
@@ -73,6 +92,10 @@ pub const Engine = struct {
     frames: usize = 0,
     seek_req: usize = NO_SEEK,
     volume_bits: u32 = @bitCast(@as(f32, 1)),
+    rg_enabled: bool = true,
+    rg_gain: f32 = 1,
+    rg_gain_db: f32 = 0,
+    rg_peak: f32 = 0,
     equalizer: eq.Equalizer = .{},
 
     title: [256]u8 = @splat(0),
@@ -94,6 +117,23 @@ pub const Engine = struct {
 
     fn volume(self: *const Engine) f32 {
         return @bitCast(@atomicLoad(u32, &self.volume_bits, .monotonic));
+    }
+
+    fn loadReplayGain(self: *Engine, d: *ch_decoder) void {
+        self.rg_gain = 1;
+        self.rg_gain_db = 0;
+        self.rg_peak = 0;
+
+        const db = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_GAIN"))) orelse 0;
+        self.rg_gain_db = db;
+        var linear = std.math.pow(f32, 10, db / 20);
+
+        const peak = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_PEAK"))) orelse 0;
+        self.rg_peak = @max(peak, 0);
+        if (self.rg_peak > 0 and linear * self.rg_peak > 1) {
+            linear = 1 / self.rg_peak;
+        }
+        self.rg_gain = linear;
     }
 
     fn fail(self: *Engine, msg: []const u8, code: i32) i32 {
@@ -226,8 +266,10 @@ pub const Engine = struct {
         self.equalizer.process(out[0..produced], take);
 
         const vol = self.volume();
-        if (vol != 1) {
-            for (out[0..produced]) |*s| s.* *= vol;
+        var gain = vol;
+        if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) gain *= self.rg_gain;
+        if (gain != 1) {
+            for (out[0..produced]) |*s| s.* *= gain;
         }
 
         if (take == 0 and @atomicLoad(bool, &self.eof, .acquire)) {
@@ -350,7 +392,7 @@ export fn ch_engine_create() ?*Engine {
 
     @atomicStore(bool, &self.idle, true, .release);
 
-    self.audio = ch_audio_create(&renderAudio, self, SAMPLE_RATE, CHANNELS) orelse {
+    self.audio = ch_audio_create(&renderAudio, self, SAMPLE_RATE, CHANNELS, self.output_device) orelse {
         copyAudioError();
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
@@ -422,6 +464,7 @@ export fn ch_engine_load(self: ?*Engine, path: [*c]const u8) i32 {
     copyCString(&e.title, ch_decode_title(d));
     copyCString(&e.artist, ch_decode_artist(d));
     copyCString(&e.album, ch_decode_album(d));
+    e.loadReplayGain(d);
     e.storeCover(d);
 
     return 0;
@@ -464,6 +507,71 @@ export fn ch_engine_set_volume(self: ?*Engine, volume: f32) i32 {
     const e = self orelse return -1;
     const clamped = std.math.clamp(volume, 0, 1);
     @atomicStore(u32, &e.volume_bits, @bitCast(clamped), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_set_replaygain(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(bool, &e.rg_enabled, enabled != 0, .monotonic);
+    return 0;
+}
+
+export fn ch_engine_replaygain_gain_db(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.rg_gain_db;
+}
+
+export fn ch_engine_replaygain_peak(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.rg_peak;
+}
+
+export fn ch_engine_output_device_count() i32 {
+    return ch_audio_device_count();
+}
+
+export fn ch_engine_output_device_name(index: i32) [*c]const u8 {
+    return ch_audio_device_name(index);
+}
+
+export fn ch_engine_output_device(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    return e.output_device;
+}
+
+export fn ch_engine_set_output_device(self: ?*Engine, index: i32) i32 {
+    const e = self orelse return -1;
+    const count = ch_audio_device_count();
+    if (index < -1 or index >= count) return e.fail("dispositivo de audio inválido", -2);
+    if (index == e.output_device) return 0;
+
+    const was_playing = @atomicLoad(bool, &e.playing, .acquire);
+    @atomicStore(bool, &e.playing, false, .release);
+    if (!e.waitIdle(2000)) return e.fail("el motor de audio no respondió", -3);
+
+    if (e.audio) |audio| {
+        ch_audio_destroy(audio);
+        e.audio = null;
+    }
+    e.output_device = index;
+    e.audio = ch_audio_create(&renderAudio, e, SAMPLE_RATE, CHANNELS, index) orelse {
+        copyAudioError();
+        e.output_device = -1;
+        e.audio = ch_audio_create(&renderAudio, e, SAMPLE_RATE, CHANNELS, -1) orelse {
+            copyAudioError();
+            return -2;
+        };
+        if (ch_audio_start(e.audio) != 0) {
+            copyAudioError();
+            return -3;
+        }
+        return -2;
+    };
+    if (ch_audio_start(e.audio) != 0) {
+        copyAudioError();
+        return -3;
+    }
+    if (was_playing) @atomicStore(bool, &e.playing, true, .release);
     return 0;
 }
 

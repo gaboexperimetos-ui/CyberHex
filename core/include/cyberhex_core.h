@@ -20,6 +20,17 @@ int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);
 int32_t ch_engine_set_volume(ch_engine* engine, float volume);
 
+/* ReplayGain: aplica la ganancia de pista si el archivo trae la etiqueta. */
+int32_t ch_engine_set_replaygain(ch_engine* engine, int32_t enabled);
+float   ch_engine_replaygain_gain_db(ch_engine* engine);
+float   ch_engine_replaygain_peak(ch_engine* engine);
+
+/* Dispositivos de salida. index -1 = predeterminado del sistema. */
+int32_t     ch_engine_output_device_count(void);
+const char* ch_engine_output_device_name(int32_t index);
+int32_t     ch_engine_output_device(ch_engine* engine);
+int32_t     ch_engine_set_output_device(ch_engine* engine, int32_t index);
+
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);

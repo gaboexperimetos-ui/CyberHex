@@ -8,10 +8,15 @@ extern "C" {
 
 typedef void (*ch_render_fn)(void* user, float* out, uint32_t frames);
 
-void* ch_audio_create(ch_render_fn render, void* user, uint32_t sample_rate, uint32_t channels);
+void* ch_audio_create(ch_render_fn render, void* user, uint32_t sample_rate, uint32_t channels, int32_t device_index);
 void ch_audio_destroy(void* audio);
 int32_t ch_audio_start(void* audio);
 int32_t ch_audio_stop(void* audio);
+
+/* Enumeración de dispositivos de salida. */
+int32_t ch_audio_device_count(void);
+const char* ch_audio_device_name(int32_t index);
+int32_t ch_audio_default_device(void);
 
 typedef struct ch_decoder ch_decoder;
 

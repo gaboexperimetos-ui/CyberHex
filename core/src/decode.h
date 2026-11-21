@@ -33,6 +33,9 @@ const char* ch_decode_title(ch_decoder* decoder);
 const char* ch_decode_artist(ch_decoder* decoder);
 const char* ch_decode_album(ch_decoder* decoder);
 
+/* Valor de una etiqueta arbitraria (p. ej. "REPLAYGAIN_TRACK_GAIN"); "" si no existe. */
+const char* ch_decode_tag(ch_decoder* decoder, const char* key);
+
 /* Carátula embebida (JPEG/PNG); NULL si no hay. Válida hasta ch_decode_close. */
 const uint8_t* ch_decode_cover(ch_decoder* decoder, uint64_t* size);
 

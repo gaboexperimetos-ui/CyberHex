@@ -401,6 +401,17 @@ const char* ch_decode_album(ch_decoder* d) {
     return (d == NULL || d->album == NULL) ? "" : d->album;
 }
 
+const char* ch_decode_tag(ch_decoder* d, const char* key) {
+    if (d == NULL || key == NULL) {
+        return "";
+    }
+    AVDictionaryEntry* entry = av_dict_get(d->fmt->metadata, key, NULL, 0);
+    if (entry == NULL) {
+        entry = av_dict_get(d->fmt->streams[d->stream_index]->metadata, key, NULL, 0);
+    }
+    return entry == NULL ? "" : entry->value;
+}
+
 const uint8_t* ch_decode_cover(ch_decoder* d, uint64_t* size) {
     if (size != NULL) {
         *size = (d == NULL) ? 0 : (uint64_t)d->cover_size;

@@ -92,6 +92,12 @@ const char* ch_decode_album(ch_decoder* d) {
     return "";
 }
 
+const char* ch_decode_tag(ch_decoder* d, const char* key) {
+    (void)d;
+    (void)key;
+    return "";
+}
+
 const uint8_t* ch_decode_cover(ch_decoder* d, uint64_t* size) {
     (void)d;
     if (size != NULL) {
