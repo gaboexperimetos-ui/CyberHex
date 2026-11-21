@@ -43,6 +43,22 @@ double  ch_engine_sleep_remaining(ch_engine* engine);
 int32_t ch_engine_set_replaygain(ch_engine* engine, int32_t enabled);
 float   ch_engine_replaygain_gain_db(ch_engine* engine);
 float   ch_engine_replaygain_peak(ch_engine* engine);
+/*
+ * 0 = ganancia por pista (REPLAYGAIN_TRACK_*), 1 = por album
+ * (REPLAYGAIN_ALBUM_*). Si el archivo no trae tags de ReplayGain se usa
+ * R128_TRACK_GAIN / R128_ALBUM_GAIN (Q7.8, formato Opus). Afecta a las pistas
+ * que se abran despues.
+ */
+int32_t ch_engine_set_replaygain_mode(ch_engine* engine, int32_t mode);
+int32_t ch_engine_replaygain_mode(ch_engine* engine);
+
+/*
+ * Niveles de salida para vumetros: escribe rms_l, rms_r, peak_l, peak_r
+ * (0.0-1.0, pico incluido por canal) y devuelve cuantos valores escribio.
+ * Se miden despues de EQ, ganancia y limitador, con caida exponencial de
+ * ~200 ms; baja a cero al pausar. Seguro desde el hilo de UI.
+ */
+int32_t ch_engine_levels(ch_engine* engine, float* out, int32_t count);
 
 /* Limitador de picos en caliente (ceiling en dBFS, p.ej. -1.0). */
 int32_t ch_engine_set_limiter(ch_engine* engine, int32_t enabled, float ceiling_db);
@@ -108,6 +124,12 @@ float   ch_engine_eq_band_freq(int32_t index);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 /* Cambia una sola banda (±18 dB) conservando el resto. */
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);
+/*
+ * Preamp del EQ en dB (0 a -24, nunca amplifica): baja la senal antes del
+ * banco de filtros para que un refuerzo no haga recortar al limitador.
+ */
+int32_t ch_engine_set_eq_preamp(ch_engine* engine, float db);
+float   ch_engine_eq_preamp(ch_engine* engine);
 
 const char* ch_engine_title(ch_engine* engine);
 const char* ch_engine_artist(ch_engine* engine);
@@ -131,6 +153,19 @@ const uint8_t* ch_engine_cover_at(ch_engine* engine, int32_t index, uint64_t* si
 int32_t ch_engine_lyrics_count(ch_engine* engine);
 /* Copia la linea activa en `out` (UTF-8). Devuelve bytes escritos o -1. */
 int32_t ch_engine_lyric_line(ch_engine* engine, char* out, uint32_t out_size);
+
+/* Fundido al pausar/reanudar, en segundos (0 = corte inmediato, def. 0.05). */
+int32_t ch_engine_set_pause_fade(ch_engine* engine, float seconds);
+float   ch_engine_pause_fade(ch_engine* engine);
+
+/*
+ * Loop A-B de la pista actual, en segundos. Al llegar a B se salta a A por el
+ * mismo camino que un seek (respeta crossfade y estiramiento). `end <= start`
+ * lo desactiva; tambien se cancela solo al cambiar de pista.
+ */
+int32_t ch_engine_set_loop(ch_engine* engine, double start, double end);
+double  ch_engine_loop_start(ch_engine* engine);
+double  ch_engine_loop_end(ch_engine* engine);
 
 double ch_engine_position(ch_engine* engine);
 double ch_engine_duration(ch_engine* engine);
@@ -169,6 +204,8 @@ const char* ch_engine_last_error(ch_engine* engine);
 /* Estadisticas de búfer para diagnostico. */
 double ch_engine_buffered_seconds(ch_engine* engine);
 uint64_t ch_engine_buffer_underflows(ch_engine* engine);
+/* Pistas que se saltaron solas por no poder abrirse (archivo roto). */
+uint64_t ch_engine_skipped_tracks(ch_engine* engine);
 
 /* Detecta silencio al principio/fin de un archivo (dBFS). lead/tail en segundos. */
 int32_t ch_engine_detect_silence(const char* utf8_path, float threshold_db, double* lead, double* tail);

@@ -244,6 +244,17 @@ pub const Engine = struct {
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
     buf_underflows: u64 = 0,
+    // Niveles de salida para vumetros (bits de f32, legibles sin candados).
+    level_rms: [2]u32 = @splat(0),
+    level_peak: [2]u32 = @splat(0),
+    pause_fade_bits: u32 = @bitCast(@as(f32, 0.05)),
+    // 0 = ReplayGain por pista, 1 = por album.
+    rg_mode: u32 = 0,
+    // Loop A-B en marcos absolutos de la cola (NO_SEEK = inactivo).
+    ab_start: usize = NO_SEEK,
+    ab_end: usize = NO_SEEK,
+    // Pistas que no se pudieron abrir y se saltaron solas.
+    skipped_tracks: u64 = 0,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     ev_lock: SpinLock = .{},
@@ -466,10 +477,35 @@ pub const Engine = struct {
         copyCString(&seg.artist, ch_decode_artist(d));
         copyCString(&seg.album, ch_decode_album(d));
 
-        const db = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_GAIN"))) orelse 0;
+        // ReplayGain: modo album (una sola ganancia para todo el disco, sin
+        // saltos entre pistas) o modo pista. R128_TRACK_GAIN esta en Q7.8.
+        const track_db = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_GAIN")));
+        const track_peak = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_PEAK")));
+        const album_db = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_ALBUM_GAIN")));
+        const album_peak = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_ALBUM_PEAK")));
+        const r128_track = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "R128_TRACK_GAIN")));
+        const r128_album = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "R128_ALBUM_GAIN")));
+
+        // El tramo ha cambiado: el loop A-B era de la pista anterior.
+        @atomicStore(usize, &self.ab_start, NO_SEEK, .release);
+        @atomicStore(usize, &self.ab_end, NO_SEEK, .release);
+
+        const album_mode = @atomicLoad(u32, &self.rg_mode, .acquire) == 1;
+        var db: f32 = 0;
+        var peak: f32 = 0;
+        if (album_mode and album_db != null) {
+            db = album_db.?;
+            peak = album_peak orelse 0;
+        } else if (track_db != null) {
+            db = track_db.?;
+            peak = track_peak orelse 0;
+        } else {
+            const q7 = if (album_mode) (r128_album orelse r128_track) else (r128_track orelse r128_album);
+            if (q7) |q| db = q / 256.0;
+        }
+
         seg.rg_gain_db = db;
         var linear = std.math.pow(f32, 10, db / 20);
-        const peak = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_PEAK"))) orelse 0;
         seg.rg_peak = @max(peak, 0);
         if (seg.rg_peak > 0 and linear * seg.rg_peak > 1) linear = 1 / seg.rg_peak;
         seg.rg_gain = linear;
@@ -815,32 +851,36 @@ fn audibleLyricsOffset(self: *Engine) f64 {
     fn openNextAuto(self: *Engine) bool {
         self.list_mutex.lock();
         const mode = @atomicLoad(u32, &self.repeat_mode, .monotonic);
-        const target: ?usize = if (mode == 2) self.queue_index else self.nextAfterLocked(self.queue_index);
-        const next = target orelse {
-            self.list_mutex.unlock();
-            return false;
-        };
-        if (next >= self.playlist.items.len) {
-            self.list_mutex.unlock();
-            return false;
-        }
-        const path = self.playlist.items[next];
-        const d = ch_decode_open(path.ptr, SAMPLE_RATE, CHANNELS) orelse {
-            self.list_mutex.unlock();
-            return false;
-        };
-        const old = self.decoder;
-        self.decoder = d;
-        self.queue_index = next;
-        self.list_mutex.unlock();
+        var candidate: ?usize = if (mode == 2) self.queue_index else self.nextAfterLocked(self.queue_index);
+        var attempts: usize = 0;
+        while (candidate) |next| {
+            if (next >= self.playlist.items.len) break;
+            // Un archivo ilegible no debe cortar la cola: se salta y se prueba
+            // el siguiente (con repeat-one no, seria un bucle sobre el roto).
+            if (attempts >= self.playlist.items.len) break;
+            if (mode == 2 and attempts > 0) break;
+            attempts += 1;
 
-        if (old) |o| ch_decode_close(o);
-        self.resetStretch();
-        _ = self.addSegment(next, d, 0);
-        @atomicStore(bool, &self.eof, false, .release);
-        @atomicStore(bool, &self.playing, true, .release);
-        self.pushEvent(EV_TRACK, @intCast(next), 0, 0);
-        return true;
+            const path = self.playlist.items[next];
+            if (ch_decode_open(path.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+                const old = self.decoder;
+                self.decoder = d;
+                self.queue_index = next;
+                self.list_mutex.unlock();
+
+                if (old) |o| ch_decode_close(o);
+                self.resetStretch();
+                _ = self.addSegment(next, d, 0);
+                @atomicStore(bool, &self.eof, false, .release);
+                @atomicStore(bool, &self.playing, true, .release);
+                self.pushEvent(EV_TRACK, @intCast(next), 0, 0);
+                return true;
+            }
+            self.skipped_tracks +%= 1;
+            candidate = self.nextAfterLocked(next);
+        }
+        self.list_mutex.unlock();
+        return false;
     }
 
     fn mixCrossfadeIntoRing(self: *Engine, abs_start: usize, head: []const f32, frames: usize) void {
@@ -1037,6 +1077,35 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         self.pushEvent(EV_STATE, 0, 0, 0);
     }
 
+    /// Actualiza los niveles con caida exponencial (~200 ms).
+    fn applyLevels(self: *Engine, rms: [2]f32, peak: [2]f32, frames: usize) void {
+        const n: f32 = @floatFromInt(@max(frames, 1));
+        const decay: f32 = @exp(-n / (0.2 * @as(f32, @floatFromInt(SAMPLE_RATE))));
+        for (0..2) |ch| {
+            const prev_rms: f32 = @bitCast(@atomicLoad(u32, &self.level_rms[ch], .monotonic));
+            const prev_peak: f32 = @bitCast(@atomicLoad(u32, &self.level_peak[ch], .monotonic));
+            const next_rms = @max(rms[ch], prev_rms * decay);
+            const next_peak = @max(peak[ch], prev_peak * decay);
+            @atomicStore(u32, &self.level_rms[ch], @bitCast(next_rms), .monotonic);
+            @atomicStore(u32, &self.level_peak[ch], @bitCast(next_peak), .monotonic);
+        }
+    }
+
+    /// Inicio del tramo que contiene `frame` (0 si no hay segmentos).
+    fn segmentStartFor(self: *Engine, frame: usize) usize {
+        var start: usize = 0;
+        self.seg_lock.lock();
+        defer self.seg_lock.unlock();
+        if (self.findSegment(frame)) |sp| start = self.segments[sp].start;
+        return start;
+    }
+
+    /// Segundos de fundido de pausa (0 = corte inmediato).
+    fn pauseFadeSeconds(self: *const Engine) f32 {
+        const seconds: f32 = @bitCast(@atomicLoad(u32, &self.pause_fade_bits, .monotonic));
+        return @max(seconds, 0);
+    }
+
     fn render(self: *Engine, out: []f32) void {
         const frames_out = out.len / CHANNELS;
         @memset(out, 0);
@@ -1058,7 +1127,20 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         }
         if (!playing and self.fade_gain < 0.001) {
             self.fade_gain = 0;
+            // El vumetro tiene que bajar a cero, no quedarse congelado.
+            self.applyLevels(.{ 0, 0 }, .{ 0, 0 }, frames_out);
             return;
+        }
+
+        // Loop A-B: al llegar a B se pide volver a A (mismo camino que un
+        // seek normal, asi que respeta crossfade y estiramiento).
+        {
+            const ab_a = @atomicLoad(usize, &self.ab_start, .acquire);
+            const ab_b = @atomicLoad(usize, &self.ab_end, .acquire);
+            if (playing and ab_a != NO_SEEK and ab_b != NO_SEEK and ab_b > ab_a) {
+                const p = @atomicLoad(usize, &self.played, .acquire);
+                if (p >= ab_b) @atomicStore(usize, &self.seek_req, ab_a, .release);
+            }
         }
 
         const r = @atomicLoad(usize, &self.ring.read, .acquire);
@@ -1072,7 +1154,10 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         if (take > 0) {
             self.readRingAt(r, out[0 .. take * CHANNELS]);
             @atomicStore(usize, &self.ring.read, r +% take, .release);
-            if (playing) {
+            {
+                // Se cuenta siempre lo consumido, incluido el fundido de pausa:
+                // si no, al reanudar el audio va por delante de la posicion
+                // mostrada (~50 ms perdidos por cada pausa).
                 const sp = self.speedValue();
                 var adv: usize = take;
                 if (sp != 1) {
@@ -1097,6 +1182,11 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         }
         if (take > 0) {
             var g = self.fade_gain;
+            const fade_frames = self.pauseFadeSeconds() * @as(f32, @floatFromInt(SAMPLE_RATE));
+            const fade_coeff: f32 = if (fade_frames <= 0)
+                1.0
+            else
+                1.0 - @exp(-1.0 / fade_frames);
             const limiting = self.limit_enabled;
             const ceiling = self.limit_ceiling;
             var lg = self.limit_gain;
@@ -1105,7 +1195,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             const release: f32 = 1.0 - @exp(-1.0 / (0.2 * @as(f32, @floatFromInt(SAMPLE_RATE))));
             var i: usize = 0;
             while (i < take) : (i += 1) {
-                g += (target - g) * FADE_COEFF;
+                g += (target - g) * fade_coeff;
                 var s = out[i * CHANNELS] * g;
                 var s2 = out[i * CHANNELS + 1] * g;
                 if (limiting) {
@@ -1126,6 +1216,28 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             }
             self.limit_gain = lg;
             self.fade_gain = if (!playing and g < 0.001) 0 else g;
+        }
+
+        {
+            var sum_l: f32 = 0;
+            var sum_r: f32 = 0;
+            var peak_l: f32 = 0;
+            var peak_r: f32 = 0;
+            var li: usize = 0;
+            while (li < take) : (li += 1) {
+                const sl = out[li * CHANNELS];
+                const sr = out[li * CHANNELS + 1];
+                sum_l += sl * sl;
+                sum_r += sr * sr;
+                peak_l = @max(peak_l, @abs(sl));
+                peak_r = @max(peak_r, @abs(sr));
+            }
+            const inv = 1.0 / @as(f32, @floatFromInt(@max(take, 1)));
+            self.applyLevels(
+                .{ @sqrt(sum_l * inv), @sqrt(sum_r * inv) },
+                .{ peak_l, peak_r },
+                frames_out,
+            );
         }
 
         if (take > 0 and self.sp_lock.tryLock()) {
@@ -2077,6 +2189,75 @@ export fn ch_engine_set_band_gain(self: ?*Engine, band: i32, db: f32) i32 {
     return 0;
 }
 
+/// Loop A-B de la pista actual, en segundos. `end <= start` lo desactiva.
+export fn ch_engine_set_loop(self: ?*Engine, start_s: f64, end_s: f64) i32 {
+    const e = self orelse return -1;
+    if (!(end_s > start_s) or start_s < 0) {
+        @atomicStore(usize, &e.ab_start, NO_SEEK, .release);
+        @atomicStore(usize, &e.ab_end, NO_SEEK, .release);
+        return 0;
+    }
+    const frames = @as(f64, @floatFromInt(SAMPLE_RATE));
+    const base = e.segmentStartFor(@atomicLoad(usize, &e.played, .acquire));
+    const a = base + @as(usize, @intFromFloat(start_s * frames));
+    const b = base + @as(usize, @intFromFloat(end_s * frames));
+    @atomicStore(usize, &e.ab_start, a, .release);
+    @atomicStore(usize, &e.ab_end, b, .release);
+    return 0;
+}
+
+/// Principio del loop en segundos desde el inicio de la pista (-1 si no hay).
+export fn ch_engine_loop_start(self: ?*Engine) f64 {
+    const e = self orelse return -1;
+    const a = @atomicLoad(usize, &e.ab_start, .acquire);
+    if (a == NO_SEEK) return -1;
+    const base = e.segmentStartFor(@atomicLoad(usize, &e.played, .acquire));
+    if (a < base) return -1;
+    return @as(f64, @floatFromInt(a - base)) / @as(f64, @floatFromInt(SAMPLE_RATE));
+}
+
+/// Final del loop en segundos desde el inicio de la pista (-1 si no hay).
+export fn ch_engine_loop_end(self: ?*Engine) f64 {
+    const e = self orelse return -1;
+    const b = @atomicLoad(usize, &e.ab_end, .acquire);
+    if (b == NO_SEEK) return -1;
+    const base = e.segmentStartFor(@atomicLoad(usize, &e.played, .acquire));
+    if (b < base) return -1;
+    return @as(f64, @floatFromInt(b - base)) / @as(f64, @floatFromInt(SAMPLE_RATE));
+}
+
+/// Cuantas pistas se saltaron por no poder abrirlas.
+export fn ch_engine_skipped_tracks(self: ?*Engine) u64 {
+    const e = self orelse return 0;
+    return @atomicLoad(u64, &e.skipped_tracks, .monotonic);
+}
+
+/// Preamp del EQ en dB (0 a -24). Baja la señal antes del banco de filtros.
+export fn ch_engine_set_eq_preamp(self: ?*Engine, db: f32) i32 {
+    const e = self orelse return -1;
+    e.equalizer.setPreamp(db);
+    return 0;
+}
+
+export fn ch_engine_eq_preamp(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.equalizer.preamp_db;
+}
+
+/// 1 = ReplayGain por album, 0 = por pista. Afecta a las pistas que se abran
+/// despues (las ya cargadas conservan su ganancia).
+export fn ch_engine_set_replaygain_mode(self: ?*Engine, mode: i32) i32 {
+    const e = self orelse return -1;
+    if (mode != 0 and mode != 1) return e.fail("modo de ReplayGain inválido", -2);
+    @atomicStore(u32, &e.rg_mode, @intCast(mode), .release);
+    return 0;
+}
+
+export fn ch_engine_replaygain_mode(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return @intCast(@atomicLoad(u32, &e.rg_mode, .acquire));
+}
+
 export fn ch_engine_position(self: ?*Engine) f64 {
     const e = self orelse return 0;
     const p = @atomicLoad(usize, &e.played, .acquire);
@@ -2258,6 +2439,34 @@ export fn ch_engine_buffered_seconds(self: ?*Engine) f64 {
     return @as(f64, @floatFromInt(avail)) / @as(f64, @floatFromInt(SAMPLE_RATE));
 }
 
+/// Niveles de salida para vumetros: escribe rms_l, rms_r, peak_l, peak_r
+/// (0..1, con caida ~200 ms). Devuelve cuantos valores escribio.
+export fn ch_engine_levels(self: ?*Engine, out: [*c]f32, count: i32) i32 {
+    const e = self orelse return -1;
+    if (out == null or count <= 0) return -1;
+    const values = [4]f32{
+        @bitCast(@atomicLoad(u32, &e.level_rms[0], .monotonic)),
+        @bitCast(@atomicLoad(u32, &e.level_rms[1], .monotonic)),
+        @bitCast(@atomicLoad(u32, &e.level_peak[0], .monotonic)),
+        @bitCast(@atomicLoad(u32, &e.level_peak[1], .monotonic)),
+    };
+    const n: usize = @min(@as(usize, @intCast(count)), values.len);
+    for (0..n) |i| out[i] = values[i];
+    return @intCast(n);
+}
+
+/// Fundido al pausar, en segundos (0 = corte inmediato).
+export fn ch_engine_set_pause_fade(self: ?*Engine, seconds: f32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(u32, &e.pause_fade_bits, @bitCast(std.math.clamp(seconds, 0, 2)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_pause_fade(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.pauseFadeSeconds();
+}
+
 /// Nº de veces que el hilo de audio se quedo sin datos (underrun).
 export fn ch_engine_buffer_underflows(self: ?*Engine) u64 {
     const e = self orelse return 0;
@@ -2368,6 +2577,17 @@ test "api: los punteros nulos devuelven error, no revientan" {
     try std.testing.expectEqual(@as(i32, -1), ch_engine_set_band_gain(null, 0, 3));
     try std.testing.expectEqual(@as(f64, 0.0), ch_engine_position(null));
     try std.testing.expectEqual(@as(u64, 0), ch_engine_buffer_underflows(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_levels(null, null, 4));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_pause_fade(null, 0.1));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_pause_fade(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_eq_preamp(null, -3));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_eq_preamp(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_replaygain_mode(null, 1));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_replaygain_mode(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_loop(null, 0, 10));
+    try std.testing.expectEqual(@as(f64, -1.0), ch_engine_loop_start(null));
+    try std.testing.expectEqual(@as(f64, -1.0), ch_engine_loop_end(null));
+    try std.testing.expectEqual(@as(u64, 0), ch_engine_skipped_tracks(null));
 }
 
 test "moveIndex reordena sin perder pistas" {
