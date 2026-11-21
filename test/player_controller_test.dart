@@ -184,6 +184,74 @@ void main() {
     expect(controller.sleepRemaining, 600);
   });
 
+  test('el DSP y la medición llegan al motor', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    fake.levels = const [0.1, 0.2, 0.3, 0.4];
+    expect(controller.levels, const [0.1, 0.2, 0.3, 0.4]);
+    expect(controller.spectrum(8), hasLength(8));
+
+    controller.eqPreamp = -6;
+    expect(fake.eqPreamp, -6);
+    expect(controller.setBandGain(3, 4.5), isTrue);
+    expect(fake.eqGains[3], 4.5);
+
+    controller.setLimiter(true, ceilingDb: -1.5);
+    expect(controller.limiter, isTrue);
+    expect(fake.limiterCeiling, -1.5);
+
+    controller.setCrossfeed(true, strength: 0.3);
+    expect(controller.crossfeed, (enabled: true, strength: 0.3));
+
+    controller.gainDb = 2.5;
+    expect(fake.gainDb, 2.5);
+
+    controller.stereoWidth = 1.5;
+    expect(fake.stereoWidth, 1.5);
+
+    controller.setTrimSilence(true, thresholdDb: -45);
+    expect(controller.trimSilence.thresholdDb, -45);
+
+    controller.setReplayGain(true);
+    expect(fake.replayGainEnabled, isTrue);
+    fake.replayGainGainDb = -7.5;
+    expect(controller.replayGainGainDb, -7.5);
+
+    controller.setMono(true);
+    expect(controller.mono, isTrue);
+
+    controller.setAbLoop(10, 20);
+    expect(controller.abLoop, (start: 10.0, end: 20.0));
+    controller.clearAbLoop();
+    expect(controller.abLoop.start, -1);
+  });
+
+  test('análisis de sonoridad, normalización y silencio', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.analyzeCurrent(), isNull);
+    fake.analysisLufs = -14.2;
+    expect(controller.analyzeCurrent(), (lufs: -14.2, peakDb: 0.0));
+
+    fake.normalizedDb = 3.5;
+    expect(controller.normalizeCurrent(-16), 3.5);
+    expect(controller.gainDb, 3.5);
+
+    expect(controller.detectSilence('/musica/tema.flac'), isNull);
+    fake.silence = (lead: 1.5, tail: 2.0);
+    expect(controller.detectSilence('/musica/tema.flac'),
+        (lead: 1.5, tail: 2.0));
+
+    fake.bufferedSeconds = 3.75;
+    fake.bufferUnderflows = 2;
+    expect(controller.bufferedSeconds, 3.75);
+    expect(controller.bufferUnderflows, 2);
+  });
+
   test('etiquetas completas, letras y carátula llegan a la UI', () {
     final fake = FakePlayer()
       ..hasTrack = true

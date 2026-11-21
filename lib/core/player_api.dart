@@ -251,6 +251,74 @@ abstract class PlayerApi {
   /// Línea de letra que corresponde a la posición actual ("" si no hay).
   String get activeLyricLine => '';
 
+  // ---------------------------------------------------------------------------
+  // Medición y DSP
+  // ---------------------------------------------------------------------------
+
+  /// RMS y pico por canal: `[rmsL, rmsR, peakL, peakR]` (0..1).
+  List<double> get levels => const [];
+
+  /// Picos en dBFS: `[peakL, peakR, rms]`.
+  List<double> get meterLevels => const [];
+
+  /// Espectro logarítmico de 20 Hz a 20 kHz: `bands` valores (0..1).
+  List<double> spectrum(int bands) => const [];
+
+  /// Preamp del EQ en dB (0 a -24, nunca amplifica).
+  double get eqPreamp => 0;
+  set eqPreamp(double db) {}
+
+  /// Cambia una sola banda del EQ conservando las demás.
+  bool setBandGain(int band, double db) => false;
+
+  void setLimiter(bool enabled, {double ceilingDb = -1}) {}
+  bool get limiter => false;
+
+  void setCrossfeed(bool enabled, {double strength = 0.5}) {}
+  ({bool enabled, double strength}) get crossfeed =>
+      (enabled: false, strength: 0);
+
+  /// Ganancia manual en dB (-24 a +24).
+  double get gainDb => 0;
+  set gainDb(double db) {}
+
+  /// Ancho estéreo: 0 (mono) a 2 (doble).
+  double get stereoWidth => 1;
+  set stereoWidth(double width) {}
+
+  void setTrimSilence(bool enabled, {double thresholdDb = -60}) {}
+  ({bool enabled, double thresholdDb}) get trimSilence =>
+      (enabled: false, thresholdDb: -60);
+
+  void setReplayGain(bool enabled) {}
+  double get replayGainGainDb => 0;
+  double get replayGainPeak => 0;
+
+  void setMono(bool enabled) {}
+  bool get mono => false;
+
+  /// Bucle A-B dentro de la pista actual.
+  void setAbLoop(double start, double end) {}
+  void clearAbLoop() {}
+  ({double start, double end}) get abLoop => (start: -1, end: -1);
+
+  /// Sonoridad integrada (LUFS) y pico del archivo actual.
+  ({double lufs, double peakDb})? analyzeCurrent() => null;
+
+  /// Normaliza la pista actual a `targetLufs`; devuelve los dB aplicados.
+  double? normalizeCurrent(double targetLufs) => null;
+
+  /// Audio decodificado por delante de la posición (segundos).
+  double get bufferedSeconds => 0;
+
+  /// Veces que el hilo de audio se quedó sin datos.
+  int get bufferUnderflows => 0;
+
+  /// Silencio al principio y al final de un archivo (dBFS).
+  ({double lead, double tail})? detectSilence(
+          String path, {double thresholdDb = -60}) =>
+      null;
+
   /// Siguiente evento del motor, o `null` si no hay ninguno pendiente.
   PlayerEvent? pollEvent();
 

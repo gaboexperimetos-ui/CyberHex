@@ -98,6 +98,24 @@ typedef _TagNative = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
 typedef _TagDart = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
 typedef _LyricLineNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32);
 typedef _LyricLineDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _IntFloatNative = Int32 Function(Pointer<Void>, Int32, Float);
+typedef _IntFloatDart = int Function(Pointer<Void>, int, double);
+typedef _FloatOutNative = Int32 Function(Pointer<Void>, Pointer<Float>);
+typedef _FloatOutDart = int Function(Pointer<Void>, Pointer<Float>);
+typedef _MeterNative = Int32 Function(
+    Pointer<Void>, Pointer<Float>, Pointer<Float>, Pointer<Float>);
+typedef _MeterDart = int Function(
+    Pointer<Void>, Pointer<Float>, Pointer<Float>, Pointer<Float>);
+typedef _TwoDoubleOutNative = Int32 Function(
+    Pointer<Void>, Pointer<Double>, Pointer<Double>);
+typedef _TwoDoubleOutDart = int Function(
+    Pointer<Void>, Pointer<Double>, Pointer<Double>);
+typedef _NormalizeNative = Int32 Function(Pointer<Void>, Double, Pointer<Double>);
+typedef _NormalizeDart = int Function(Pointer<Void>, double, Pointer<Double>);
+typedef _DetectSilenceNative = Int32 Function(
+    Pointer<Utf8>, Float, Pointer<Double>, Pointer<Double>);
+typedef _DetectSilenceDart = int Function(
+    Pointer<Utf8>, double, Pointer<Double>, Pointer<Double>);
 
 const String _libraryName = 'libcyberhex_core.so';
 
@@ -345,15 +363,203 @@ class NativePlayer extends PlayerApi {
     setBand(0, 0);
   }
 
+  // ---------------------------------------------------------------------------
+  // Medición y DSP
+  // ---------------------------------------------------------------------------
+
   /// Niveles de salida `[rms_l, rms_r, peak_l, peak_r]` (0..1). Lista vacía si
   /// la librería cargada es antigua y no expone `ch_engine_levels`.
-  List<double> levels() {
+  @override
+  List<double> get levels {
     if (_disposed) return const [];
     final fn = _bindings.levels;
     if (fn == null) return const [];
     final count = fn(_engine, _levelBuf, 4);
     if (count <= 0) return const [];
     return List<double>.generate(count, (i) => _levelBuf[i]);
+  }
+
+  @override
+  List<double> get meterLevels {
+    final fn = _bindings.meter;
+    if (fn == null || _disposed) return const [];
+    final left = calloc<Float>();
+    final right = calloc<Float>();
+    final rms = calloc<Float>();
+    try {
+      if (fn(_engine, left, right, rms) != 0) return const [];
+      return <double>[left.value, right.value, rms.value];
+    } finally {
+      calloc.free(left);
+      calloc.free(right);
+      calloc.free(rms);
+    }
+  }
+
+  @override
+  List<double> spectrum(int bands) {
+    final fn = _bindings.spectrum;
+    if (fn == null || _disposed || bands <= 0 || bands > 512) return const [];
+    final buffer = calloc<Float>(bands);
+    try {
+      final count = fn(_engine, buffer, bands);
+      if (count <= 0) return const [];
+      return List<double>.generate(count, (i) => buffer[i]);
+    } finally {
+      calloc.free(buffer);
+    }
+  }
+
+  @override
+  set eqPreamp(double db) => setEqPreamp(db);
+
+  @override
+  bool setBandGain(int band, double db) =>
+      _bindings.setBandGain?.call(_engine, band, db) == 0;
+
+  @override
+  void setLimiter(bool enabled, {double ceilingDb = -1}) =>
+      _bindings.setLimiter?.call(_engine, enabled ? 1 : 0, ceilingDb);
+
+  @override
+  bool get limiter => (_bindings.limiter?.call(_engine) ?? 0) != 0;
+
+  @override
+  void setCrossfeed(bool enabled, {double strength = 0.5}) =>
+      _bindings.setCrossfeed?.call(_engine, enabled ? 1 : 0, strength);
+
+  @override
+  ({bool enabled, double strength}) get crossfeed {
+    final fn = _bindings.crossfeed;
+    if (fn == null || _disposed) return (enabled: false, strength: 0);
+    final strength = calloc<Float>();
+    try {
+      final enabled = fn(_engine, strength) != 0;
+      return (enabled: enabled, strength: strength.value);
+    } finally {
+      calloc.free(strength);
+    }
+  }
+
+  @override
+  double get gainDb => _bindings.gainDb?.call(_engine) ?? 0;
+
+  @override
+  set gainDb(double db) => _bindings.setGainDb?.call(_engine, db);
+
+  @override
+  double get stereoWidth => _bindings.stereoWidth?.call(_engine) ?? 1;
+
+  @override
+  set stereoWidth(double width) =>
+      _bindings.setStereoWidth?.call(_engine, width);
+
+  @override
+  void setTrimSilence(bool enabled, {double thresholdDb = -60}) =>
+      _bindings.setTrimSilence?.call(_engine, enabled ? 1 : 0, thresholdDb);
+
+  @override
+  ({bool enabled, double thresholdDb}) get trimSilence {
+    final fn = _bindings.trimSilence;
+    if (fn == null || _disposed) return (enabled: false, thresholdDb: -60);
+    final threshold = calloc<Float>();
+    try {
+      final enabled = fn(_engine, threshold) != 0;
+      return (enabled: enabled, thresholdDb: threshold.value);
+    } finally {
+      calloc.free(threshold);
+    }
+  }
+
+  @override
+  void setReplayGain(bool enabled) =>
+      _bindings.setReplayGain?.call(_engine, enabled ? 1 : 0);
+
+  @override
+  double get replayGainGainDb => _bindings.replayGainGainDb?.call(_engine) ?? 0;
+
+  @override
+  double get replayGainPeak => _bindings.replayGainPeak?.call(_engine) ?? 0;
+
+  @override
+  void setMono(bool enabled) =>
+      _bindings.setMono?.call(_engine, enabled ? 1 : 0);
+
+  @override
+  bool get mono => (_bindings.mono?.call(_engine) ?? 0) != 0;
+
+  @override
+  void setAbLoop(double start, double end) =>
+      _bindings.setAbLoop?.call(_engine, start, end);
+
+  @override
+  void clearAbLoop() => _bindings.clearAbLoop?.call(_engine);
+
+  @override
+  ({double start, double end}) get abLoop {
+    final fn = _bindings.abLoop;
+    if (fn == null || _disposed) return (start: -1, end: -1);
+    final start = calloc<Double>();
+    final end = calloc<Double>();
+    try {
+      if (fn(_engine, start, end) == 0) return (start: -1, end: -1);
+      return (start: start.value, end: end.value);
+    } finally {
+      calloc.free(start);
+      calloc.free(end);
+    }
+  }
+
+  @override
+  ({double lufs, double peakDb})? analyzeCurrent() {
+    final fn = _bindings.analyzeCurrent;
+    if (fn == null || _disposed) return null;
+    final lufs = calloc<Double>();
+    final peak = calloc<Double>();
+    try {
+      if (fn(_engine, lufs, peak) != 0) return null;
+      return (lufs: lufs.value, peakDb: peak.value);
+    } finally {
+      calloc.free(lufs);
+      calloc.free(peak);
+    }
+  }
+
+  @override
+  double? normalizeCurrent(double targetLufs) {
+    final fn = _bindings.normalizeCurrent;
+    if (fn == null || _disposed) return null;
+    final applied = calloc<Double>();
+    try {
+      if (fn(_engine, targetLufs, applied) != 0) return null;
+      return applied.value;
+    } finally {
+      calloc.free(applied);
+    }
+  }
+
+  @override
+  double get bufferedSeconds => _bindings.bufferedSeconds?.call(_engine) ?? 0;
+
+  @override
+  int get bufferUnderflows => _bindings.bufferUnderflows?.call(_engine) ?? 0;
+
+  @override
+  ({double lead, double tail})? detectSilence(String path,
+      {double thresholdDb = -60}) {
+    final fn = _bindings.detectSilence;
+    if (fn == null || _disposed) return null;
+    final lead = calloc<Double>();
+    final tail = calloc<Double>();
+    final utf8 = path.toNativeUtf8();
+    try {
+      if (fn(utf8, thresholdDb, lead, tail) != 0) return null;
+      return (lead: lead.value, tail: tail.value);
+    } finally {
+      malloc.free(utf8);
+      calloc.free(lead);
+      calloc.free(tail);
+    }
   }
 
   /// Fundido de pausa en segundos (0 = corte inmediato).
@@ -365,6 +571,7 @@ class NativePlayer extends PlayerApi {
   /// Preamp del EQ en dB (0 a -24).
   void setEqPreamp(double db) => _bindings.setEqPreamp?.call(_engine, db);
 
+  @override
   double get eqPreamp => _bindings.eqPreamp?.call(_engine) ?? 0;
 
   /// ReplayGain por álbum (una ganancia para todo el disco) o por pista.
@@ -805,6 +1012,84 @@ class _Bindings {
         loadState = lib.providesSymbol('ch_engine_load_state')
             ? lib.lookupFunction<_LoadStateNative, _LoadStateDart>('ch_engine_load_state')
             : null,
+        meter = lib.providesSymbol('ch_engine_meter')
+            ? lib.lookupFunction<_MeterNative, _MeterDart>('ch_engine_meter')
+            : null,
+        spectrum = lib.providesSymbol('ch_engine_spectrum')
+            ? lib.lookupFunction<_LevelsNative, _LevelsDart>('ch_engine_spectrum')
+            : null,
+        setBandGain = lib.providesSymbol('ch_engine_set_band_gain')
+            ? lib.lookupFunction<_IntFloatNative, _IntFloatDart>('ch_engine_set_band_gain')
+            : null,
+        setLimiter = lib.providesSymbol('ch_engine_set_limiter')
+            ? lib.lookupFunction<_IntFloatNative, _IntFloatDart>('ch_engine_set_limiter')
+            : null,
+        limiter = lib.providesSymbol('ch_engine_limiter')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_limiter')
+            : null,
+        setCrossfeed = lib.providesSymbol('ch_engine_set_crossfeed')
+            ? lib.lookupFunction<_IntFloatNative, _IntFloatDart>('ch_engine_set_crossfeed')
+            : null,
+        crossfeed = lib.providesSymbol('ch_engine_crossfeed')
+            ? lib.lookupFunction<_FloatOutNative, _FloatOutDart>('ch_engine_crossfeed')
+            : null,
+        setGainDb = lib.providesSymbol('ch_engine_set_gain_db')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_gain_db')
+            : null,
+        gainDb = lib.providesSymbol('ch_engine_gain_db')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_gain_db')
+            : null,
+        setStereoWidth = lib.providesSymbol('ch_engine_set_stereo_width')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_stereo_width')
+            : null,
+        stereoWidth = lib.providesSymbol('ch_engine_stereo_width')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_stereo_width')
+            : null,
+        setTrimSilence = lib.providesSymbol('ch_engine_set_trim_silence')
+            ? lib.lookupFunction<_IntFloatNative, _IntFloatDart>('ch_engine_set_trim_silence')
+            : null,
+        trimSilence = lib.providesSymbol('ch_engine_trim_silence')
+            ? lib.lookupFunction<_FloatOutNative, _FloatOutDart>('ch_engine_trim_silence')
+            : null,
+        setReplayGain = lib.providesSymbol('ch_engine_set_replaygain')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_replaygain')
+            : null,
+        replayGainGainDb = lib.providesSymbol('ch_engine_replaygain_gain_db')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_replaygain_gain_db')
+            : null,
+        replayGainPeak = lib.providesSymbol('ch_engine_replaygain_peak')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_replaygain_peak')
+            : null,
+        setMono = lib.providesSymbol('ch_engine_set_mono')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_mono')
+            : null,
+        mono = lib.providesSymbol('ch_engine_mono')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_mono')
+            : null,
+        setAbLoop = lib.providesSymbol('ch_engine_set_ab_loop')
+            ? lib.lookupFunction<_SetLoopNative, _SetLoopDart>('ch_engine_set_ab_loop')
+            : null,
+        clearAbLoop = lib.providesSymbol('ch_engine_clear_ab_loop')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_clear_ab_loop')
+            : null,
+        abLoop = lib.providesSymbol('ch_engine_ab_loop')
+            ? lib.lookupFunction<_TwoDoubleOutNative, _TwoDoubleOutDart>('ch_engine_ab_loop')
+            : null,
+        analyzeCurrent = lib.providesSymbol('ch_engine_analyze_current')
+            ? lib.lookupFunction<_TwoDoubleOutNative, _TwoDoubleOutDart>('ch_engine_analyze_current')
+            : null,
+        normalizeCurrent = lib.providesSymbol('ch_engine_normalize_current')
+            ? lib.lookupFunction<_NormalizeNative, _NormalizeDart>('ch_engine_normalize_current')
+            : null,
+        bufferedSeconds = lib.providesSymbol('ch_engine_buffered_seconds')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_buffered_seconds')
+            : null,
+        bufferUnderflows = lib.providesSymbol('ch_engine_buffer_underflows')
+            ? lib.lookupFunction<_U64Native, _U64Dart>('ch_engine_buffer_underflows')
+            : null,
+        detectSilence = lib.providesSymbol('ch_engine_detect_silence')
+            ? lib.lookupFunction<_DetectSilenceNative, _DetectSilenceDart>('ch_engine_detect_silence')
+            : null,
         tag = lib.providesSymbol('ch_engine_tag')
             ? lib.lookupFunction<_TagNative, _TagDart>('ch_engine_tag')
             : null,
@@ -911,6 +1196,32 @@ class _Bindings {
   final _DoubleDart? sleepRemaining;
   final _LoadDart? saveState;
   final _LoadStateDart? loadState;
+  final _MeterDart? meter;
+  final _LevelsDart? spectrum;
+  final _IntFloatDart? setBandGain;
+  final _IntFloatDart? setLimiter;
+  final _IntDart? limiter;
+  final _IntFloatDart? setCrossfeed;
+  final _FloatOutDart? crossfeed;
+  final _SetFloatDart? setGainDb;
+  final _GetFloatDart? gainDb;
+  final _SetFloatDart? setStereoWidth;
+  final _GetFloatDart? stereoWidth;
+  final _IntFloatDart? setTrimSilence;
+  final _FloatOutDart? trimSilence;
+  final _SetIntDart? setReplayGain;
+  final _GetFloatDart? replayGainGainDb;
+  final _GetFloatDart? replayGainPeak;
+  final _SetIntDart? setMono;
+  final _IntDart? mono;
+  final _SetLoopDart? setAbLoop;
+  final _ControlDart? clearAbLoop;
+  final _TwoDoubleOutDart? abLoop;
+  final _TwoDoubleOutDart? analyzeCurrent;
+  final _NormalizeDart? normalizeCurrent;
+  final _DoubleDart? bufferedSeconds;
+  final _U64Dart? bufferUnderflows;
+  final _DetectSilenceDart? detectSilence;
   final _TagDart? tag;
   final _TextDart? dateFn;
   final _TextDart? genreFn;

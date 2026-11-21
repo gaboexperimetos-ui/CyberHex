@@ -315,6 +315,104 @@ class PlayerController extends ChangeNotifier {
   bool saveState(String path) => _disposed ? false : _player.saveState(path);
 
   // ---------------------------------------------------------------------------
+  // Medición y DSP
+  // ---------------------------------------------------------------------------
+
+  List<double> get levels => _player.levels;
+
+  List<double> get meterLevels => _player.meterLevels;
+
+  List<double> spectrum(int bands) => _player.spectrum(bands);
+
+  double get eqPreamp => _player.eqPreamp;
+
+  set eqPreamp(double db) {
+    if (_disposed) return;
+    _player.eqPreamp = db;
+  }
+
+  bool setBandGain(int band, double db) =>
+      _disposed ? false : _player.setBandGain(band, db);
+
+  void setLimiter(bool enabled, {double ceilingDb = -1}) {
+    if (_disposed) return;
+    _player.setLimiter(enabled, ceilingDb: ceilingDb);
+  }
+
+  bool get limiter => _player.limiter;
+
+  void setCrossfeed(bool enabled, {double strength = 0.5}) {
+    if (_disposed) return;
+    _player.setCrossfeed(enabled, strength: strength);
+  }
+
+  ({bool enabled, double strength}) get crossfeed => _player.crossfeed;
+
+  double get gainDb => _player.gainDb;
+
+  set gainDb(double db) {
+    if (_disposed) return;
+    _player.gainDb = db;
+  }
+
+  double get stereoWidth => _player.stereoWidth;
+
+  set stereoWidth(double width) {
+    if (_disposed) return;
+    _player.stereoWidth = width;
+  }
+
+  void setTrimSilence(bool enabled, {double thresholdDb = -60}) {
+    if (_disposed) return;
+    _player.setTrimSilence(enabled, thresholdDb: thresholdDb);
+  }
+
+  ({bool enabled, double thresholdDb}) get trimSilence =>
+      _player.trimSilence;
+
+  void setReplayGain(bool enabled) {
+    if (_disposed) return;
+    _player.setReplayGain(enabled);
+  }
+
+  double get replayGainGainDb => _player.replayGainGainDb;
+
+  double get replayGainPeak => _player.replayGainPeak;
+
+  void setMono(bool enabled) {
+    if (_disposed) return;
+    _player.setMono(enabled);
+  }
+
+  bool get mono => _player.mono;
+
+  void setAbLoop(double start, double end) {
+    if (_disposed) return;
+    _player.setAbLoop(start, end);
+  }
+
+  void clearAbLoop() {
+    if (_disposed) return;
+    _player.clearAbLoop();
+  }
+
+  ({double start, double end}) get abLoop => _player.abLoop;
+
+  ({double lufs, double peakDb})? analyzeCurrent() =>
+      _disposed ? null : _player.analyzeCurrent();
+
+  double? normalizeCurrent(double targetLufs) =>
+      _disposed ? null : _player.normalizeCurrent(targetLufs);
+
+  double get bufferedSeconds => _player.bufferedSeconds;
+
+  int get bufferUnderflows => _player.bufferUnderflows;
+
+  ({double lead, double tail})? detectSilence(String path,
+          {double thresholdDb = -60}) =>
+      _disposed ? null : _player.detectSilence(path, thresholdDb: thresholdDb);
+
+  // ---------------------------------------------------------------------------
   // Metadatos completos, letras y carátulas
   // ---------------------------------------------------------------------------
 

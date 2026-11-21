@@ -189,6 +189,121 @@ class FakePlayer extends PlayerApi {
     return seconds;
   }
 
+  // --- Medición y DSP -------------------------------------------------------
+
+  @override
+  List<double> levels = const [0, 0, 0, 0];
+
+  @override
+  List<double> meterLevels = const [-120, -120, -120];
+
+  @override
+  double eqPreamp = 0;
+
+  @override
+  bool limiter = false;
+
+  double limiterCeiling = -1;
+
+  @override
+  ({bool enabled, double strength}) crossfeed =
+      (enabled: false, strength: 0);
+
+  @override
+  double gainDb = 0;
+
+  @override
+  double stereoWidth = 1;
+
+  @override
+  ({bool enabled, double thresholdDb}) trimSilence =
+      (enabled: false, thresholdDb: -60);
+
+  bool replayGainEnabled = false;
+
+  @override
+  double replayGainGainDb = 0;
+
+  @override
+  double replayGainPeak = 0;
+
+  @override
+  bool mono = false;
+
+  @override
+  ({double start, double end}) abLoop = (start: -1, end: -1);
+
+  @override
+  double bufferedSeconds = 0;
+
+  @override
+  int bufferUnderflows = 0;
+
+  /// Sonoridad que devolverá [analyzeCurrent] (`null` = falla).
+  double? analysisLufs;
+
+  /// dB que devolverá [normalizeCurrent] (`null` = falla).
+  double? normalizedDb;
+
+  /// Silencio que devolverá [detectSilence].
+  ({double lead, double tail})? silence;
+
+  @override
+  List<double> spectrum(int bands) => List<double>.filled(bands, 0);
+
+  @override
+  bool setBandGain(int band, double db) {
+    if (band < 0 || band >= _gains.length) return false;
+    _gains[band] = db;
+    return true;
+  }
+
+  @override
+  void setLimiter(bool enabled, {double ceilingDb = -1}) {
+    limiter = enabled;
+    limiterCeiling = ceilingDb;
+  }
+
+  @override
+  void setCrossfeed(bool enabled, {double strength = 0.5}) =>
+      crossfeed = (enabled: enabled, strength: strength);
+
+  @override
+  void setTrimSilence(bool enabled, {double thresholdDb = -60}) =>
+      trimSilence = (enabled: enabled, thresholdDb: thresholdDb);
+
+  @override
+  void setReplayGain(bool enabled) => replayGainEnabled = enabled;
+
+  @override
+  void setMono(bool enabled) => mono = enabled;
+
+  @override
+  void setAbLoop(double start, double end) =>
+      abLoop = (start: start, end: end);
+
+  @override
+  void clearAbLoop() => abLoop = (start: -1, end: -1);
+
+  @override
+  ({double lufs, double peakDb})? analyzeCurrent() {
+    final lufs = analysisLufs;
+    return lufs == null ? null : (lufs: lufs, peakDb: 0);
+  }
+
+  @override
+  double? normalizeCurrent(double targetLufs) {
+    final db = normalizedDb;
+    if (db == null) return null;
+    gainDb = db;
+    return db;
+  }
+
+  @override
+  ({double lead, double tail})? detectSilence(String path,
+          {double thresholdDb = -60}) =>
+      silence;
+
   // --- Metadatos completos y letras -----------------------------------------
 
   @override
