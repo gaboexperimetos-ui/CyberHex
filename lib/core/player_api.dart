@@ -147,6 +147,17 @@ class PlayerSnapshot {
     this.queue = const <QueueItem>[],
     this.queueIndex = -1,
     this.queueProtected = false,
+    this.nineDEnabled = false,
+    this.nineDSpeed = 0.15,
+    this.nineDDepth = 0.65,
+    this.stereoWidth = 1,
+    this.bassPunch = 0,
+    this.vocalCut = 0,
+    this.crossfeedEnabled = false,
+    this.crossfeedLevel = 0.5,
+    this.nightModeEnabled = false,
+    this.nightModeAmount = 0.5,
+    this.s16Output = false,
     this.error,
   });
 
@@ -177,6 +188,41 @@ class PlayerSnapshot {
   /// Con la cola protegida, abrir un archivo suelto lo añade sin vaciar la cola.
   final bool queueProtected;
 
+  // --- Fase 2: núcleo DSP audiófilo (todo del motor, nada inventado aquí) ---
+
+  /// Audio 9D espacial: giro azimutal continuo para auriculares.
+  final bool nineDEnabled;
+
+  /// Vueltas por segundo del 9D (0.05 .. 2.0).
+  final double nineDSpeed;
+
+  /// Profundidad del 9D (0 = apagado de hecho, 1 = giro completo).
+  final double nineDDepth;
+
+  /// Ancho estéreo por matriz Mid/Side: 0 = mono, 1 = natural, 2 = ultra.
+  final double stereoWidth;
+
+  /// Realce armónico de graves (0 .. 1).
+  final double bassPunch;
+
+  /// Modo karaoke: atenuación del centro por encima de ~130 Hz (0 .. 1).
+  final double vocalCut;
+
+  /// Crossfeed Bauer para auriculares.
+  final bool crossfeedEnabled;
+
+  /// Cantidad de alimentación cruzada (0 .. 1).
+  final double crossfeedLevel;
+
+  /// Compresor de modo noche.
+  final bool nightModeEnabled;
+
+  /// Cantidad de compresión del modo noche (0 .. 1).
+  final double nightModeAmount;
+
+  /// Salida S16 con dither TPDF (si está apagada se entrega f32).
+  final bool s16Output;
+
   final String? error;
 
   PlayerSnapshot copyWith({
@@ -194,6 +240,17 @@ class PlayerSnapshot {
     List<QueueItem>? queue,
     int? queueIndex,
     bool? queueProtected,
+    bool? nineDEnabled,
+    double? nineDSpeed,
+    double? nineDDepth,
+    double? stereoWidth,
+    double? bassPunch,
+    double? vocalCut,
+    bool? crossfeedEnabled,
+    double? crossfeedLevel,
+    bool? nightModeEnabled,
+    double? nightModeAmount,
+    bool? s16Output,
     String? error,
     bool clearError = false,
   }) {
@@ -212,6 +269,17 @@ class PlayerSnapshot {
       queue: queue ?? this.queue,
       queueIndex: queueIndex ?? this.queueIndex,
       queueProtected: queueProtected ?? this.queueProtected,
+      nineDEnabled: nineDEnabled ?? this.nineDEnabled,
+      nineDSpeed: nineDSpeed ?? this.nineDSpeed,
+      nineDDepth: nineDDepth ?? this.nineDDepth,
+      stereoWidth: stereoWidth ?? this.stereoWidth,
+      bassPunch: bassPunch ?? this.bassPunch,
+      vocalCut: vocalCut ?? this.vocalCut,
+      crossfeedEnabled: crossfeedEnabled ?? this.crossfeedEnabled,
+      crossfeedLevel: crossfeedLevel ?? this.crossfeedLevel,
+      nightModeEnabled: nightModeEnabled ?? this.nightModeEnabled,
+      nightModeAmount: nightModeAmount ?? this.nightModeAmount,
+      s16Output: s16Output ?? this.s16Output,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -233,13 +301,48 @@ class PlayerSnapshot {
         identical(other.queue, queue) &&
         other.queueIndex == queueIndex &&
         other.queueProtected == queueProtected &&
+        other.nineDEnabled == nineDEnabled &&
+        other.nineDSpeed == nineDSpeed &&
+        other.nineDDepth == nineDDepth &&
+        other.stereoWidth == stereoWidth &&
+        other.bassPunch == bassPunch &&
+        other.vocalCut == vocalCut &&
+        other.crossfeedEnabled == crossfeedEnabled &&
+        other.crossfeedLevel == crossfeedLevel &&
+        other.nightModeEnabled == nightModeEnabled &&
+        other.nightModeAmount == nightModeAmount &&
+        other.s16Output == s16Output &&
         other.error == error;
   }
 
   @override
-  int get hashCode => Object.hash(hasTrack, title, artist, album, cover,
-      duration, playing, busy, volume, repeatMode, shuffle, queueIndex,
-      queueProtected, error);
+  int get hashCode => Object.hashAll(<Object?>[
+        hasTrack,
+        title,
+        artist,
+        album,
+        cover,
+        duration,
+        playing,
+        busy,
+        volume,
+        repeatMode,
+        shuffle,
+        queueIndex,
+        queueProtected,
+        nineDEnabled,
+        nineDSpeed,
+        nineDDepth,
+        stereoWidth,
+        bassPunch,
+        vocalCut,
+        crossfeedEnabled,
+        crossfeedLevel,
+        nightModeEnabled,
+        nightModeAmount,
+        s16Output,
+        error,
+      ]);
 }
 
 /// Superficie que la UI necesita del motor.
@@ -296,6 +399,53 @@ abstract class PlayerApi {
 
   /// Invierte el modo aleatorio.
   void toggleShuffle();
+
+  // ---------------------------------------------------------------------
+  // Fase 2: núcleo DSP audiófilo
+  // ---------------------------------------------------------------------
+
+  /// Audio 9D espacial: `speedHz` vueltas por segundo (0.05..2) y `depth` 0..1.
+  void set9D(bool enabled, double speedHz, double depth);
+
+  bool get nineDEnabled;
+
+  /// Vueltas por segundo del giro azimutal.
+  double get nineDSpeed;
+
+  double get nineDDepth;
+
+  /// Potenciador estéreo: ancho Mid/Side (0..2) y punch de graves (0..1).
+  void setStereoEnhance(double width, double bassPunch);
+
+  void setStereoWidth(double width);
+
+  double get stereoWidth;
+
+  double get bassPunch;
+
+  /// Modo karaoke: atenúa el centro por encima de ~130 Hz (0 apagado, 1 fuera).
+  void setVocalCut(double amount);
+
+  double get vocalCut;
+
+  /// Crossfeed Bauer para auriculares: `level` 0..1.
+  void setCrossfeed(bool enabled, double level);
+
+  bool get crossfeedEnabled;
+
+  double get crossfeedLevel;
+
+  /// Compresor de modo noche: `amount` 0..1.
+  void setNightMode(bool enabled, double amount);
+
+  bool get nightModeEnabled;
+
+  double get nightModeAmount;
+
+  /// Salida S16 con dither TPDF (por defecto se entrega f32).
+  void setS16Output(bool enabled);
+
+  bool get s16Output;
 
   // ---------------------------------------------------------------------
   // Cola de reproducción

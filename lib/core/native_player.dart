@@ -78,6 +78,14 @@ typedef _GetFloatNative = Float Function(Pointer<Void>);
 typedef _GetFloatDart = double Function(Pointer<Void>);
 typedef _SetIntNative = Int32 Function(Pointer<Void>, Int32);
 typedef _SetIntDart = int Function(Pointer<Void>, int);
+typedef _SetTwoFloatsNative = Int32 Function(Pointer<Void>, Float, Float);
+typedef _SetTwoFloatsDart = int Function(Pointer<Void>, double, double);
+typedef _SetIntAndFloatNative = Int32 Function(Pointer<Void>, Int32, Float);
+typedef _SetIntAndFloatDart = int Function(Pointer<Void>, int, double);
+typedef _SetIntTwoFloatsNative = Int32 Function(Pointer<Void>, Int32, Float, Float);
+typedef _SetIntTwoFloatsDart = int Function(Pointer<Void>, int, double, double);
+typedef _OutFloatNative = Int32 Function(Pointer<Void>, Pointer<Float>);
+typedef _OutFloatDart = int Function(Pointer<Void>, Pointer<Float>);
 typedef _SetLoopNative = Int32 Function(Pointer<Void>, Double, Double);
 typedef _SetLoopDart = int Function(Pointer<Void>, double, double);
 
@@ -184,6 +192,7 @@ class NativePlayer implements PlayerApi {
   NativePlayer._(this._engine, this._bindings) {
     _eventBuf = calloc<_ChEvent>();
     _levelBuf = calloc<Float>(4);
+    _outBuf = calloc<Float>(1);
   }
 
   static NativePlayer? open() {
@@ -209,6 +218,10 @@ class NativePlayer implements PlayerApi {
   final _Bindings _bindings;
   late final Pointer<_ChEvent> _eventBuf;
   late final Pointer<Float> _levelBuf;
+
+  /// Salida de un solo float para los getters que escriben por puntero
+  /// (crossfeed y modo noche). Se reserva una vez: el snapshot los lee a 12 Hz.
+  late final Pointer<Float> _outBuf;
 
   @override
   final List<double> eqGains = List<double>.filled(_Bindings.instance.eqBandCount(), 0);
@@ -409,6 +422,118 @@ class NativePlayer implements PlayerApi {
 
   @override
   void toggleShuffle() => setShuffle(!shuffle);
+
+  // ---------------------------------------------------------------------
+  // Fase 2: núcleo DSP audiófilo
+  // ---------------------------------------------------------------------
+
+  /// Lee un float por puntero: 0 si la `.so` es anterior a estos símbolos.
+  double _valueOut(_OutFloatDart? fn) {
+    if (_disposed || fn == null) return 0;
+    fn(_engine, _outBuf);
+    return _outBuf.value;
+  }
+
+  @override
+  bool get nineDEnabled =>
+      !_disposed && (_bindings.nineDEnabled?.call(_engine) ?? 0) != 0;
+
+  @override
+  double get nineDSpeed => _bindings.nineDSpeed?.call(_engine) ?? 0;
+
+  @override
+  double get nineDDepth => _bindings.nineDDepth?.call(_engine) ?? 0;
+
+  @override
+  void set9D(bool enabled, double speedHz, double depth) {
+    if (_disposed) return;
+    _bindings.set9D?.call(
+      _engine,
+      enabled ? 1 : 0,
+      speedHz.clamp(0.05, 2.0).toDouble(),
+      depth.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  @override
+  double get stereoWidth => _bindings.stereoWidthFn?.call(_engine) ?? 1;
+
+  @override
+  double get bassPunch => _bindings.bassPunchFn?.call(_engine) ?? 0;
+
+  @override
+  void setStereoEnhance(double width, double bassPunch) {
+    if (_disposed) return;
+    _bindings.setStereoEnhance?.call(
+      _engine,
+      width.clamp(0.0, 2.0).toDouble(),
+      bassPunch.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  @override
+  void setStereoWidth(double width) {
+    if (_disposed) return;
+    _bindings.setStereoWidthFn?.call(_engine, width.clamp(0.0, 2.0).toDouble());
+  }
+
+  @override
+  double get vocalCut => _bindings.vocalCutFn?.call(_engine) ?? 0;
+
+  @override
+  void setVocalCut(double amount) {
+    if (_disposed) return;
+    _bindings.setVocalCut?.call(_engine, amount.clamp(0.0, 1.0).toDouble());
+  }
+
+  @override
+  bool get crossfeedEnabled => !_disposed && _crossfeed() != 0;
+
+  @override
+  double get crossfeedLevel {
+    if (_disposed || _bindings.crossfeedFn == null) return 0;
+    _bindings.crossfeedFn!(_engine, _outBuf);
+    return _outBuf.value;
+  }
+
+  int _crossfeed() => _bindings.crossfeedFn?.call(_engine, nullptr) ?? 0;
+
+  @override
+  void setCrossfeed(bool enabled, double level) {
+    if (_disposed) return;
+    _bindings.setCrossfeedFn?.call(
+      _engine,
+      enabled ? 1 : 0,
+      level.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  @override
+  bool get nightModeEnabled => !_disposed && _nightMode() != 0;
+
+  @override
+  double get nightModeAmount => _valueOut(_bindings.nightModeFn);
+
+  int _nightMode() => _bindings.nightModeFn?.call(_engine, nullptr) ?? 0;
+
+  @override
+  void setNightMode(bool enabled, double amount) {
+    if (_disposed) return;
+    _bindings.setNightMode?.call(
+      _engine,
+      enabled ? 1 : 0,
+      amount.clamp(0.0, 1.0).toDouble(),
+    );
+  }
+
+  @override
+  bool get s16Output => !_disposed && (_bindings.s16Fn?.call(_engine) ?? 0) != 0;
+
+  @override
+  void setS16Output(bool enabled) {
+    if (_disposed) return;
+    _bindings.setS16?.call(_engine, enabled ? 1 : 0);
+  }
 
   // ---------------------------------------------------------------------
   // Cola
@@ -782,6 +907,7 @@ class NativePlayer implements PlayerApi {
     _disposed = true;
     calloc.free(_eventBuf);
     calloc.free(_levelBuf);
+    calloc.free(_outBuf);
     _bindings.destroy(_engine);
   }
 
@@ -935,6 +1061,58 @@ class _Bindings {
             : null,
         libraryRemovedFn = lib.providesSymbol('ch_library_removed')
             ? lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_removed')
+            : null,
+        set9D = lib.providesSymbol('ch_engine_set_9d')
+            ? lib.lookupFunction<_SetIntTwoFloatsNative, _SetIntTwoFloatsDart>(
+                'ch_engine_set_9d')
+            : null,
+        nineDEnabled = lib.providesSymbol('ch_engine_9d_enabled')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_9d_enabled')
+            : null,
+        nineDSpeed = lib.providesSymbol('ch_engine_9d_speed')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_9d_speed')
+            : null,
+        nineDDepth = lib.providesSymbol('ch_engine_9d_depth')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_9d_depth')
+            : null,
+        setStereoEnhance = lib.providesSymbol('ch_engine_set_stereo_enhance')
+            ? lib.lookupFunction<_SetTwoFloatsNative, _SetTwoFloatsDart>(
+                'ch_engine_set_stereo_enhance')
+            : null,
+        setStereoWidthFn = lib.providesSymbol('ch_engine_set_stereo_width')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_stereo_width')
+            : null,
+        stereoWidthFn = lib.providesSymbol('ch_engine_stereo_width')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_stereo_width')
+            : null,
+        bassPunchFn = lib.providesSymbol('ch_engine_bass_punch')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_bass_punch')
+            : null,
+        setVocalCut = lib.providesSymbol('ch_engine_set_vocal_cut')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_vocal_cut')
+            : null,
+        vocalCutFn = lib.providesSymbol('ch_engine_vocal_cut')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_vocal_cut')
+            : null,
+        setCrossfeedFn = lib.providesSymbol('ch_engine_set_crossfeed')
+            ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
+                'ch_engine_set_crossfeed')
+            : null,
+        crossfeedFn = lib.providesSymbol('ch_engine_crossfeed')
+            ? lib.lookupFunction<_OutFloatNative, _OutFloatDart>('ch_engine_crossfeed')
+            : null,
+        setNightMode = lib.providesSymbol('ch_engine_set_night_mode')
+            ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
+                'ch_engine_set_night_mode')
+            : null,
+        nightModeFn = lib.providesSymbol('ch_engine_night_mode')
+            ? lib.lookupFunction<_OutFloatNative, _OutFloatDart>('ch_engine_night_mode')
+            : null,
+        setS16 = lib.providesSymbol('ch_engine_set_s16_output')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_s16_output')
+            : null,
+        s16Fn = lib.providesSymbol('ch_engine_s16_output')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_s16_output')
             : null;
 
   static final _Bindings instance = _Bindings._(_open());
@@ -994,6 +1172,22 @@ class _Bindings {
   final _LibCountDart? libraryCount;
   final _LibPathDart? libraryPath;
   final _LibCountDart? libraryRemovedFn;
+  final _SetIntTwoFloatsDart? set9D;
+  final _IntDart? nineDEnabled;
+  final _GetFloatDart? nineDSpeed;
+  final _GetFloatDart? nineDDepth;
+  final _SetTwoFloatsDart? setStereoEnhance;
+  final _SetFloatDart? setStereoWidthFn;
+  final _GetFloatDart? stereoWidthFn;
+  final _GetFloatDart? bassPunchFn;
+  final _SetFloatDart? setVocalCut;
+  final _GetFloatDart? vocalCutFn;
+  final _SetIntAndFloatDart? setCrossfeedFn;
+  final _OutFloatDart? crossfeedFn;
+  final _SetIntAndFloatDart? setNightMode;
+  final _OutFloatDart? nightModeFn;
+  final _SetIntDart? setS16;
+  final _IntDart? s16Fn;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;

@@ -64,6 +64,26 @@ class FakePlayer implements PlayerApi {
   bool shuffle = false;
 
   /// Cuántas veces se pidió cambiar de modo (para comprobar la llamada).
+  // Fase 2: DSP. Se guardan ya recortados, como hace el motor.
+  bool nineDFlag = false;
+  double nineDSpeedValue = 0.15;
+  double nineDDepthValue = 0.65;
+  double stereoWidthValue = 1;
+  double bassPunchValue = 0;
+  double vocalCutValue = 0;
+  bool crossfeedFlag = false;
+  double crossfeedLevelValue = 0.5;
+  bool nightModeFlag = false;
+  double nightModeAmountValue = 0.5;
+  bool s16Flag = false;
+
+  int nineDCalls = 0;
+  int stereoEnhanceCalls = 0;
+  int vocalCutCalls = 0;
+  int crossfeedCalls = 0;
+  int nightModeCalls = 0;
+  int s16Calls = 0;
+
   int repeatRequests = 0;
   int shuffleRequests = 0;
 
@@ -201,6 +221,89 @@ class FakePlayer implements PlayerApi {
 
   @override
   PlayerEvent? pollEvent() => _events.isEmpty ? null : _events.removeAt(0);
+
+  // ---------------------------------------------------------------------
+  // Fase 2: DSP
+  // ---------------------------------------------------------------------
+
+  @override
+  bool get nineDEnabled => nineDFlag;
+
+  @override
+  double get nineDSpeed => nineDSpeedValue;
+
+  @override
+  double get nineDDepth => nineDDepthValue;
+
+  @override
+  void set9D(bool enabled, double speedHz, double depth) {
+    nineDCalls++;
+    nineDFlag = enabled;
+    nineDSpeedValue = speedHz.clamp(0.05, 2.0).toDouble();
+    nineDDepthValue = depth.clamp(0.0, 1.0).toDouble();
+  }
+
+  @override
+  double get stereoWidth => stereoWidthValue;
+
+  @override
+  double get bassPunch => bassPunchValue;
+
+  @override
+  void setStereoEnhance(double width, double bassPunch) {
+    stereoEnhanceCalls++;
+    stereoWidthValue = width.clamp(0.0, 2.0).toDouble();
+    bassPunchValue = bassPunch.clamp(0.0, 1.0).toDouble();
+  }
+
+  @override
+  void setStereoWidth(double width) {
+    stereoWidthValue = width.clamp(0.0, 2.0).toDouble();
+  }
+
+  @override
+  double get vocalCut => vocalCutValue;
+
+  @override
+  void setVocalCut(double amount) {
+    vocalCutCalls++;
+    vocalCutValue = amount.clamp(0.0, 1.0).toDouble();
+  }
+
+  @override
+  bool get crossfeedEnabled => crossfeedFlag;
+
+  @override
+  double get crossfeedLevel => crossfeedLevelValue;
+
+  @override
+  void setCrossfeed(bool enabled, double level) {
+    crossfeedCalls++;
+    crossfeedFlag = enabled;
+    crossfeedLevelValue = level.clamp(0.0, 1.0).toDouble();
+  }
+
+  @override
+  bool get nightModeEnabled => nightModeFlag;
+
+  @override
+  double get nightModeAmount => nightModeAmountValue;
+
+  @override
+  void setNightMode(bool enabled, double amount) {
+    nightModeCalls++;
+    nightModeFlag = enabled;
+    nightModeAmountValue = amount.clamp(0.0, 1.0).toDouble();
+  }
+
+  @override
+  bool get s16Output => s16Flag;
+
+  @override
+  void setS16Output(bool enabled) {
+    s16Calls++;
+    s16Flag = enabled;
+  }
 
   // ---------------------------------------------------------------------
   // Cola

@@ -18,6 +18,57 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 13 · FASE 2: núcleo DSP audiófilo, 9D espacial y R14
+
+- **PEDIDO:** Fase 2 en cuatro commits atómicos y reversibles: (1) fix R14
+  (directorio persistente real); (2) 9D espacial + potenciador estéreo +
+  karaoke en el núcleo; (3) crossfeed Bauer + modo noche + dither TPDF;
+  (4) bindings y estado Dart de todo lo anterior. `RIESGO ACEPTABLE`: **no**
+  en los cuatro.
+- **HECHO (1, `84532c9`):** canal `cyberhex/storage` con `getAppDataDir` →
+  `context.filesDir.absolutePath`, enganchado en `ensureEngine` (el motor nace
+  antes que cualquier actividad) y, idempotente, en `configureFlutterEngine`.
+  Dart: `StorageDirectory.prepare()` en `main()` resuelve
+  `CYBERHEX_DATA_DIR` → canal Android → `$XDG_DATA_HOME/cyberhex` →
+  `~/.local/share/cyberhex` → `%APPDATA%\CyberHex` → temporal, y crea el
+  directorio. `SessionStore` y `FavoritesStore` lo usan por defecto, así que la
+  pantalla de biblioteca también acierta sin tocarla. 7 tests nuevos.
+- **HECHO (2, `1aca4cf`):** `core/src/dsp_spatial.zig` con `Spatial9D`
+  (ITD ≤ 0.75 ms por línea de retardo, ILD de potencia constante y sombra
+  craneal de 3 kHz en el oído que se aleja), `StereoEnhancer` (Mid/Side +
+  punch por residuo armónico de `tanh` sobre < 120 Hz) y `VocalCut` (dos polos
+  a 130 Hz con compensación del grave). 8 exports nuevos. De paso se arregla
+  `sleepMs`, que llamaba a `poll` con una lista vacía y hacía imposible correr
+  `zig build smoke` en Zig 0.17.
+- **HECHO (3, `f857b78`):** `Crossfeed` Bauer (retardo de 12 muestras = 250 µs
+  + paso bajo de 700 Hz) sustituyendo el inline; `NightMode` (RMS con ataque
+  2 ms y relajación 300 ms, umbral -12 dBFS, hasta 4:1 y compensación);
+  `ch_audio_quantize_s16` con dither TPDF (±1 LSB, dos uniformes de un
+  xorshift32 por canal) y `ch_audio_set_s16` que reabre el dispositivo y
+  reanuda. 6 exports nuevos.
+- **HECHO (4, este commit):** 18 miembros nuevos en `PlayerApi` (63), todos
+  con `providesSymbol`; `PlayerSnapshot` con los once campos DSP dentro de
+  `copyWith`/`==`/`hashCode` (`Object.hashAll`); setters y alternancias en
+  `PlayerController` con `_refresh()`; `FakePlayer` recortando igual que el
+  motor. 8 tests nuevos.
+- **VERIFICADO:** `zig build test -Ddecoder=miniaudio` **31/31**;
+  `zig build smoke` **0 fallos**; `gcc -fsyntax-only -std=c2x -Wall -Wextra`
+  limpio en `audio.c` y en la cabecera; `nm -D` del `.so`: 193 `ch_*` y los 12
+  símbolos nuevos; tree-sitter-dart **22/22**; `PlayerApi` **63/63** en
+  `NativePlayer` y `FakePlayer`; `lib` 5 100 líneas, `test` 1 970, 80 casos.
+- **NO VERIFICABLE AQUÍ:** `flutter analyze`/`flutter test` y `kotlinc` (sin
+  SDK): los 80 casos Dart están escritos, no ejecutados. Tampoco hay
+  `/dev/snd` en este contenedor: la prueba de humo mide niveles porque el
+  motor funciona sin dispositivo, pero un oído humano no ha escuchado el 9D.
+- **COMMITS:** `84532c9` (1), `1aca4cf` (2), `f857b78` (3) y el de este turno.
+- **ABIERTO / RIESGOS:** **R16** el DSP no tiene todavía interfaz (fase
+  siguiente); **R17** coste de la cadena (despreciable y saltada con
+  `isIdle()`); sigue **R15** (duración en la biblioteca). Pendiente de
+  decisión del arquitecto: si el estado DSP debe viajar en
+  `ch_engine_save_state` (hoy no) o quedarse solo en la sesión de Dart.
+
+---
+
 ## 2026-11-21 · turno 12 · FASE 1B: cola, biblioteca y sesión
 
 - **PEDIDO:** Fase 1B en tres commits atómicos y reversibles: (1) bindings FFI

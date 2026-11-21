@@ -143,6 +143,17 @@ class PlayerController extends ChangeNotifier {
       queue: _queue,
       queueIndex: _queueIndex,
       queueProtected: _queueProtected,
+      nineDEnabled: _player.nineDEnabled,
+      nineDSpeed: _player.nineDSpeed,
+      nineDDepth: _player.nineDDepth,
+      stereoWidth: _player.stereoWidth,
+      bassPunch: _player.bassPunch,
+      vocalCut: _player.vocalCut,
+      crossfeedEnabled: _player.crossfeedEnabled,
+      crossfeedLevel: _player.crossfeedLevel,
+      nightModeEnabled: _player.nightModeEnabled,
+      nightModeAmount: _player.nightModeAmount,
+      s16Output: _player.s16Output,
       error: _error,
     );
     if (next != _snapshot) {
@@ -251,6 +262,73 @@ class PlayerController extends ChangeNotifier {
   void toggleShuffle() {
     if (_disposed) return;
     _player.toggleShuffle();
+    _refresh();
+  }
+
+  // ---------------------------------------------------------------------
+  // Fase 2: núcleo DSP audiófilo
+  // ---------------------------------------------------------------------
+
+  /// 9D espacial. Solo se envía lo que cambia: `null` deja el valor del motor.
+  void set9D({bool? enabled, double? speed, double? depth}) {
+    if (_disposed) return;
+    _player.set9D(
+      enabled ?? _player.nineDEnabled,
+      speed ?? _player.nineDSpeed,
+      depth ?? _player.nineDDepth,
+    );
+    _refresh();
+  }
+
+  void toggle9D() => set9D(enabled: !_player.nineDEnabled);
+
+  /// Potenciador estéreo: ancho (0..2) y punch de graves (0..1).
+  void setStereoEnhance({double? width, double? bassPunch}) {
+    if (_disposed) return;
+    _player.setStereoEnhance(
+      width ?? _player.stereoWidth,
+      bassPunch ?? _player.bassPunch,
+    );
+    _refresh();
+  }
+
+  /// Karaoke: 0 apagado, 1 voz fuera (los subgraves se conservan).
+  void setVocalCut(double amount) {
+    if (_disposed) return;
+    _player.setVocalCut(amount);
+    _refresh();
+  }
+
+  void toggleVocalCut() => setVocalCut(_player.vocalCut > 0 ? 0 : 0.85);
+
+  void setCrossfeed({bool? enabled, double? level}) {
+    if (_disposed) return;
+    _player.setCrossfeed(
+      enabled ?? _player.crossfeedEnabled,
+      level ?? _player.crossfeedLevel,
+    );
+    _refresh();
+  }
+
+  void toggleCrossfeed() =>
+      setCrossfeed(enabled: !_player.crossfeedEnabled);
+
+  void setNightMode({bool? enabled, double? amount}) {
+    if (_disposed) return;
+    _player.setNightMode(
+      enabled ?? _player.nightModeEnabled,
+      amount ?? _player.nightModeAmount,
+    );
+    _refresh();
+  }
+
+  void toggleNightMode() =>
+      setNightMode(enabled: !_player.nightModeEnabled);
+
+  /// Salida S16 con dither TPDF (por defecto, f32).
+  void setS16Output(bool enabled) {
+    if (_disposed) return;
+    _player.setS16Output(enabled);
     _refresh();
   }
 

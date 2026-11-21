@@ -36,9 +36,11 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo (tras fusionar `main`): **6 807 líneas**, **173 funciones FFI**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **4 602 líneas Dart** + **1 632 de tests** (66 casos). Estado
-  centralizado en `PlayerController` (testeable **sin** la `.so`). Fase 1B
-  cerrada: cola, biblioteca y sesión que sobrevive al cierre.
+- App: **5 100 líneas Dart** + **1 970 de tests** (80 casos). Estado
+  centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
+  cerradas: cola, biblioteca, sesión persistente y el núcleo DSP audiófilo
+  (9D espacial, potenciador estéreo, karaoke, crossfeed Bauer, modo noche y
+  dither TPDF) ya expuesto a Dart.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -185,6 +187,40 @@ medios + 3 de la pantalla + 8 de archivos externos + 1 de tema, todos con
 
 ---
 
+### 5.2 Fase 2: el DSP audiófilo llega a Dart
+
+Los 18 miembros nuevos de `PlayerApi` (63 en total) siguen la regla de la casa:
+**todos con `providesSymbol`** (§8.6), así que una `.so` anterior a la ABI que
+los exporta deja el control en `null` y cada operación devuelve un valor seguro
+(`false`, `0` o el valor por defecto) en vez de romper.
+
+| Qué | Setter | Lectura |
+|---|---|---|
+| 9D espacial | `set9D(enabled, speedHz, depth)` | `nineDEnabled`, `nineDSpeed`, `nineDDepth` |
+| Potenciador | `setStereoEnhance(width, bassPunch)` | `stereoWidth`, `bassPunch` |
+| Karaoke | `setVocalCut(0..1)` | `vocalCut` |
+| Crossfeed Bauer | `setCrossfeed(enabled, level)` | `crossfeedEnabled`, `crossfeedLevel` |
+| Modo noche | `setNightMode(enabled, amount)` | `nightModeEnabled`, `nightModeAmount` |
+| Salida S16 | `setS16Output(bool)` | `s16Output` |
+
+* `PlayerSnapshot` lleva los once campos (más `s16Output`) dentro de
+  `copyWith`, `==` y `hashCode` (`Object.hashAll`, porque `Object.hash` tiene
+  tope de 20 argumentos).
+* `PlayerController` añade setters con `_refresh()` y la misma idea que el
+  resto: `set9D({enabled, speed, depth})` envía solo lo que cambia y
+  `toggle9D/toggleVocalCut/toggleCrossfeed/toggleNightMode` para la UI.
+* Los getters que el C devuelve por puntero (`ch_engine_crossfeed`,
+  `ch_engine_night_mode`) usan un `_outBuf` reservado una sola vez en el
+  constructor: el snapshot los lee a 12 Hz y no se asigna memoria por lectura.
+* `FakePlayer` implementa los 18 y **recorta igual que el motor**, así que los
+  tests de rangos prueban el contrato, no la cortesía del doble.
+
+Tests: 8 nuevos en `player_controller_test.dart` (setters, recorte de rangos,
+alternancias, `==`/`hashCode` con los campos DSP, `copyWith` parcial y que los
+setters no hacen nada tras `dispose`).
+
+---
+
 ## 6. Plataformas
 
 ### Escritorio (PC, Arch)
@@ -273,13 +309,16 @@ lleva su propio *action* y *requestCode* para no colisionar.
 
 | Qué | Comando | Resultado último |
 |---|---|---|
-| Tests Zig (13) | `cd core && zig build test -Ddecoder=miniaudio` | 13/13 |
+| Tests Zig (31) | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | `.so` nativa | `zig build-lib … -O ReleaseFast` | 4,0 MB, 97 símbolos |
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
 | Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 22/22 sin errores |
-| Firmas de `PlayerApi` | comprobador propio: 45 miembros en `NativePlayer` y `FakePlayer` | 45/45 en ambos |
+| Firmas de `PlayerApi` | comprobador propio: 63 miembros en `NativePlayer` y `FakePlayer` | 63/63 en ambos |
+| Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
+| Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
+| Símbolos del `.so` | `nm -D` | 193 `ch_*`; los 12 de la fase 2 presentes |
 | Coherencia del canal | grep cruzado Dart↔Kotlin de nombres de método | 2/2 y 7/7 sin huérfanos |
 | XML de Android | `ElementTree` sobre `AndroidManifest.xml` | válido; 6 permisos, 1 servicio `mediaPlayback` |
 | Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 3/3 balanceados |
@@ -339,7 +378,21 @@ lleva su propio *action* y *requestCode* para no colisionar.
 14. `queueProtected` cambia el significado de `openFile`: con el flag, se usa
     `load_add` (añade al final y reproduce); sin él, `load` (la cola queda con
     esa única pista). La UI no decide, solo cambia el flag.
-15. La sesión es un JSON pequeño y prescindible: si falta, está vacío o está
+15. Cadena DSP fija y en este orden: **karaoke → 9D → ancho/punch → crossfeed
+    → modo noche → balance → limitador**. Todo en el callback de audio, con los
+    parámetros en `std.atomic.Value` (flotantes como bits en `u32`), sin
+    candados y sin reservar memoria. Cualquier procesador nuevo entra aquí, no
+    en un hilo aparte.
+16. Los símbolos DSP tienen rango cerrado en el motor (`speed` 0.05..2,
+    `depth`/`punch`/`vocal`/`level`/`night` 0..1, ancho 0..2) y la API recorta
+    igual en `NativePlayer` y en `FakePlayer`: la UI no puede sacar al motor de
+    su rango.
+17. `ch_engine_set_stereo_width` (histórico) y `ch_engine_set_stereo_enhance`
+    comparten el mismo mando de ancho: no hay dos anchos que se peleen.
+18. La salida es f32 por defecto. El camino **S16 con dither TPDF** es opt-in
+    (`ch_engine_set_s16_output`) y reabre el dispositivo; al hacerlo se
+    conserva la configuración y se reanuda si estaba sonando.
+19. La sesión es un JSON pequeño y prescindible: si falta, está vacío o está
     corrupto, la app arranca igual. Nunca se guarda una pista sin ruta y el
     índice se recoloca al filtrarlas.
 
@@ -361,7 +414,9 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R10 | Android antes de P0.1 | ~~sin MediaSession ni servicio~~ **resuelto** en P0.1 (notificación, bloqueo, foco, auriculares) | `android/` |
 | R11 | ~~Recientes mata el motor~~ | **resuelto**: engine cacheado en `CyberHexApplication`, `shouldDestroyEngineWithHost = false` | `CyberHexApplication.kt` |
 | R12 | ~~Icono genérico en la notificación~~ | **resuelto**: `R.drawable.ic_launcher_foreground` (hexágono propio) | `MediaSessionService.kt` |
-| R14 | Sesión en Android | sin `path_provider` ni tocar `android/`, Dart no alcanza `getFilesDir()`: en Android la sesión y los favoritos se escriben en el temporal (a menudo no escribible) y se pierden. Arreglo: 15 líneas de canal en `android/` que devuelvan `cacheDir`/`filesDir` (pedido aparte) | `session_store.dart`, `favorites_store.dart` |
+| R14 | ~~Sesión en Android~~ | **resuelto**: canal `cyberhex/storage` → `filesDir`; en Linux `$XDG_DATA_HOME/cyberhex` o `~/.local/share/cyberhex`; el temporal queda solo como último recurso | `CyberHexApplication.kt`, `session_store.dart` |
+| R16 | DSP sin interfaz todavía | los seis procesadores nuevos se manejan solo por API; la pantalla de ajustes audiófilos es la fase siguiente | `lib/ui/` |
+| R17 | Coste del DSP | la cadena entera (9D + ancho + punch + crossfeed + noche) son ~40 operaciones por muestra a 48 kHz; en el Redmi es despreciable y `isIdle()` la salta por completo cuando todo está apagado | `dsp_spatial.zig` |
 | R15 | Duración en la biblioteca | el núcleo solo da rutas: no hay consulta de duración por ruta (`ch_loudness_scan` decodifica el archivo entero). La ordenación por duración y el filtro «< 30 s» solo ven las pistas ya reproducidas; el resto sale con «—» y nunca se oculta | `library_page.dart` |
 | R13 | FGS desde segundo plano | Android 12+ prohíbe arrancar un FGS en background salvo excepciones; aquí se arranca al pulsar play con la app delante | `MediaBridge.ensureServiceStarted` |
 
@@ -417,9 +472,13 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (32 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (36 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 2-4 → app(core): bindings y estado Dart de todo el DSP
+FASE 2-3 → core(dsp): crossfeed Bauer, modo noche y dither TPDF en S16
+FASE 2-2 → core(dsp): motor 9D espacial, potenciador estéreo y modo karaoke
+FASE 2-1 → app: directorio persistente real para sesión y favoritos (R14)
 FASE 1B-3 → app(ui): pantalla de biblioteca con favoritos
 FASE 1B-2 → app(ui): pantalla de cola y sesión que sobrevive al cierre
 FASE 1B-1 → app(core): cola de reproducción y biblioteca por FFI

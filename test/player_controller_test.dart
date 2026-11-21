@@ -336,6 +336,168 @@ void main() {
     expect(controller.libraryRemoved, 0);
   });
 
+  // -------------------------------------------------------------------
+  // Fase 2: núcleo DSP audiófilo
+  // -------------------------------------------------------------------
+
+  test('9D: setter, snapshot y recorte de rangos', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.snapshot.nineDEnabled, isFalse);
+
+    controller.set9D(enabled: true, speed: 0.4, depth: 0.9);
+    expect(fake.nineDCalls, 1);
+    expect(controller.snapshot.nineDEnabled, isTrue);
+    expect(controller.snapshot.nineDSpeed, 0.4);
+    expect(controller.snapshot.nineDDepth, 0.9);
+
+    // Solo cambia lo que se pasa: la velocidad se queda donde estaba.
+    controller.set9D(depth: 0.2);
+    expect(controller.snapshot.nineDSpeed, 0.4);
+    expect(controller.snapshot.nineDDepth, 0.2);
+
+    // El motor recorta; el controlador no inventa valores fuera de rango.
+    controller.set9D(speed: 99, depth: 9);
+    expect(controller.snapshot.nineDSpeed, 2.0);
+    expect(controller.snapshot.nineDDepth, 1.0);
+    controller.set9D(speed: -1, depth: -1);
+    expect(controller.snapshot.nineDSpeed, 0.05);
+    expect(controller.snapshot.nineDDepth, 0.0);
+
+    controller.toggle9D();
+    expect(controller.snapshot.nineDEnabled, isFalse);
+  });
+
+  test('potenciador estéreo: ancho y punch en el snapshot', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.snapshot.stereoWidth, 1);
+    expect(controller.snapshot.bassPunch, 0);
+
+    controller.setStereoEnhance(width: 1.7, bassPunch: 0.6);
+    expect(fake.stereoEnhanceCalls, 1);
+    expect(controller.snapshot.stereoWidth, 1.7);
+    expect(controller.snapshot.bassPunch, 0.6);
+
+    controller.setStereoEnhance(bassPunch: 0.1);
+    expect(controller.snapshot.stereoWidth, 1.7);
+    expect(controller.snapshot.bassPunch, 0.1);
+
+    controller.setStereoEnhance(width: 9, bassPunch: 9);
+    expect(controller.snapshot.stereoWidth, 2.0);
+    expect(controller.snapshot.bassPunch, 1.0);
+  });
+
+  test('karaoke: el mando y su alternancia respetan 0..1', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.setVocalCut(0.5);
+    expect(fake.vocalCutCalls, 1);
+    expect(controller.snapshot.vocalCut, 0.5);
+
+    controller.setVocalCut(3);
+    expect(controller.snapshot.vocalCut, 1.0);
+
+    controller.toggleVocalCut(); // estaba por encima de 0 → se apaga
+    expect(controller.snapshot.vocalCut, 0.0);
+    controller.toggleVocalCut(); // apagado → 0.85
+    expect(controller.snapshot.vocalCut, 0.85);
+  });
+
+  test('crossfeed y modo noche: estado y cantidad en el snapshot', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.snapshot.crossfeedEnabled, isFalse);
+    expect(controller.snapshot.nightModeEnabled, isFalse);
+
+    controller.setCrossfeed(enabled: true, level: 0.3);
+    expect(fake.crossfeedCalls, 1);
+    expect(controller.snapshot.crossfeedEnabled, isTrue);
+    expect(controller.snapshot.crossfeedLevel, 0.3);
+
+    controller.setNightMode(enabled: true, amount: 0.8);
+    expect(fake.nightModeCalls, 1);
+    expect(controller.snapshot.nightModeEnabled, isTrue);
+    expect(controller.snapshot.nightModeAmount, 0.8);
+
+    controller.setCrossfeed(level: 7);
+    expect(controller.snapshot.crossfeedLevel, 1.0);
+    // El nivel no se dispara al cambiar solo la cantidad.
+    expect(controller.snapshot.crossfeedEnabled, isTrue);
+
+    controller.toggleCrossfeed();
+    controller.toggleNightMode();
+    expect(controller.snapshot.crossfeedEnabled, isFalse);
+    expect(controller.snapshot.nightModeEnabled, isFalse);
+  });
+
+  test('salida S16 con dither', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.snapshot.s16Output, isFalse);
+    controller.setS16Output(true);
+    expect(fake.s16Calls, 1);
+    expect(controller.snapshot.s16Output, isTrue);
+    controller.setS16Output(false);
+    expect(controller.snapshot.s16Output, isFalse);
+  });
+
+  test('el snapshot compara los campos DSP: == y hashCode', () {
+    const a = PlayerSnapshot(vocalCut: 0.2, bassPunch: 0.4);
+    const b = PlayerSnapshot(vocalCut: 0.2, bassPunch: 0.4);
+    const c = PlayerSnapshot(vocalCut: 0.2, bassPunch: 0.5);
+
+    expect(a, b);
+    expect(a.hashCode, b.hashCode);
+    expect(a, isNot(c));
+
+    final withNineD = a.copyWith(nineDEnabled: true, nineDSpeed: 0.3, nineDDepth: 0.1);
+    expect(withNineD.nineDEnabled, isTrue);
+    expect(withNineD.nineDSpeed, 0.3);
+    expect(withNineD.nineDDepth, 0.1);
+    expect(withNineD.vocalCut, 0.2); // lo que no se toca, no cambia
+    expect(withNineD, isNot(a));
+
+    final withAll = a.copyWith(
+      stereoWidth: 1.5,
+      crossfeedEnabled: true,
+      crossfeedLevel: 0.7,
+      nightModeEnabled: true,
+      nightModeAmount: 0.9,
+      s16Output: true,
+    );
+    expect(withAll.crossfeedLevel, 0.7);
+    expect(withAll.nightModeAmount, 0.9);
+    expect(withAll.s16Output, isTrue);
+    expect(withAll.hashCode, isNot(a.hashCode));
+  });
+
+  test('los setters DSP no hacen nada tras dispose', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    controller.dispose();
+
+    controller.set9D(enabled: true);
+    controller.setVocalCut(1);
+    controller.setNightMode(enabled: true);
+    controller.setS16Output(true);
+
+    expect(fake.nineDCalls, 0);
+    expect(fake.vocalCutCalls, 0);
+    expect(fake.nightModeCalls, 0);
+    expect(fake.s16Calls, 0);
+  });
+
   test('dispose libera el motor', () {
     final fake = FakePlayer();
     final controller = PlayerController(fake);
