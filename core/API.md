@@ -420,6 +420,50 @@ conserva el 85 % del grave mientras deja la voz de 1 kHz por debajo del 12 %.
 - `ch_engine_normalize_current(target_lufs)` mide y aplica una ganancia manual
   (limitada a ±24 dB) para alcanzar el objetivo; devuelve la ganancia aplicada.
 
+### Crossfeed Bauer, modo noche y dither TPDF
+
+Tres remates de la cadena, todos en `src/dsp_spatial.zig` salvo el dither, que
+vive en `src/audio.c` porque es el último paso antes del dispositivo.
+
+```c
+/* Crossfeed Bauer (ya existia el simbolo; ahora con retardo y filtro reales). */
+ch_engine_set_crossfeed(engine, 1, 0.4f);
+float level; ch_engine_crossfeed(engine, &level);   /* devuelve 1 si esta on */
+
+/* Modo noche. */
+ch_engine_set_night_mode(engine, 1, 0.7f);
+float amount; ch_engine_night_mode(engine, &amount);
+
+/* Salida S16 con dither (por defecto se entrega f32). */
+ch_engine_set_s16_output(engine, 1);
+ch_engine_s16_output(engine);
+```
+
+* **Crossfeed** (`Crossfeed`): el canal opuesto entra **retardado 12 muestras**
+  (250 µs exactos a 48 kHz) y pasado por un pasa-bajos de 700 Hz, y se mezcla al
+  40-60 % segun `level`. El retardo es lo que evita la suma en fase en el centro
+  (el "sonido pegado a la cabeza"); el filtro deja fuera los agudos, que no
+  cruzan la cabeza. El simbolo C ya existia desde la ABI 3: lo que cambia es el
+  DSP, no la firma.
+* **Modo noche** (`NightMode`): envolvente **RMS** de los dos canales juntos
+  (ataque 2 ms, relajacion 300 ms), umbral -12 dBFS y relacion hasta 4:1, mas
+  una compensacion de +0 a +3.5 dB. Resultado: los pasajes flojos suben y los
+  picos no despiertan a nadie. La ganancia se suaviza a 200 Hz para que no haya
+  escalones. Va antes del limitador, que sigue siendo la ultima red.
+* **Dither TPDF** (`ch_audio_quantize_s16`): cuando el dispositivo se abre en
+  `ma_format_s16` (`ch_audio_set_s16`), el motor renderiza en f32 por trozos de
+  4096 frames y cuantiza sumando la diferencia de **dos uniformes** del PRNG
+  xorshift32: ruido triangular de +-1 LSB, insesgado y descorrelacionado entre
+  canales (un estado por canal, sin candados). El error medio medido es < 0.05
+  LSB y la salida de una muestra constante reparte los valores entre los dos
+  enteros vecinos, que es exactamente lo que se busca.
+
+Tests (`zig build test`): el crossfeed lleva señal de un canal al otro
+atenuada, deja pasar menos del 35 % de un tono de 8 kHz, el modo noche sube un
+pasaje flojo mas de un 30 % y baja un pasaje fuerte mas de un 20 %, y el dither
+es insesgado, reproducible con la misma semilla, recorta en los extremos y
+admite estado NULL.
+
 ### Hojas CUE
 
 `ch_cue_read` parsea un `.cue` (FILE/TRACK/TITLE/PERFORMER/INDEX 01) y resuelve

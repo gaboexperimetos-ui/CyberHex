@@ -33,6 +33,15 @@ pub const VOCAL_CUT_HZ: f32 = 130;
 pub const BASS_HZ: f32 = 120;
 pub const BASS_HP_HZ: f32 = 35;
 
+/// Crossfeed Bauer: pasa-bajos de 700 Hz y retardo de 250 us en el camino cruzado.
+pub const CROSSFEED_HZ: f32 = 700;
+pub const CROSSFEED_DELAY_FRAMES: usize = 12; // 250 us a 48 kHz
+
+/// Modo noche: umbral del compresor (RMS lineal, ~ -12 dBFS) y suavizado.
+pub const NIGHT_THRESHOLD: f32 = 0.25;
+pub const NIGHT_ATTACK_S: f32 = 0.002;
+pub const NIGHT_RELEASE_S: f32 = 0.3;
+
 pub const MIN_SPEED_HZ: f32 = 0.05;
 pub const MAX_SPEED_HZ: f32 = 2.0;
 
@@ -242,21 +251,153 @@ pub const VocalCut = struct {
     }
 };
 
+/// Crossfeed Bauer para auriculares (#28).
+///
+/// Mezcla en cada oído una parte del opuesto **filtrada y retardada**: el
+/// pasa-bajos de 700 Hz imita la sombra de la cabeza (los agudos no cruzan) y
+/// el retardo de 12 muestras (250 µs) evita que las dos señales se sumen en
+/// fase justo en el centro, que es lo que hace que el sonido "se pegue" a la
+/// cabeza. Con auriculares reduce la fatiga; con altavoces no se usa.
+pub const Crossfeed = struct {
+    enabled: std.atomic.Value(bool) = .init(false),
+    level_bits: std.atomic.Value(u32) = .init(fbits(0.5)),
+
+    lp_l: f32 = 0,
+    lp_r: f32 = 0,
+    delay_l: [CROSSFEED_DELAY_FRAMES]f32 = @splat(0),
+    delay_r: [CROSSFEED_DELAY_FRAMES]f32 = @splat(0),
+    pos: usize = 0,
+
+    pub fn set(self: *Crossfeed, on: bool, new_level: f32) void {
+        self.enabled.store(on, .monotonic);
+        self.level_bits.store(fbits(clampf(new_level, 0, 1)), .monotonic);
+        if (!on) self.reset();
+    }
+
+    pub fn isEnabled(self: *const Crossfeed) bool {
+        return self.enabled.load(.monotonic);
+    }
+
+    pub fn level(self: *const Crossfeed) f32 {
+        return toFloat(self.level_bits.load(.monotonic));
+    }
+
+    pub fn reset(self: *Crossfeed) void {
+        self.lp_l = 0;
+        self.lp_r = 0;
+        @memset(&self.delay_l, 0);
+        @memset(&self.delay_r, 0);
+        self.pos = 0;
+    }
+
+    pub fn process(self: *Crossfeed, in_l: f32, in_r: f32) [2]f32 {
+        if (!self.enabled.load(.monotonic)) return .{ in_l, in_r };
+        const amount = clampf(self.level(), 0, 1);
+        if (amount <= 0) return .{ in_l, in_r };
+        const wet = 0.6 * amount;
+
+        // Retardo exacto de CROSSFEED_DELAY_FRAMES muestras: se lee antes de
+        // escribir en la misma posición (el hueco es de una vuelta completa).
+        self.pos = (self.pos + 1) % CROSSFEED_DELAY_FRAMES;
+        const fed_l = self.delay_l[self.pos];
+        const fed_r = self.delay_r[self.pos];
+        self.delay_l[self.pos] = in_l;
+        self.delay_r[self.pos] = in_r;
+
+        // Lo que entra al oído izquierdo viene del derecho, y al revés.
+        const alpha = onePole(CROSSFEED_HZ);
+        self.lp_l += (fed_r - self.lp_l) * alpha;
+        self.lp_r += (fed_l - self.lp_r) * alpha;
+
+        const dry = 1.0 - wet * 0.5;
+        return .{ in_l * dry + self.lp_l * wet, in_r * dry + self.lp_r * wet };
+    }
+};
+
+/// Compresor de modo noche (#38).
+///
+/// Un seguidor de envolvente RMS (ataque 2 ms, relajación 300 ms) mide el nivel
+/// de los dos canales juntos; por encima de -12 dBFS la señal se comprime con
+/// relación hasta 4:1 y una ganancia de compensación devuelve el nivel medio.
+/// Asi los pasajes flojos suben y los picos no despiertan a nadie. Va antes del
+/// limitador, que sigue siendo la última red.
+pub const NightMode = struct {
+    enabled: std.atomic.Value(bool) = .init(false),
+    amount_bits: std.atomic.Value(u32) = .init(fbits(0.5)),
+
+    env: f32 = 0,
+    gain: f32 = 1,
+
+    pub fn set(self: *NightMode, on: bool, new_amount: f32) void {
+        self.enabled.store(on, .monotonic);
+        self.amount_bits.store(fbits(clampf(new_amount, 0, 1)), .monotonic);
+        if (!on) self.reset();
+    }
+
+    pub fn isEnabled(self: *const NightMode) bool {
+        return self.enabled.load(.monotonic);
+    }
+
+    pub fn amount(self: *const NightMode) f32 {
+        return toFloat(self.amount_bits.load(.monotonic));
+    }
+
+    pub fn reset(self: *NightMode) void {
+        self.env = 0;
+        self.gain = 1;
+    }
+
+    pub fn process(self: *NightMode, in_l: f32, in_r: f32) [2]f32 {
+        if (!self.enabled.load(.monotonic)) return .{ in_l, in_r };
+        const level_amount = clampf(self.amount(), 0, 1);
+        if (level_amount <= 0) return .{ in_l, in_r };
+
+        const power = (in_l * in_l + in_r * in_r) * 0.5;
+        const attack = onePole(1.0 / NIGHT_ATTACK_S / (2.0 * std.math.pi));
+        const release = onePole(1.0 / NIGHT_RELEASE_S / (2.0 * std.math.pi));
+        const coeff = if (power > self.env) attack else release;
+        self.env += (power - self.env) * coeff;
+
+        const level = @sqrt(@max(self.env, 0));
+        const ratio = 1.0 + 3.0 * level_amount; // 1:1 .. 4:1
+        var desired: f32 = 1;
+        if (level > NIGHT_THRESHOLD) {
+            const over = level / NIGHT_THRESHOLD;
+            desired = std.math.pow(f32, over, 1.0 / ratio - 1.0);
+        }
+        // Compensacion: devuelve lo que quita el compresor para que el volumen
+        // medio no caiga (hasta +3.5 dB con amount = 1).
+        const makeup = 1.0 + 0.4 * level_amount;
+        const target = desired * makeup;
+
+        // Suavizado de la ganancia: sin escalones audibles entre muestras.
+        const smooth = onePole(200.0);
+        self.gain += (target - self.gain) * smooth;
+        return .{ in_l * self.gain, in_r * self.gain };
+    }
+};
+
 /// Cadena completa en el orden en que suena.
 pub const Dsp = struct {
     vocal: VocalCut = .{},
     spatial: Spatial9D = .{},
     enhancer: StereoEnhancer = .{},
+    crossfeed: Crossfeed = .{},
+    night: NightMode = .{},
 
     pub fn process(self: *Dsp, in_l: f32, in_r: f32) [2]f32 {
         const cut = self.vocal.process(in_l, in_r);
         const space = self.spatial.process(cut[0], cut[1]);
-        return self.enhancer.process(space[0], space[1]);
+        const wide = self.enhancer.process(space[0], space[1]);
+        const fed = self.crossfeed.process(wide[0], wide[1]);
+        return self.night.process(fed[0], fed[1]);
     }
 
     /// ¿Hay algo encendido? Evita recorrer la cadena cuando no hace falta.
     pub fn isIdle(self: *const Dsp) bool {
         return !self.spatial.isEnabled() and
+            !self.crossfeed.isEnabled() and
+            !self.night.isEnabled() and
             self.vocal.amount() <= 0 and
             self.enhancer.punch() <= 0 and
             self.enhancer.width() == 1.0;
@@ -434,4 +575,97 @@ test "cadena: con todo apagado es la identidad" {
     const out = dsp.process(0.11, -0.42);
     try std.testing.expectEqual(@as(f32, 0.11), out[0]);
     try std.testing.expectEqual(@as(f32, -0.42), out[1]);
+}
+
+test "crossfeed: apagado es identidad y encendido mezcla el canal opuesto" {
+    var cf: Crossfeed = .{};
+    const off = cf.process(0.6, 0.0);
+    try std.testing.expectEqual(@as(f32, 0.6), off[0]);
+
+    cf.set(true, 1.0);
+    var out: [2]f32 = .{ 0, 0 };
+    var i: usize = 0;
+    while (i < 2000) : (i += 1) {
+        // Solo derecha: tras el retardo, algo tiene que llegar a la izquierda.
+        out = cf.process(0.0, 0.8);
+    }
+    try std.testing.expect(out[0] > 0.1); // cruzado, filtrado y atenuado
+    try std.testing.expect(out[0] < 0.8); // nunca tanto como el original
+    // Con la entrada en silencio total, la salida se va a cero.
+    i = 0;
+    while (i < 4000) : (i += 1) out = cf.process(0.0, 0.0);
+    try std.testing.expect(@abs(out[0]) < 1e-3);
+}
+
+test "crossfeed: los agudos no cruzan (el paso bajo de 700 Hz los quita)" {
+    var cf: Crossfeed = .{};
+    cf.set(true, 1.0);
+    // Tono agudo solo por la derecha: lo cruzado tiene que ser mucho menor.
+    var sum_l: f64 = 0;
+    var sum_r: f64 = 0;
+    var i: usize = 0;
+    while (i < 4800) : (i += 1) {
+        const x = 0.5 * @sin(2.0 * std.math.pi * 8000.0 * @as(f32, @floatFromInt(i)) / SAMPLE_RATE);
+        const out = cf.process(0, x);
+        sum_l += @abs(out[0]);
+        sum_r += @abs(out[1]);
+    }
+    try std.testing.expect(sum_l < sum_r * 0.35);
+}
+
+test "modo noche: los pasajes flojos suben y los fuertes bajan" {
+    var night: NightMode = .{};
+    night.set(true, 1.0);
+
+    // Paso flojo (RMS muy por debajo del umbral): la compensacion lo sube.
+    var quiet_in: f64 = 0;
+    var quiet_out: f64 = 0;
+    var i: usize = 0;
+    while (i < 24000) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / SAMPLE_RATE;
+        const x = 0.06 * @sin(2.0 * std.math.pi * 220.0 * t);
+        const out = night.process(x, x);
+        quiet_in += @as(f64, x) * x;
+        quiet_out += @as(f64, out[0]) * out[0];
+    }
+    try std.testing.expect(quiet_out > quiet_in * 1.3);
+
+    // Paso fuerte: la envolvente ya esta arriba y la ganancia comprime.
+    var loud_in: f64 = 0;
+    var loud_out: f64 = 0;
+    i = 0;
+    while (i < 24000) : (i += 1) {
+        const t = @as(f32, @floatFromInt(i)) / SAMPLE_RATE;
+        const x = 0.9 * @sin(2.0 * std.math.pi * 220.0 * t);
+        const out = night.process(x, x);
+        // Se mide en la segunda mitad, cuando la envolvente ya se asento.
+        if (i > 12000) {
+            loud_in += @as(f64, x) * x;
+            loud_out += @as(f64, out[0]) * out[0];
+        }
+    }
+    try std.testing.expect(loud_out < loud_in * 0.8);
+}
+
+test "modo noche: apagado o con amount 0 es identidad" {
+    var night: NightMode = .{};
+    const off = night.process(0.7, -0.3);
+    try std.testing.expectEqual(@as(f32, 0.7), off[0]);
+    try std.testing.expectEqual(@as(f32, -0.3), off[1]);
+    night.set(true, 0);
+    const zero = night.process(0.7, -0.3);
+    try std.testing.expectEqual(@as(f32, 0.7), zero[0]);
+    try std.testing.expectEqual(@as(f32, -0.3), zero[1]);
+}
+
+test "cadena: crossfeed y modo noche entran en el orden correcto" {
+    var dsp_chain: Dsp = .{};
+    try std.testing.expect(dsp_chain.isIdle());
+    dsp_chain.crossfeed.set(true, 0.8);
+    try std.testing.expect(!dsp_chain.isIdle());
+    dsp_chain.crossfeed.set(false, 0.8);
+    dsp_chain.night.set(true, 0.5);
+    try std.testing.expect(!dsp_chain.isIdle());
+    dsp_chain.night.set(false, 0.5);
+    try std.testing.expect(dsp_chain.isIdle());
 }

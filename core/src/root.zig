@@ -31,6 +31,8 @@ extern fn ch_audio_device_count() i32;
 extern fn ch_audio_device_name(index: i32) [*c]const u8;
 extern fn ch_audio_default_device() i32;
 extern fn ch_audio_last_error() [*c]const u8;
+extern fn ch_audio_set_s16(audio: ?*anyopaque, enabled: i32) i32;
+extern fn ch_audio_quantize_s16(sample: f32, state: ?*u32) i16;
 
 extern fn ch_decode_open(path: [*c]const u8, out_rate: u32, out_channels: u32) ?*ch_decoder;
 extern fn ch_decode_read(decoder: *ch_decoder, out: [*]f32, frames: u64) u64;
@@ -269,11 +271,6 @@ pub const Engine = struct {
     ab_start: usize = NO_SEEK,
     ab_end: usize = NO_SEEK,
 
-    // Crossfeed para auriculares.
-    cf_enabled: bool = false,
-    cf_strength_bits: u32 = @bitCast(@as(f32, 0.5)),
-    cf_lp_l: f32 = 0,
-    cf_lp_r: f32 = 0,
 
     // Cadena DSP de la fase 2: karaoke -> 9D -> ancho/punch. El ancho estereo
     // (1 = normal, 0 = mono, 2 = muy amplio) vive ahora en la cadena.
@@ -305,6 +302,8 @@ pub const Engine = struct {
     chan_mode: u32 = 0,
     // 0 = ReplayGain por pista, 1 = por album.
     rg_mode: u32 = 0,
+    // Salida S16 con dither TPDF (por defecto se entrega f32 al dispositivo).
+    s16_output: bool = false,
     // Pistas que no se pudieron abrir y se saltaron solas.
     skipped_tracks: u64 = 0,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
@@ -1288,12 +1287,6 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             const limiting = self.limit_enabled;
             const ceiling = self.limit_ceiling;
             var lg = self.limit_gain;
-            const crossfeeding = self.cf_enabled;
-            const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &self.cf_strength_bits, .monotonic)));
-            const cf_wet = 0.6 * std.math.clamp(cf_strength, 0.0, 1.0);
-            const cf_alpha = 1.0 - @exp(-2.0 * std.math.pi * 700.0 / @as(f32, @floatFromInt(SAMPLE_RATE)));
-            var lp_l = self.cf_lp_l;
-            var lp_r = self.cf_lp_r;
             var peak_l: f32 = 0;
             var peak_r: f32 = 0;
             var sq: f64 = 0;
@@ -1321,23 +1314,15 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 var s = l * g;
                 var s2 = rr * g;
 
-                // Karaoke -> 9D -> ancho/punch: atomicos, sin candados y sin
-                // reservar memoria (esto corre en el callback de audio).
+                // Karaoke -> 9D -> ancho/punch -> crossfeed -> modo noche:
+                // atomicos, sin candados y sin reservar memoria (esto corre en
+                // el callback de audio). El limitador va justo despues.
                 if (!self.dsp.isIdle()) {
                     const shaped = self.dsp.process(s, s2);
                     s = shaped[0];
                     s2 = shaped[1];
                 }
 
-                if (crossfeeding) {
-                    // Bauer simplificado: mezcla el canal opuesto filtrado paso bajo.
-                    lp_l += (s2 - lp_l) * cf_alpha;
-                    lp_r += (s - lp_r) * cf_alpha;
-                    const l2 = s * (1.0 - cf_wet * 0.5) + lp_l * cf_wet;
-                    const r2 = s2 * (1.0 - cf_wet * 0.5) + lp_r * cf_wet;
-                    s = l2;
-                    s2 = r2;
-                }
                 if (balance != 0) {
                     s *= gain_l;
                     s2 *= gain_r;
@@ -1364,8 +1349,6 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 sq += @as(f64, s) * s + @as(f64, s2) * s2;
             }
             self.limit_gain = lg;
-            self.cf_lp_l = lp_l;
-            self.cf_lp_r = lp_r;
             self.fade_gain = if (!playing and g < 0.001) 0 else g;
 
             self.meter_lock.lock();
@@ -2227,22 +2210,47 @@ export fn ch_engine_ab_loop(self: ?*Engine, a_seconds: ?*f64, b_seconds: ?*f64) 
     return 1;
 }
 
-/// Crossfeed para auriculares: 0 apagado, fuerza 0..1 (0.5 = moderado).
+/// Crossfeed Bauer para auriculares: alimentacion cruzada con paso bajo de
+/// 700 Hz y retardo de 250 us. `strength` 0..1 (0.5 = moderado).
 export fn ch_engine_set_crossfeed(self: ?*Engine, enabled: i32, strength: f32) i32 {
     const e = self orelse return -1;
-    @atomicStore(u32, &e.cf_strength_bits, @bitCast(std.math.clamp(strength, 0, 1)), .monotonic);
-    e.cf_enabled = enabled != 0;
-    if (!e.cf_enabled) {
-        e.cf_lp_l = 0;
-        e.cf_lp_r = 0;
-    }
+    e.dsp.crossfeed.set(enabled != 0, strength);
     return 0;
 }
 
 export fn ch_engine_crossfeed(self: ?*Engine, strength: ?*f32) i32 {
     const e = self orelse return 0;
-    if (strength) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.cf_strength_bits, .monotonic)));
-    return if (e.cf_enabled) 1 else 0;
+    if (strength) |p| p.* = e.dsp.crossfeed.level();
+    return if (e.dsp.crossfeed.isEnabled()) 1 else 0;
+}
+
+/// Modo noche: compresor suave que sube los pasajes flojos y doma los picos
+/// (va antes del limitador). `amount` 0..1; devuelve 1 si esta encendido.
+export fn ch_engine_set_night_mode(self: ?*Engine, enabled: i32, amount: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.night.set(enabled != 0, amount);
+    return 0;
+}
+
+export fn ch_engine_night_mode(self: ?*Engine, amount: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (amount) |p| p.* = e.dsp.night.amount();
+    return if (e.dsp.night.isEnabled()) 1 else 0;
+}
+
+/// Salida S16 con dither TPDF (±1 LSB). Apagada por defecto: se entrega f32.
+export fn ch_engine_set_s16_output(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    e.s16_output = enabled != 0;
+    if (e.audio) |audio| {
+        return ch_audio_set_s16(audio, if (e.s16_output) 1 else 0);
+    }
+    return 0;
+}
+
+export fn ch_engine_s16_output(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.s16_output) 1 else 0;
 }
 
 /// Mono (1) o estereo (0).
@@ -2988,7 +2996,7 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
     const speed = e.speedValue();
     const pitch = @as(f32, @bitCast(@atomicLoad(u32, &e.pitch_bits, .monotonic)));
     const balance = @as(f32, @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic)));
-    const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &e.cf_strength_bits, .monotonic)));
+    const cf_strength = e.dsp.crossfeed.level();
     const xfade = @as(f32, @bitCast(@atomicLoad(u32, &e.xfade_bits, .monotonic)));
 
     const lines = [_]struct { key: []const u8, a: f64, b: f64 }{
@@ -3006,7 +3014,7 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
         .{ .key = "chan_mode", .a = @floatFromInt(@atomicLoad(u32, &e.chan_mode, .monotonic)), .b = 0 },
         .{ .key = "width", .a = e.dsp.enhancer.width(), .b = 0 },
         .{ .key = "trim", .a = if (e.trim_enabled) 1 else 0, .b = e.trim_threshold_db },
-        .{ .key = "crossfeed", .a = if (e.cf_enabled) 1 else 0, .b = cf_strength },
+        .{ .key = "crossfeed", .a = if (e.dsp.crossfeed.isEnabled()) 1 else 0, .b = cf_strength },
     };
     for (lines) |line| {
         buf.appendSlice(e.allocator, line.key) catch {};
@@ -3270,6 +3278,10 @@ test "api: los punteros nulos devuelven error, no revientan" {
     try std.testing.expectEqual(@as(f32, 0.0), ch_engine_bass_punch(null));
     try std.testing.expectEqual(@as(i32, -1), ch_engine_set_vocal_cut(null, 0.5));
     try std.testing.expectEqual(@as(f32, 0.0), ch_engine_vocal_cut(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_night_mode(null, 1, 0.5));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_night_mode(null, null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_s16_output(null, 1));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_s16_output(null));
     try std.testing.expectEqual(ABI_VERSION, ch_engine_abi_version());
 }
 
@@ -3339,4 +3351,75 @@ test "fase 2: los mandos DSP van y vuelven por la API C" {
     // Al apagar el 9D no queda estado: volver a encenderlo arranca del centro.
     _ = ch_engine_set_9d(e, 0, 0.5, 0.8);
     try std.testing.expectEqual(@as(i32, 0), ch_engine_9d_enabled(e));
+
+    // Crossfeed Bauer y modo noche.
+    _ = ch_engine_set_crossfeed(e, 1, 0.35);
+    var cf_level: f32 = 0;
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_crossfeed(e, &cf_level));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), cf_level, 1e-6);
+
+    _ = ch_engine_set_night_mode(e, 1, 0.6);
+    var night_amount: f32 = 0;
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_night_mode(e, &night_amount));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.6), night_amount, 1e-6);
+    _ = ch_engine_set_night_mode(e, 0, 0.6);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_night_mode(e, null));
+
+    // Salida S16: el mando se recuerda aunque no haya dispositivo.
+    _ = ch_engine_set_s16_output(e, 1);
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_s16_output(e));
+    _ = ch_engine_set_s16_output(e, 0);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_s16_output(e));
+}
+
+test "dither: TPDF de +-1 LSB, insesgado y reproducible" {
+    // El error medio tiene que ser cero: eso es lo que hace el dither, meter
+    // ruido a cambio de que la cuantizacion no sesgue el sonido.
+    var state: u32 = 0x12345678;
+    var sum: f64 = 0;
+    var min_q: i16 = 32767;
+    var max_q: i16 = -32768;
+    const samples: usize = 20000;
+    var i: usize = 0;
+    while (i < samples) : (i += 1) {
+        // Muestra constante: con dither la salida no es siempre el mismo entero.
+        const q = ch_audio_quantize_s16(0.5, &state);
+        sum += @as(f64, @floatFromInt(q)) - 0.5 * 32767.0;
+        min_q = @min(min_q, q);
+        max_q = @max(max_q, q);
+    }
+    const mean_error = sum / 20000.0;
+    try std.testing.expect(@abs(mean_error) < 0.05); // sesgo practicamente nulo
+    try std.testing.expectEqual(@as(i16, 16383), min_q);
+    try std.testing.expectEqual(@as(i16, 16384), max_q);
+
+    // Ruido triangular: la desviacion tipica baja, pero distinta de cero.
+    var variance: f64 = 0;
+    var s2: u32 = 0x12345678;
+    i = 0;
+    while (i < samples) : (i += 1) {
+        const q = ch_audio_quantize_s16(0.5, &s2);
+        const e = @as(f64, @floatFromInt(q)) - 0.5 * 32767.0;
+        variance += e * e;
+    }
+    variance /= 20000.0;
+    try std.testing.expect(variance > 0.02);
+    try std.testing.expect(variance < 1.0);
+
+    // Mismo estado inicial, misma secuencia: reproducible en los tests.
+    var a: u32 = 42;
+    var b: u32 = 42;
+    try std.testing.expectEqual(ch_audio_quantize_s16(0.25, &a), ch_audio_quantize_s16(0.25, &b));
+    try std.testing.expectEqual(ch_audio_quantize_s16(0.25, &a), ch_audio_quantize_s16(0.25, &b));
+
+    // Recorte en los extremos y estado nulo admitido.
+    var st: u32 = 7;
+    try std.testing.expectEqual(@as(i16, 32767), ch_audio_quantize_s16(4.0, &st));
+    try std.testing.expectEqual(@as(i16, -32768), ch_audio_quantize_s16(-4.0, &st));
+    // Sin estado (NULL) tambien funciona: usa una semilla local y el dither
+    // sigue siendo de +-1 LSB como mucho.
+    const zero_a = ch_audio_quantize_s16(0.0, null);
+    const zero_b = ch_audio_quantize_s16(0.0, null);
+    try std.testing.expect(@abs(@as(i32, zero_a)) <= 1);
+    try std.testing.expect(@abs(@as(i32, zero_b)) <= 1);
 }

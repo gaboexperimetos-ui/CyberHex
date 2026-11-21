@@ -38,8 +38,17 @@ int32_t ch_engine_set_volume(ch_engine* engine, float volume);
 float   ch_engine_volume(ch_engine* engine);
 
 /* DSP de reproduccion. */
+/* Crossfeed Bauer para auriculares: alimentacion cruzada con paso bajo de
+   ~700 Hz y retardo de ~250 us. `strength` 0 .. 1. */
 int32_t ch_engine_set_crossfeed(ch_engine* engine, int32_t enabled, float strength);
 int32_t ch_engine_crossfeed(ch_engine* engine, float* strength);
+/* Modo noche: compresor RMS suave que sube los pasajes flojos y doma los picos
+   (va antes del limitador). `amount` 0 .. 1; la consulta devuelve 1 si esta on. */
+int32_t ch_engine_set_night_mode(ch_engine* engine, int32_t enabled, float amount);
+int32_t ch_engine_night_mode(ch_engine* engine, float* amount);
+/* Salida S16 con dither TPDF (+-1 LSB). Apagada: se entrega f32 al dispositivo. */
+int32_t ch_engine_set_s16_output(ch_engine* engine, int32_t enabled);
+int32_t ch_engine_s16_output(ch_engine* engine);
 int32_t ch_engine_set_mono(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_mono(ch_engine* engine);
 int32_t ch_engine_set_balance(ch_engine* engine, float balance);
