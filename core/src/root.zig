@@ -72,6 +72,13 @@ extern fn c_lib_removed(lib: ?*const ch_library) c_int;
 extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
 extern fn ch_file_free(data: [*c]u8) void;
 extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
+
+const ChLoudness = extern struct {
+    integrated_lufs: f64,
+    sample_peak_dbfs: f64,
+    duration_s: f64,
+};
+extern fn ch_loudness_scan(path: [*c]const u8, out: *ChLoudness) i32;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -258,7 +265,14 @@ pub const Engine = struct {
     cf_lp_l: f32 = 0,
     cf_lp_r: f32 = 0,
 
-    // Mezcla: balance (-1 izquierda .. +1 derecha).
+    // Ancho estereo (1 = normal, 0 = mono, 2 = muy amplio).
+    width_bits: u32 = @bitCast(@as(f32, 1)),
+
+    // Recorte automatico de silencio al abrir pista.
+    trim_enabled: bool = false,
+    trim_threshold_db: f32 = -60,
+
+    // Mezcla: mono y balance (-1 izquierda .. +1 derecha).
     balance_bits: u32 = @bitCast(@as(f32, 0)),
     gain_db_bits: u32 = @bitCast(@as(f32, 0)),
 
@@ -872,7 +886,42 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         @atomicStore(bool, &self.eof, false, .release);
         // Fundido de entrada suave (evita el clic al abrir una pista nueva).
         self.fade_gain = 0;
+        if (self.trim_enabled) self.applyTrim(index);
         return 0;
+    }
+
+    /// Recorta el silencio inicial/final de la pista recién añadida.
+    fn applyTrim(self: *Engine, index: usize) void {
+        if (index >= self.playlist.items.len) return;
+        const path = self.playlist.items[index];
+        var lead: f64 = 0;
+        var tail: f64 = 0;
+        if (ch_engine_detect_silence(path.ptr, self.trim_threshold_db, &lead, &tail) != 0) return;
+
+        const lead_frames: usize = @intFromFloat(@max(0, lead) * SAMPLE_RATE);
+        const tail_frames: usize = @intFromFloat(@max(0, tail) * SAMPLE_RATE);
+
+        self.seg_lock.lock();
+        if (self.seg_count > 0) {
+            const seg = &self.segments[self.seg_count - 1];
+            const span = seg.end -| seg.start;
+            seg.end -= @min(tail_frames, span);
+        }
+        self.seg_lock.unlock();
+
+        // Aplicar tambien el desplazamiento a la posicion base del segmento:
+        // el reloj del motor resta `seg.start`, asi que sin esto `played` quedaria
+        // por debajo del inicio y el analisis de posicion seria incorrecto.
+        if (lead_frames > 0) {
+            self.seg_lock.lock();
+            if (self.seg_count > 0) {
+                const seg = &self.segments[self.seg_count - 1];
+                seg.start += @min(lead_frames, seg.end - seg.start);
+                self.running_end = seg.end;
+            }
+            self.seg_lock.unlock();
+            @atomicStore(usize, &self.seek_req, lead_frames, .release);
+        }
     }
 
     fn openNextAuto(self: *Engine) bool {
@@ -1229,6 +1278,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             const ceiling = self.limit_ceiling;
             var lg = self.limit_gain;
             const crossfeeding = self.cf_enabled;
+            const width = @as(f32, @bitCast(@atomicLoad(u32, &self.width_bits, .monotonic)));
             const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &self.cf_strength_bits, .monotonic)));
             const cf_wet = 0.6 * std.math.clamp(cf_strength, 0.0, 1.0);
             const cf_alpha = 1.0 - @exp(-2.0 * std.math.pi * 700.0 / @as(f32, @floatFromInt(SAMPLE_RATE)));
@@ -1269,6 +1319,13 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                     const r2 = s2 * (1.0 - cf_wet * 0.5) + lp_r * cf_wet;
                     s = l2;
                     s2 = r2;
+                }
+                if (width != 1.0) {
+                    // Matriz mid/side: width 0 = mono, 1 = normal, 2 = amplio.
+                    const mid = (s + s2) * 0.5;
+                    const side = (s - s2) * 0.5 * width;
+                    s = mid + side;
+                    s2 = mid - side;
                 }
                 if (balance != 0) {
                     s *= gain_l;
@@ -2215,6 +2272,60 @@ export fn ch_engine_gain_db(self: ?*Engine) f32 {
     return @as(f32, @bitCast(@atomicLoad(u32, &e.gain_db_bits, .monotonic)));
 }
 
+/// Ancho estereo: 0 = mono, 1 = normal, 2 = amplio.
+export fn ch_engine_set_stereo_width(self: ?*Engine, width: f32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(u32, &e.width_bits, @bitCast(std.math.clamp(width, 0, 2)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_stereo_width(self: ?*Engine) f32 {
+    const e = self orelse return 1;
+    return @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic)));
+}
+
+/// Recorte automatico de silencio al abrir cada pista (dBFS).
+export fn ch_engine_set_trim_silence(self: ?*Engine, enabled: i32, threshold_db: f32) i32 {
+    const e = self orelse return -1;
+    e.trim_enabled = enabled != 0;
+    e.trim_threshold_db = std.math.clamp(threshold_db, -90, -20);
+    return 0;
+}
+
+export fn ch_engine_trim_silence(self: ?*Engine, threshold_db: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (threshold_db) |p| p.* = e.trim_threshold_db;
+    return if (e.trim_enabled) 1 else 0;
+}
+
+/// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).
+export fn ch_engine_analyze_current(self: ?*Engine, lufs: ?*f64, peak_db: ?*f64) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const idx = e.queue_index;
+    const path: ?[:0]u8 = if (idx < e.playlist.items.len) e.playlist.items[idx] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return -2;
+
+    var result: ChLoudness = undefined;
+    if (ch_loudness_scan(p.ptr, &result) != 0) return -3;
+    if (lufs) |out| out.* = result.integrated_lufs;
+    if (peak_db) |out| out.* = result.sample_peak_dbfs;
+    return 0;
+}
+
+/// Normaliza la pista cargada a `target_lufs` ajustando la ganancia manual.
+/// Devuelve 0 y escribe en `applied_db` la ganancia aplicada.
+export fn ch_engine_normalize_current(self: ?*Engine, target_lufs: f64, applied_db: ?*f64) i32 {
+    const e = self orelse return -1;
+    var lufs: f64 = 0;
+    if (ch_engine_analyze_current(e, &lufs, null) != 0) return -2;
+    const gain = std.math.clamp(target_lufs - lufs, -24, 24);
+    _ = ch_engine_set_gain_db(e, @floatCast(gain));
+    if (applied_db) |out| out.* = gain;
+    return 0;
+}
+
 /// Guarda la caratula `index` de la pista audible en `path`. 0 si ok.
 export fn ch_engine_save_cover(self: ?*Engine, index: i32, path: [*c]const u8) i32 {
     const e = self orelse return -1;
@@ -2833,6 +2944,9 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
         .{ .key = "rg", .a = if (@atomicLoad(bool, &e.rg_enabled, .monotonic)) 1 else 0, .b = 0 },
         .{ .key = "limiter", .a = if (e.limit_enabled) 1 else 0, .b = e.limit_ceiling },
         .{ .key = "mono", .a = if (@atomicLoad(u32, &e.chan_mode, .monotonic) == 1) 1 else 0, .b = 0 },
+        .{ .key = "chan_mode", .a = @floatFromInt(@atomicLoad(u32, &e.chan_mode, .monotonic)), .b = 0 },
+        .{ .key = "width", .a = @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic))), .b = 0 },
+        .{ .key = "trim", .a = if (e.trim_enabled) 1 else 0, .b = e.trim_threshold_db },
         .{ .key = "crossfeed", .a = if (e.cf_enabled) 1 else 0, .b = cf_strength },
     };
     for (lines) |line| {
@@ -2840,7 +2954,8 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
         buf.append(e.allocator, '\t') catch {};
         appendNum(&buf, e.allocator, line.a) catch {};
         const has_second = std.mem.eql(u8, line.key, "limiter") or
-            std.mem.eql(u8, line.key, "crossfeed");
+            std.mem.eql(u8, line.key, "crossfeed") or
+            std.mem.eql(u8, line.key, "trim");
         if (has_second) {
             buf.append(e.allocator, '\t') catch {};
             appendNum(&buf, e.allocator, line.b) catch {};
@@ -2884,6 +2999,10 @@ export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out:
     var limiter: i32 = -1;
     var limiter_ceiling: f32 = 0;
     var mono: i32 = -1;
+    var chan_mode: i32 = -1;
+    var width: f32 = -1;
+    var trim: i32 = -1;
+    var trim_threshold: f32 = -60;
     var crossfeed: i32 = -1;
     var cf_strength: f32 = 0.5;
 
@@ -2930,6 +3049,12 @@ export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out:
             limiter = @intFromFloat(value);
             limiter_ceiling = @floatCast(extra);
         } else if (std.mem.eql(u8, key, "mono")) mono = @intFromFloat(value)
+        else if (std.mem.eql(u8, key, "chan_mode")) chan_mode = @intFromFloat(value)
+        else if (std.mem.eql(u8, key, "width")) width = @floatCast(value)
+        else if (std.mem.eql(u8, key, "trim")) {
+            trim = @intFromFloat(value);
+            trim_threshold = @floatCast(extra);
+        }
         else if (std.mem.eql(u8, key, "crossfeed")) {
             crossfeed = @intFromFloat(value);
             cf_strength = @floatCast(extra);
@@ -2971,7 +3096,13 @@ export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out:
     if (shuffle >= 0) _ = ch_engine_set_shuffle(e, shuffle);
     if (rg >= 0) _ = ch_engine_set_replaygain(e, rg);
     if (limiter >= 0) _ = ch_engine_set_limiter(e, limiter, limiter_ceiling);
-    if (mono >= 0) _ = ch_engine_set_mono(e, mono);
+    if (chan_mode >= 0) {
+        _ = ch_engine_set_channel_mode(e, chan_mode);
+    } else if (mono >= 0) {
+        _ = ch_engine_set_mono(e, mono);
+    }
+    if (width >= 0) _ = ch_engine_set_stereo_width(e, width);
+    if (trim >= 0) _ = ch_engine_set_trim_silence(e, trim, trim_threshold);
     if (crossfeed >= 0) _ = ch_engine_set_crossfeed(e, crossfeed, cf_strength);
 
     _ = e.beginAt(current);

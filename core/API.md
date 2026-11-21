@@ -125,6 +125,15 @@ double    ch_cue_start(const ch_cue* cue, int32_t index);
 double    ch_cue_end(const ch_cue* cue, int32_t index);
 int32_t   ch_cue_number(const ch_cue* cue, int32_t index);
 
+/* Analisis, trim, ancho y normalizacion. */
+int32_t ch_engine_set_stereo_width(ch_engine* engine, float width); /* 0 mono .. 2 ancho */
+float   ch_engine_stereo_width(ch_engine* engine);
+int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float threshold_db);
+int32_t ch_engine_detect_silence(const char* utf8_path, float threshold_db, double* lead, double* tail);
+int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
+int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
+int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
+
 /* Temporizador de apagado: pausa tras `seconds` con fundido de `fade_seconds`.
  * seconds <= 0 lo desactiva. ch_engine_sleep_remaining: segundos restantes o -1. */
 int32_t ch_engine_set_sleep_timer(ch_engine* engine, double seconds, double fade_seconds);
@@ -349,6 +358,18 @@ escritura atómica.
   de muestra, sin tocar el motor. Sirve para generar ReplayGain propio.
 - `ch_waveform_peaks(path, buckets, out)` devuelve el máximo por tramo en [0..1]
   para dibujar la forma de onda en la UI.
+
+### Ancho, trim y sonoridad
+
+- `ch_engine_set_stereo_width` controla el ancho de la imagen estereofónica
+  mediante matriz mid/side: 0 = mono, 1 = normal, 2 = muy amplio.
+- `ch_engine_set_trim_silence(engine, enabled, threshold_db)` recorta el silencio
+  inicial (seek) y final (acorta el segmento) al abrir cada pista. El umbral se
+  satura a [-90, -20] dBFS; por defecto -60 dBFS.
+- `ch_engine_analyze_current` mide la sonoridad integrada (BS.1770-4) y el pico
+  de muestra de la pista actual.
+- `ch_engine_normalize_current(target_lufs)` mide y aplica una ganancia manual
+  (limitada a ±24 dB) para alcanzar el objetivo; devuelve la ganancia aplicada.
 
 ### Hojas CUE
 

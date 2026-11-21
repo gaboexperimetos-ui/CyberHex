@@ -48,6 +48,12 @@ int32_t ch_engine_set_gain_db(ch_engine* engine, float gain_db); /* -24 .. +24 *
 float   ch_engine_gain_db(ch_engine* engine);
 /* Guarda la caratula `index` de la pista audible en `path` (0 si ok). */
 int32_t ch_engine_save_cover(ch_engine* engine, int32_t index, const char* path);
+int32_t ch_engine_set_stereo_width(ch_engine* engine, float width); /* 0 .. 2 */
+float   ch_engine_stereo_width(ch_engine* engine);
+int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float threshold_db);
+int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
+int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
+int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
 
 /* Bucle A-B en segundos (a < b). */
