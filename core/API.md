@@ -9,10 +9,36 @@ carga la canción completa en RAM.
 ```bash
 cd core
 zig build                         # ReleaseFast por defecto -> zig-out/lib/libcyberhex_core.so
-zig build -Doptimize=ReleaseSafe  # misma build con comprobaciones de seguridad
+zig build -Ddecoder=miniaudio     # sin FFmpeg (WAV/FLAC/MP3/Vorbis), cero dependencias
+zig build -Ddecoder=ffmpeg        # exige FFmpeg; falla con un mensaje claro si falta
 zig build test                    # tests unitarios del núcleo
+zig build smoke                   # prueba de humo con audio real (ver más abajo)
 ./build_ffmpeg_android.sh         # FFmpeg estático para arm64-v8a (una vez)
 ./build_android.sh                # -> jniLibs/arm64-v8a/libcyberhex_core.so
+```
+
+### Un núcleo, dos plataformas
+
+`-Ddecoder` (por defecto `auto`) decide el decodificador en las dos:
+
+| Plataforma | `auto` hace |
+|---|---|
+| Escritorio (Linux/macOS) | FFmpeg del sistema si `pkg-config --exists libavcodec libavformat`; si no, miniaudio con un aviso |
+| Android | FFmpeg estático de `third_party/ffmpeg-android/<abi>` si está compilado; si no, miniaudio con un aviso |
+
+Así `zig build` funciona en un PC pelado (sin `libav*-dev`) y el APK se puede
+compilar sin haber generado el FFmpeg estático: solo se pierden los formatos que
+aporta FFmpeg (AAC, ALAC, WMA...). Con `-Ddecoder=ffmpeg` se obliga y un falta de
+dependencias se para el build en vez de degradar en silencio.
+
+`zig build smoke` compila y ejecuta `tests/smoke.c` contra el motor de verdad:
+sintetiza un WAV, lo reproduce y comprueba niveles RMS/pico, pausa sin deriva,
+loop A-B, eventos, preamp, ReplayGain por álbum, balance y modo de canales. El
+mismo binario corre en el teléfono:
+
+```bash
+adb push zig-out/bin/cyberhex_smoke /data/local/tmp/
+adb shell /data/local/tmp/cyberhex_smoke /data/local/tmp   # 0 = todo bien
 ```
 
 ### Objetivo: Redmi Note 13 (Snapdragon 685)
@@ -196,6 +222,16 @@ const char* ch_engine_genre(ch_engine* engine);
 const char* ch_engine_composer(ch_engine* engine);
 int32_t     ch_engine_track_number(ch_engine* engine);
 int32_t     ch_engine_disc_number(ch_engine* engine);
+
+/* Balance (-1 izq .. +1 der, acotado) y modo de canales (0 estereo, 1 mono,
+ * 2 cambiados). Se aplican tras el EQ y antes del limitador. */
+int32_t ch_engine_set_balance(ch_engine* engine, float balance);
+float   ch_engine_balance(ch_engine* engine);
+int32_t ch_engine_set_channel_mode(ch_engine* engine, int32_t mode);
+int32_t ch_engine_channel_mode(ch_engine* engine);
+
+/* Version del ABI (hoy 3). Sube ante cambios incompatibles. */
+int32_t ch_engine_abi_version(void);
 
 /* Limitador de picos (dBFS) y estadisticas de búfer. */
 int32_t  ch_engine_set_limiter(ch_engine* engine, int32_t enabled, float ceiling_db);

@@ -67,9 +67,22 @@ letras, espectro, vúmetro, loop A-B, ReplayGain por álbum).
 | `ch_engine_set_pause_fade` | fundido de pausa configurable (0 = corte seco); arregla B6 |
 | `ch_engine_set_loop` | loop A-B sobre el mismo camino que un seek (crossfade y estiramiento intactos) |
 | `ch_engine_skipped_tracks` | contador de pistas rotas saltadas por el avance automático |
+| `ch_engine_set_balance` | balance −1..+1 sin amplificar el canal favorecido |
+| `ch_engine_set_channel_mode` | estéreo / mono / canales intercambiados (auricular de un lado, cableado raro) |
+| `ch_engine_abi_version` | ABI 3: la app sabe qué núcleo tiene cargado antes de llamar lo nuevo |
 
 Todo viaja ya bindeado en `lib/core/native_player.dart` (con `providesSymbol`,
 así que una `.so` antigua sigue cargando).
+
+### Un núcleo, dos plataformas
+
+| Pieza | Antes | Ahora |
+|---|---|---|
+| `zig build` en PC sin FFmpeg | fallaba al enlazar | compila con miniaudio y avisa |
+| `zig build -Ddecoder=ffmpeg` | — | exige FFmpeg y para el build con mensaje claro |
+| Build de Android sin FFmpeg estático | error de enlazado confuso | avisa y compila con miniaudio |
+| `zig build test` sin FFmpeg | no compilaba | 13/13 |
+| Prueba del motor con audio real | scripts sueltos en `/tmp` | `zig build smoke` + `tests/smoke.c`, corre igual en el PC y en el teléfono |
 
 ---
 

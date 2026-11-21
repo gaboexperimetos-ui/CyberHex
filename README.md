@@ -44,7 +44,7 @@ La referencia completa de la API está en [`core/API.md`](core/API.md).
 
 ```bash
 # 1. Núcleo -> core/zig-out/lib/libcyberhex_core.so
-cd core && zig build && cd ..
+cd core && zig build && cd ..    # si no hay libav*-dev, compila con miniaudio (aviso)
 
 # 2. App
 flutter pub get
@@ -113,6 +113,7 @@ core/
 
 ```bash
 cd core && zig build test     # EQ, FFT y speed/pitch
+cd core && zig build smoke    # motor real: niveles, pausa, loop A-B, eventos
 flutter test                  # tema
 ```
 
