@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) void {
             mod.addIncludePath(b.path(b.pathJoin(&.{ "third_party", "ffmpeg-android", abi, "include" })));
             mod.addLibraryPath(b.path(b.pathJoin(&.{ "third_party", "ffmpeg-android", abi, "lib" })));
             mod.addCSourceFiles(.{
-                .files = &.{ "src/audio.c", "src/decode_ffmpeg.c", "src/playlist.c", "src/lyrics.c", "src/library.c" },
+                .files = &.{ "src/audio.c", "src/decode_ffmpeg.c", "src/playlist.c", "src/lyrics.c", "src/library.c", "src/markers.c" },
                 .flags = &.{ "-std=c23", "-O2" },
             });
             mod.linkSystemLibrary("avformat", .{});
@@ -43,14 +43,14 @@ pub fn build(b: *std.Build) void {
             mod.linkSystemLibrary("dl", .{});
         } else {
             mod.addCSourceFiles(.{
-                .files = &.{ "src/audio.c", "src/decode_miniaudio.c", "src/playlist.c", "src/lyrics.c", "src/library.c" },
+                .files = &.{ "src/audio.c", "src/decode_miniaudio.c", "src/playlist.c", "src/lyrics.c", "src/library.c", "src/markers.c" },
                 .flags = &.{ "-std=c23", "-O2" },
             });
         }
     } else {
         // Escritorio: FFmpeg cubre prácticamente todos los formatos de audio.
         mod.addCSourceFiles(.{
-            .files = &.{ "src/audio.c", "src/decode_ffmpeg.c", "src/playlist.c", "src/lyrics.c", "src/library.c" },
+            .files = &.{ "src/audio.c", "src/decode_ffmpeg.c", "src/playlist.c", "src/lyrics.c", "src/library.c", "src/markers.c" },
             .flags = &.{ "-std=c23", "-O2" },
         });
         mod.linkSystemLibrary("avformat", .{});

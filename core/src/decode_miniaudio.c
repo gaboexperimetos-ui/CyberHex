@@ -106,6 +106,20 @@ const uint8_t* ch_decode_cover(ch_decoder* d, uint64_t* size) {
     return NULL;
 }
 
+uint32_t ch_decode_cover_count(ch_decoder* d) {
+    (void)d;
+    return 0;
+}
+
+const uint8_t* ch_decode_cover_at(ch_decoder* d, uint32_t index, uint64_t* size) {
+    (void)d;
+    (void)index;
+    if (size != NULL) {
+        *size = 0;
+    }
+    return NULL;
+}
+
 void ch_decode_close(ch_decoder* d) {
     if (d == NULL) {
         return;

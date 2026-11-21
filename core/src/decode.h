@@ -39,6 +39,13 @@ const char* ch_decode_tag(ch_decoder* decoder, const char* key);
 /* Carátula embebida (JPEG/PNG); NULL si no hay. Válida hasta ch_decode_close. */
 const uint8_t* ch_decode_cover(ch_decoder* decoder, uint64_t* size);
 
+/* Número de carátulas embebidas (0 si no hay ninguna). */
+uint32_t ch_decode_cover_count(ch_decoder* decoder);
+
+/* Carátula `index` (0 = primera); NULL si el índice no existe. Válida hasta
+ * ch_decode_close. */
+const uint8_t* ch_decode_cover_at(ch_decoder* decoder, uint32_t index, uint64_t* size);
+
 void ch_decode_close(ch_decoder* decoder);
 
 /* Último error del backend. */

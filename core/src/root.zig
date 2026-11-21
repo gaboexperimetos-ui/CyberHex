@@ -37,6 +37,8 @@ extern fn ch_decode_artist(decoder: *ch_decoder) [*c]const u8;
 extern fn ch_decode_album(decoder: *ch_decoder) [*c]const u8;
 extern fn ch_decode_tag(decoder: *ch_decoder, key: [*c]const u8) [*c]const u8;
 extern fn ch_decode_cover(decoder: *ch_decoder, size: *u64) [*c]const u8;
+extern fn ch_decode_cover_count(decoder: *ch_decoder) u32;
+extern fn ch_decode_cover_at(decoder: *ch_decoder, index: u32, size: *u64) [*c]const u8;
 
 const ChPlaylist = extern struct { items: [*c][*c]u8, count: c_int };
 pub const ChEvent = extern struct { kind: c_int, a: c_int, b: c_int, value: f64 };
@@ -149,6 +151,8 @@ const SpinLock = struct {
     }
 };
 
+const MAX_COVERS: usize = 4;
+
 const Segment = struct {
     start: usize = 0,
     end: usize = 0,
@@ -159,7 +163,8 @@ const Segment = struct {
     rg_gain: f32 = 1,
     rg_gain_db: f32 = 0,
     rg_peak: f32 = 0,
-    cover: ?[]u8 = null,
+    covers: [MAX_COVERS]?[]u8 = @splat(null),
+    cover_count: u8 = 0,
     lyrics: ?*ch_lyrics = null,
     lyrics_offset: f64 = 0,
 };
@@ -351,10 +356,21 @@ pub const Engine = struct {
         return if (self.seg_count > 0) 0 else null;
     }
 
+    fn dropCovers(self: *Engine, s: *Segment) void {
+        var i: usize = 0;
+        while (i < MAX_COVERS) : (i += 1) {
+            if (s.covers[i]) |c| {
+                self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+                s.covers[i] = null;
+            }
+        }
+        s.cover_count = 0;
+    }
+
     fn trimAfter(self: *Engine, pos: usize) void {
         if (pos + 1 >= self.seg_count) return;
         for (self.segments[pos + 1 .. self.seg_count]) |*s| {
-            if (s.cover) |c| self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            self.dropCovers(s);
             if (s.lyrics) |ly| ch_lyrics_free(ly);
             s.* = .{};
         }
@@ -364,7 +380,7 @@ pub const Engine = struct {
     fn resetSegments(self: *Engine) void {
         self.seg_lock.lock();
         for (self.segments[0..self.seg_count]) |*s| {
-            if (s.cover) |c| self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            self.dropCovers(s);
             if (s.lyrics) |ly| ch_lyrics_free(ly);
             s.* = .{};
         }
@@ -392,10 +408,7 @@ pub const Engine = struct {
 
         var i: usize = 0;
         while (i < keep) : (i += 1) {
-            if (self.segments[i].cover) |c| {
-                self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
-            }
-            self.segments[i].cover = null;
+            self.dropCovers(&self.segments[i]);
             if (self.segments[i].lyrics) |ly| ch_lyrics_free(ly);
             self.segments[i].lyrics = null;
         }
@@ -454,12 +467,16 @@ pub const Engine = struct {
         seg.rg_gain = linear;
 
         var size: u64 = 0;
-        const ptr = ch_decode_cover(d, &size);
-        if (ptr != null and size > 0) {
+        const total = ch_decode_cover_count(d);
+        var ci: u32 = 0;
+        while (ci < total and ci < MAX_COVERS) : (ci += 1) {
+            const ptr = ch_decode_cover_at(d, ci, &size);
+            if (ptr == null or size == 0) continue;
             const n: usize = @intCast(size);
             if (self.allocator.alloc(u8, n)) |copy| {
                 @memcpy(copy, ptr[0..n]);
-                seg.cover = copy;
+                seg.covers[seg.cover_count] = copy;
+                seg.cover_count += 1;
             } else |_| {}
         }
 
@@ -1286,7 +1303,9 @@ fn destroyEngine(e: *Engine) void {
     if (e.audio) |audio| ch_audio_destroy(audio);
     if (e.decoder) |d| ch_decode_close(d);
     for (e.segments[0..e.seg_count]) |*s| {
-        if (s.cover) |c| e.allocator.free(c);
+        for (s.covers) |maybe| {
+            if (maybe) |c| e.allocator.free(c);
+        }
         if (s.lyrics) |ly| ch_lyrics_free(ly);
     }
     for (e.retired_covers.items) |c| e.allocator.free(c);
@@ -2139,17 +2158,38 @@ export fn ch_engine_lyric_line(self: ?*Engine, out: [*c]u8, out_size: u32) i32 {
 }
 
 export fn ch_engine_cover(self: ?*Engine, size: ?*u64) [*c]const u8 {
+    return ch_engine_cover_at(self, 0, size);
+}
+
+export fn ch_engine_cover_count(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    if (e.findSegment(p)) |pos| return @intCast(e.segments[pos].cover_count);
+    return 0;
+}
+
+export fn ch_engine_cover_at(self: ?*Engine, index: i32, size: ?*u64) [*c]const u8 {
     const e = self orelse {
         if (size) |s| s.* = 0;
         return null;
     };
+    if (index < 0) {
+        if (size) |s| s.* = 0;
+        return null;
+    }
     e.seg_lock.lock();
     defer e.seg_lock.unlock();
     const p = @atomicLoad(usize, &e.played, .acquire);
     if (e.findSegment(p)) |pos| {
-        if (e.segments[pos].cover) |cover| {
-            if (size) |s| s.* = @intCast(cover.len);
-            return @ptrCast(cover.ptr);
+        const seg = &e.segments[pos];
+        const i: usize = @intCast(index);
+        if (i < seg.cover_count) {
+            if (seg.covers[i]) |cover| {
+                if (size) |s| s.* = @intCast(cover.len);
+                return @ptrCast(cover.ptr);
+            }
         }
     }
     if (size) |s| s.* = 0;

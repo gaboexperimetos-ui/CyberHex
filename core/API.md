@@ -183,7 +183,43 @@ int32_t   ch_library_scan(void* lib, const char* root);
 int32_t   ch_library_count(const void* lib);
 const char* ch_library_path(const void* lib, int32_t index);
 int32_t   ch_library_removed(const void* lib);
+
+/* Caratulas multiples: una pista puede traer varias (p.ej. FLAC con varios
+ * bloques PICTURE). ch_engine_cover() sigue devolviendo la primera. */
+int32_t       ch_engine_cover_count(ch_engine* engine);
+const uint8_t* ch_engine_cover_at(ch_engine* engine, int32_t index, uint64_t* size);
+
+/* Marcadores por pista, persistentes en un archivo de texto plano. */
+typedef struct ch_markers ch_markers;
+ch_markers* ch_markers_create(void);
+void      ch_markers_destroy(ch_markers* markers);
+int32_t   ch_markers_load(ch_markers* markers, const char* path);
+int32_t   ch_markers_save(const ch_markers* markers, const char* path);
+int32_t   ch_markers_add(ch_markers* markers, const char* track, double position,
+                          const char* name);
+int32_t   ch_markers_count(const ch_markers* markers, const char* track);
+double    ch_markers_position(const ch_markers* markers, const char* track,
+                               int32_t index);
+const char* ch_markers_name(const ch_markers* markers, const char* track,
+                            int32_t index);
+int32_t   ch_markers_remove(ch_markers* markers, const char* track, int32_t index);
+int32_t   ch_markers_clear(ch_markers* markers, const char* track);
 ```
+
+### Carátulas múltiples
+
+`ch_engine_cover_count` devuelve cuántas carátulas trae la pista audible
+(hasta 4 se conservan en memoria); `ch_engine_cover_at(i, &size)` devuelve la
+i-ésima. `ch_engine_cover()` equivale a `ch_engine_cover_at(0)`.
+
+### Marcadores
+
+`ch_markers` es un almacén independiente del motor. Se asocia cada marca a la
+ruta del archivo y una posición en segundos; `ch_markers_save` escribe todo en
+un archivo de texto (una marca por línea, separada por tabuladores, con
+escapes), y `ch_markers_load` lo recupera. La escritura es atómica: se escribe
+un `.tmp` y se renombra encima. Para saltar a una marca basta con
+`ch_engine_seek(e, position)`.
 
 ### Eventos de reproducción
 
@@ -292,4 +328,5 @@ creación del motor, p. ej. sin dispositivo de audio).
 
 ## Aún no implementado
 
-Motor de conversión, descargador y funciones de IA.
+Motor de conversión, descargador y funciones de IA. Las carátulas múltiples se
+limitan a 4 por pista en memoria.

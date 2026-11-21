@@ -115,6 +115,10 @@ int32_t     ch_engine_track_number(ch_engine* engine);
 int32_t     ch_engine_disc_number(ch_engine* engine);
 /* Devuelve la carátula embebida (JPEG/PNG) o NULL; escribe el tamaño en bytes. */
 const uint8_t* ch_engine_cover(ch_engine* engine, uint64_t* size);
+/* Numero de caratulas embebidas en la pista audible. */
+int32_t ch_engine_cover_count(ch_engine* engine);
+/* Caratula `index` (0 = primera) de la pista audible; NULL si no existe. */
+const uint8_t* ch_engine_cover_at(ch_engine* engine, int32_t index, uint64_t* size);
 
 /* Letra sincronizada (LRC) buscada junto al audio (.lrc con el mismo nombre). */
 int32_t ch_engine_lyrics_count(ch_engine* engine);
@@ -169,6 +173,22 @@ int32_t   ch_library_scan(void* lib, const char* root);
 int32_t   ch_library_count(const void* lib);
 const char* ch_library_path(const void* lib, int32_t index);
 int32_t   ch_library_removed(const void* lib);
+
+/* Marcadores por pista (marcas de posicion persistentes). */
+typedef struct ch_markers ch_markers;
+ch_markers* ch_markers_create(void);
+void      ch_markers_destroy(ch_markers* markers);
+int32_t   ch_markers_load(ch_markers* markers, const char* path);
+int32_t   ch_markers_save(const ch_markers* markers, const char* path);
+int32_t   ch_markers_add(ch_markers* markers, const char* track, double position,
+                          const char* name);
+int32_t   ch_markers_count(const ch_markers* markers, const char* track);
+double    ch_markers_position(const ch_markers* markers, const char* track,
+                               int32_t index);
+const char* ch_markers_name(const ch_markers* markers, const char* track,
+                            int32_t index);
+int32_t   ch_markers_remove(ch_markers* markers, const char* track, int32_t index);
+int32_t   ch_markers_clear(ch_markers* markers, const char* track);
 
 #ifdef __cplusplus
 }

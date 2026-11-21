@@ -36,8 +36,9 @@ struct ch_decoder {
     char* title;
     char* artist;
     char* album;
-    uint8_t* cover;
-    size_t cover_size;
+    uint8_t** covers;
+    size_t* cover_sizes;
+    size_t cover_count;
 
     double duration;
 };
@@ -90,15 +91,23 @@ static void read_metadata(struct ch_decoder* d) {
 
     for (unsigned i = 0; i < d->fmt->nb_streams; i++) {
         AVStream* s = d->fmt->streams[i];
-        if ((s->disposition & AV_DISPOSITION_ATTACHED_PIC) != 0 &&
-            s->attached_pic.data != NULL && s->attached_pic.size > 0) {
-            d->cover = malloc((size_t)s->attached_pic.size);
-            if (d->cover != NULL) {
-                memcpy(d->cover, s->attached_pic.data, (size_t)s->attached_pic.size);
-                d->cover_size = (size_t)s->attached_pic.size;
-            }
-            break;
+        if ((s->disposition & AV_DISPOSITION_ATTACHED_PIC) == 0 ||
+            s->attached_pic.data == NULL || s->attached_pic.size <= 0) {
+            continue;
         }
+        const size_t n = d->cover_count + 1;
+        uint8_t** grown = realloc(d->covers, n * sizeof(uint8_t*));
+        if (grown == NULL) break;
+        d->covers = grown;
+        size_t* grown_sizes = realloc(d->cover_sizes, n * sizeof(size_t));
+        if (grown_sizes == NULL) break;
+        d->cover_sizes = grown_sizes;
+        uint8_t* copy = malloc((size_t)s->attached_pic.size);
+        if (copy == NULL) break;
+        memcpy(copy, s->attached_pic.data, (size_t)s->attached_pic.size);
+        d->covers[d->cover_count] = copy;
+        d->cover_sizes[d->cover_count] = (size_t)s->attached_pic.size;
+        d->cover_count = n;
     }
 }
 
@@ -413,10 +422,33 @@ const char* ch_decode_tag(ch_decoder* d, const char* key) {
 }
 
 const uint8_t* ch_decode_cover(ch_decoder* d, uint64_t* size) {
-    if (size != NULL) {
-        *size = (d == NULL) ? 0 : (uint64_t)d->cover_size;
+    if (d == NULL || d->cover_count == 0) {
+        if (size != NULL) {
+            *size = 0;
+        }
+        return NULL;
     }
-    return (d == NULL) ? NULL : d->cover;
+    if (size != NULL) {
+        *size = (uint64_t)d->cover_sizes[0];
+    }
+    return d->covers[0];
+}
+
+uint32_t ch_decode_cover_count(ch_decoder* d) {
+    return (d == NULL) ? 0 : (uint32_t)d->cover_count;
+}
+
+const uint8_t* ch_decode_cover_at(ch_decoder* d, uint32_t index, uint64_t* size) {
+    if (d == NULL || index >= d->cover_count) {
+        if (size != NULL) {
+            *size = 0;
+        }
+        return NULL;
+    }
+    if (size != NULL) {
+        *size = (uint64_t)d->cover_sizes[index];
+    }
+    return d->covers[index];
 }
 
 void ch_decode_close(ch_decoder* d) {
@@ -432,7 +464,11 @@ void ch_decode_close(ch_decoder* d) {
     free(d->title);
     free(d->artist);
     free(d->album);
-    free(d->cover);
+    for (size_t i = 0; i < d->cover_count; i++) {
+        free(d->covers[i]);
+    }
+    free(d->covers);
+    free(d->cover_sizes);
     free(d);
 }
 
