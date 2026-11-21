@@ -37,27 +37,51 @@ La referencia completa de la API está en [`core/API.md`](core/API.md).
 | Para… | Necesitas |
 |---|---|
 | La app | Flutter (stable) con Dart ≥ 3.14 |
-| El núcleo en Linux | Zig 0.17 + cabeceras de FFmpeg (`libavformat`, `libavcodec`, `libavutil`, `libswresample`) |
-| El núcleo en Android | Zig 0.17 + Android NDK (API 29) + FFmpeg estático compilado una vez |
+| El núcleo en Linux | Zig 0.17. FFmpeg (`ffmpeg`) **opcional**: sin él compila con miniaudio (WAV/FLAC/MP3/OGG) |
+| El núcleo en Android | Zig 0.17 + Android NDK (API 29). FFmpeg estático opcional (una vez) |
 
-## Compilar y ejecutar en Linux
+## Compilar y ejecutar en Linux (escritorio)
 
 ```bash
-# 1. Núcleo -> core/zig-out/lib/libcyberhex_core.so
-cd core && zig build && cd ..    # si no hay libav*-dev, compila con miniaudio (aviso)
-
-# 2. App
 flutter pub get
-flutter run -d linux
+flutter run -d linux        # el CMake compila el núcleo y lo empaqueta solo
 ```
 
-La app busca `libcyberhex_core.so` con `DynamicLibrary.open`, así que en
-desarrollo conviene dejarla en el `LD_LIBRARY_PATH` o copiarla junto al
-ejecutable:
+`linux/CMakeLists.txt` invoca `zig build -Drelease=true -Ddecoder=auto` y copia
+`libcyberhex_core.so` a `build/linux/x64/<modo>/bundle/lib/`, donde el runner lo
+encuentra por su `RPATH` (`$ORIGIN/lib`). No hace falta `LD_LIBRARY_PATH`.
+
+Para forzar el decodificador:
 
 ```bash
-export LD_LIBRARY_PATH="$PWD/core/zig-out/lib:$LD_LIBRARY_PATH"
-flutter run -d linux
+flutter build linux --release -d linux      # auto (FFmpeg si está)
+flutter build linux -DCYBERHEX_DECODER=miniaudio   # sin FFmpeg
+```
+
+### Instalar en Arch Linux
+
+Dependencias (repos oficiales + AUR para Flutter):
+
+```bash
+sudo pacman -S --needed base-devel flutter zig cmake ninja clang pkgconf \
+  gtk3 ffmpeg alsa-lib libpulse fontconfig libxkbcommon libglvnd
+```
+
+Paquete nativo con `.desktop` e icono incluidos:
+
+```bash
+cd packaging/linux
+makepkg -si
+cyberhex                  # o desde el menú de aplicaciones
+```
+
+El `PKGBUILD` instala la app en `/usr/lib/cyberhex/`, el lanzador en
+`/usr/share/applications/` y el icono en `hicolor/scalable/apps/`. Para probar
+sin instalar:
+
+```bash
+flutter build linux --release
+./build/linux/x64/release/bundle/cyberhex
 ```
 
 ## Compilar el APK
@@ -79,11 +103,23 @@ flutter build apk --release --android-project-arg=skipCoreBuild=true
 ```
 
 Sin FFmpeg estático se puede compilar el núcleo con el backend miniaudio
-(menos formatos: WAV, FLAC, MP3 y OGG/Vorbis):
+(menos formatos: WAV, FLAC, MP3 y OGG/Vorbis); `build.zig` lo detecta solo y
+avisa si falta el estático:
 
 ```bash
 cd core && zig build -Dandroid-ffmpeg=false
 ```
+
+### Qué incluye el APK
+
+- Motor nativo `arm64-v8a` (Zig + C23) generado por la tarea `buildCyberHexCore`.
+- Icono adaptativo propio (hexágono) para Android 8+.
+- Permisos de **biblioteca de audio** (`READ_MEDIA_AUDIO` en 13+,
+  `READ_EXTERNAL_STORAGE` hasta 12) y `WAKE_LOCK` para que no se corte con la
+  pantalla apagada.
+- Pendiente para que sea "de bolsillo" al 100 %: `MediaSession` + servicio en
+  primer plano (`mediaPlayback`) con controles en la notificación, y las
+  pantallas de biblioteca/cola.
 
 El APK empaqueta solo `arm64-v8a` (Redmi Note 13 / Snapdragon 685). Para otros
 ABI hay que pasar los argumentos a `build_android.sh` y ajustar `abiFilters`

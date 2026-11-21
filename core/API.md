@@ -9,6 +9,8 @@ carga la canción completa en RAM.
 ```bash
 cd core
 zig build                         # ReleaseFast por defecto -> zig-out/lib/libcyberhex_core.so
+zig build --release=safe          # misma build con comprobaciones de seguridad
+zig build -Drelease=false         # Debug, para depurar
 zig build -Ddecoder=miniaudio     # sin FFmpeg (WAV/FLAC/MP3/Vorbis), cero dependencias
 zig build -Ddecoder=ffmpeg        # exige FFmpeg; falla con un mensaje claro si falta
 zig build test                    # tests unitarios del núcleo
@@ -18,6 +20,10 @@ zig build smoke                   # prueba de humo con audio real (ver más abaj
 ```
 
 ### Un núcleo, dos plataformas
+
+Ojo con las banderas: en Zig 0.17 el modo de optimización se elige con
+`--release=fast|safe|small` o `-Drelease=true|false`. `-Doptimize=...` ya no
+existe. El `build.zig` fija `ReleaseFast` como modo preferido.
 
 `-Ddecoder` (por defecto `auto`) decide el decodificador en las dos:
 

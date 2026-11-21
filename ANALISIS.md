@@ -74,6 +74,16 @@ letras, espectro, vúmetro, loop A-B, ReplayGain por álbum).
 Todo viaja ya bindeado en `lib/core/native_player.dart` (con `providesSymbol`,
 así que una `.so` antigua sigue cargando).
 
+### Empaquetado: Arch (PC) y Android
+
+| Pieza | Antes | Ahora |
+|---|---|---|
+| Núcleo en el build de escritorio | `zig build -Drelease=true` sin vigilar `include/`: al cambiar una cabecera se reutilizaba un `.so` con el ABI viejo | vigila `include/`, `vendor/`, `build.zig.zon`; `-Ddecoder` configurable y `touch` para que el `--prefix` de Zig no dispare recompilaciones |
+| Instalación en Arch | solo `flutter run` | `packaging/linux/PKGBUILD` + `.desktop` + icono SVG → menú de aplicaciones |
+| Ventana | `cyberhex`, 1280×720 | `CyberHex`, 1000×780 |
+| Icono en Android | el de la plantilla de Flutter | hexágono adaptativo propio (Android 8+) |
+| Permisos en Android | ninguno | `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE` (≤12) y `WAKE_LOCK`; `FOREGROUND_SERVICE_MEDIA_PLAYBACK` documentado para el servicio pendiente |
+
 ### Un núcleo, dos plataformas
 
 | Pieza | Antes | Ahora |
