@@ -467,10 +467,62 @@ admite estado NULL.
 ### Hojas CUE
 
 `ch_cue_read` parsea un `.cue` (FILE/TRACK/TITLE/PERFORMER/INDEX 01) y resuelve
-el `FILE` relativo a la carpeta del `.cue`. `ch_cue_end` devuelve el inicio de
+el `FILE` relativo a la carpeta del `.cue`. `ch_cue_parse(const char* text)`
+hace lo mismo sobre el texto ya cargado (un `.cue` que llega de un zip, de la
+red o de una intención de compartir); ahí los `FILE` relativos se resuelven
+contra el directorio actual. Las dos variantes comparten el mismo parser en
+`src/cue.c`. `ch_cue_end` devuelve el inicio de
 la pista siguiente, o -1 en la última. Para reproducir una pista: cargar
 `ch_cue_file`, hacer `seek` a `ch_cue_start` y, si hay fin, detener o saltar en
 `ch_cue_end`.
+
+### Paisajes sonoros, BPM y exportador WAV (fase 3)
+
+```c
+/* Paisaje bajo la música: 0 off, 1 lluvia, 2 ruido marrón, 3 vinilo. */
+ch_engine_set_soundscape(engine, 1, 0.6f);   /* 1 si quedó encendido */
+float level;
+int preset = ch_engine_soundscape(engine, &level);   /* 1, y 0.6 en level */
+
+/* Pulso del archivo, sin tocar el motor ni el audio en curso. */
+double bpm = ch_engine_detect_bpm("/musica/tema.flac");  /* 0 si no hay pulso */
+
+/* Exportar a WAV 48 kHz estéreo S16 con dither TPDF. */
+ch_engine_render_wav("/musica/tema.flac", "/tmp/tema.wav", 0.0, 0.0);      /* todo */
+ch_engine_render_wav_ex(engine, "/musica/tema.flac", "/tmp/mio.wav", 10.0, 40.0);
+```
+
+* **Paisajes** (`src/dsp_ambient.zig`, `Soundscape`): lluvia, ruido marrón y
+  vinilo generados por un xorshift32 por canal, **sin reservar memoria** y sin
+  candados (preset y nivel son atómicos). Se suman a la mezcla **después** del
+  crossfeed/modo noche y **antes** del balance y del limitador, así que el
+  limitador también protege la suma. Con preset 0 o nivel 0 el coste es cero
+  (`isIdle` corta el camino). Nivel máximo interno 0.28 para que música + lluvia
+  no se coman el margen; a nivel 1 el RMS ronda 0.06 (-24 dBFS).
+* **BPM** (`src/bpm.zig`): envolvente de energía en tramas de 10 ms, flujo
+  (solo las subidas) suavizado, centrado y normalizado, autocorrelación en el
+  rango 60-200 BPM con prior logarítmico centrado en 120 y refinado parabólico.
+  Analiza como mucho 30 s (≈ 5.7 MB de mezcla mono) y devuelve 0 ante silencio,
+  ruido estacionario o señal demasiado corta; nunca un valor fuera de 60-200.
+  Un pulso a 164 BPM no se confunde con el compás de 82 porque, entre desfases
+  casi igual de buenos, gana el más corto.
+* **Exportador** (`ch_engine_render_wav[_ex]`): decodifica a 48 kHz estéreo (sin
+  remuestrear, contrato §8.2), aplica la ganancia `REPLAYGAIN_TRACK_GAIN` (o
+  `..._ALBUM_GAIN`) de las etiquetas, limita a **-1 dBFS** y escribe PCM S16 con
+  dither TPDF (un estado de PRNG por canal). La variante `_ex` mete además el
+  DSP que tenga puesto el motor: EQ de 36 bandas con su preamp, karaoke, 9D,
+  ancho/punch, crossfeed, modo noche, paisaje y balance, en el mismo orden que
+  `render()`. La cabecera se escribe primero calculando los frames desde la
+  duración del decodificador (si no la sabe, cuenta leyendo y vuelve a empezar),
+  así que no hace falta buscar en el fichero de salida.
+* **Persistencia**: el paisaje **no** se guarda en `ch_engine_save_state`; la
+  app lo conserva en su `SessionStore` (decisión del arquitecto, 2026-11-21).
+
+Tests: paisaje determinista y recortado, BPM con clicks sintéticos de 62 a 198
+BPM y con silencio/ruido, y exportador de extremo a extremo (cabecera RIFF,
+48 kHz, 16 bits, tamaños coherentes, recorte por rango, DSP distinto del plano y
+`-1`/`-2` con argumentos u orígenes inválidos). `zig build smoke` repite el
+camino por el ABI público con audio real.
 
 ### Eventos de reproducción
 

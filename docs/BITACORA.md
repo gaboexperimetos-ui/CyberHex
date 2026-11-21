@@ -18,6 +18,69 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 14 · FASE 3, pedido 1 de 10: paisajes, BPM y exportador WAV
+
+- **PEDIDO:** Fase 3 completa en diez pedidos atómicos y reversibles, en orden
+  estricto. Este turno abre el **pedido 1 (núcleo)**: `dsp_ambient.zig`,
+  `bpm.zig`, CUE en memoria, paisaje en la cadena del motor y exportador WAV.
+  PROHIBIDO tocar `lib/`, `android/`, `linux/`; no romper la ABI 3. RIESGO NO
+  ACEPTABLE (solo `core/`).
+- **HECHO:**
+  - `core/src/dsp_ambient.zig` (nuevo): `Soundscape` con lluvia (paso alto 400 Hz
+    + paso bajo 6 kHz con ráfagas), ruido marrón (integrador con fuga 0.012 ≈ 90 Hz
+    y compensación ×4.8) y vinilo (mezcla blanco/filtrado + chasquidos). Un
+    xorshift32 por canal, semilla fija, sin `malloc` ni candados; `set()`
+    normaliza presets desconocidos a OFF y recorta el nivel; `isIdle()` corta el
+    camino a coste cero. El marrón se recalibró en este turno: con la fuga
+    anterior (420 Hz) sonaba a 0.53 de RMS (recortaba) y su delta espectral se
+    parecía al de la lluvia; ahora 0.063 de RMS, pico 0.24 y delta 7.5× menor que
+    la lluvia.
+  - `core/src/bpm.zig` (nuevo): envolvente de energía en tramas de 10 ms, flujo
+    (solo subidas), suavizado [0.25 0.5 0.25], centrado/normalizado,
+    autocorrelación 60..200 BPM con prior logarítmico en 120, desempate por el
+    desfase más corto y refinado parabólico. 5 tests: 120 exacto, 90/150, sin
+    pulso → 0, barrido 62..198 (error ≤ 0.3 %), y entradas cortas o tasas raras.
+    El suavizado fue lo que arregló 164 BPM (se leía 82 por el compás).
+  - `core/src/cue.c`: el parser se parte en `parse_text()` (trabaja sobre un
+    buffer) + `ch_cue_read()` (lee el fichero y resuelve `FILE` contra su carpeta)
+    + **`ch_cue_parse(const char* text)`** (nuevo; `.cue` que llega de un zip, de
+    la red o de compartir). Probado aparte con `gcc -fsanitize=address,undefined`:
+    2 pistas, `INDEX 01 03:21:37` = 201.4933 s, `ch_cue_end` encadenado, fuera de
+    rango → -1/"" y textos vacíos o nulos seguros, sin fugas.
+  - `core/src/root.zig`: campo `soundscape` en `Engine` y mezcla **antes del
+    limitador**; `ch_engine_set_soundscape` / `ch_engine_soundscape`;
+    `ch_engine_detect_bpm(path)` (30 s, 5.7 MB, fuera del hilo de audio);
+    `ExportChain` (EQ de 36 bandas con preamp → DSP → paisaje → balance →
+    limitador) y `ch_engine_render_wav(src,dst,ini,fin)` +
+    `ch_engine_render_wav_ex(engine,...)`: 48 kHz estéreo S16, ReplayGain de las
+    etiquetas, techo −1 dBFS, dither TPDF por canal y cabecera RIFF escrita
+    primero (sin `fseek`; si el decodificador no sabe la duración, dos pasadas).
+  - `core/src/dsp_spatial.zig`: `Dsp.Settings` + `settings()`/`applySettings()` y
+    un test, para clonar la cadena en el exportador sin arrastrar estado.
+  - `core/include/cyberhex_core.h` y `core/API.md`: 6 símbolos documentados
+    (paisaje ×2, BPM, exportador ×2, `ch_cue_parse`); `tests/smoke.c` amplía la
+    prueba de humo con el camino completo por el ABI público.
+- **VERIFICADO:** `zig build test -Ddecoder=miniaudio` → **48/48** (31 previos + 5
+  de paisaje + 5 de BPM + 1 de `Dsp.Settings` + 6 nuevos de root, incluidos 4 de
+  extremo a extremo que no se saltan). `zig build smoke -Dsmoke-dir=/tmp` →
+  **0 fallos**, con `export: 576044 y 192044 bytes` (3 s y recorte de 1 s).
+  `nm -D` → **199** símbolos `ch_*` (antes 193; +6). `zig fmt --check` limpio en
+  lo tocado; `gcc -fsyntax-only -std=c2x -Wall -Wextra` limpio en `cue.c`,
+  `smoke.c` y la cabecera, y un `abicheck.c` con punteros a los 6 símbolos nuevos
+  compila. `zig build` instala el `.so` sin avisos.
+- **NO VERIFICABLE AQUÍ:** sin dispositivo de audio real ni Android (el smoke usa
+  el decodificador de miniaudio); nada de Dart en este pedido, así que tampoco
+  `flutter analyze`/`flutter test`.
+- **COMMITS:** este turno, un solo commit en `core/` + `docs/`.
+- **ABIERTO / RIESGOS:** **R18** el paisaje aún no tiene mando en la UI (llega en
+  el pedido 3); **R19** un tema de 5 min ocupa 57 MB como WAV S16 y tarda unos
+  segundos. La ABI sigue en 3: los 6 símbolos son adiciones y la app los bindea
+  con `providesSymbol` en el pedido 2. Nota de taller: el snapshot perdió los
+  commits de la fase 2 en el índice local (seguían en `origin`); se recuperó
+  `1d2344f` con `fetch` + `reset --hard` tras respaldar los ficheros en curso.
+
+---
+
 ## 2026-11-21 · turno 13 · FASE 2: núcleo DSP audiófilo, 9D espacial y R14
 
 - **PEDIDO:** Fase 2 en cuatro commits atómicos y reversibles: (1) fix R14

@@ -171,6 +171,49 @@ int main(int argc, char** argv) {
     ch_engine_set_channel_mode(e, 0);
     ch_engine_set_balance(e, 0.0f);
 
+    /* Fase 3: paisaje sonoro, exportador WAV y BPM, por el ABI publico. */
+    float sc_level = -1;
+    check(ch_engine_soundscape(e, &sc_level) == 0 && near(sc_level, 0.0, 1e-6),
+          "paisaje: apagado de fabrica");
+    check(ch_engine_set_soundscape(e, 1, 0.6f) == 1, "paisaje: lluvia encendida");
+    check(ch_engine_soundscape(e, &sc_level) == 1 && near(sc_level, 0.6, 1e-6),
+          "paisaje: preset y nivel");
+    ch_engine_play(e);
+    msleep(300);
+    ch_engine_levels(e, lv, 4);
+    check(lv[0] > 0.01f, "paisaje: se oye bajo la musica");
+    check(ch_engine_set_soundscape(e, 0, 0.0f) == 0, "paisaje: se apaga");
+    ch_engine_pause(e);
+
+    char exp1[1030], exp2[1030];
+    snprintf(exp1, sizeof(exp1), "%s/cyberhex_smoke_flat.wav", dir);
+    snprintf(exp2, sizeof(exp2), "%s/cyberhex_smoke_dsp.wav", dir);
+    check(ch_engine_render_wav(wav, exp1, 0.0, 0.0) == 0, "export: WAV completo");
+    ch_engine_set_9d(e, 1, 0.5f, 0.9f);
+    ch_engine_set_soundscape(e, 2, 0.8f);
+    check(ch_engine_render_wav_ex(e, wav, exp2, 0.0, 1.0) == 0, "export: con DSP y recorte");
+    ch_engine_set_9d(e, 0, 0.5f, 0.0f);
+    ch_engine_set_soundscape(e, 0, 0.0f);
+
+    FILE* fa = fopen(exp1, "rb");
+    FILE* fb = fopen(exp2, "rb");
+    long la = 0, lb = 0;
+    if (fa && fb) {
+        fseek(fa, 0, SEEK_END);
+        la = ftell(fa);
+        fseek(fb, 0, SEEK_END);
+        lb = ftell(fb);
+    }
+    if (fa) fclose(fa);
+    if (fb) fclose(fb);
+    printf("     export: %ld y %ld bytes\n", la, lb);
+    check(la > 44 + 48000 * 4, "export: 3 s de audio");
+    check(lb > 44 && lb < 44 + 48000 * 4 * 2, "export: recorte de 1 s");
+    check(ch_engine_detect_bpm(exp1) >= 0.0, "bpm: no revienta con un tono");
+    check(ch_engine_render_wav("/no/existe.wav", exp1, 0.0, 0.0) == -2, "export: origen invalido");
+    remove(exp1);
+    remove(exp2);
+
     ch_engine_pause(e);
     ch_engine_destroy(e);
     remove(wav);

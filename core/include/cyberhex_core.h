@@ -76,6 +76,11 @@ float   ch_engine_bass_punch(ch_engine* engine);
    subgraves. amount 0 (apagado) .. 1 (voz fuera). */
 int32_t ch_engine_set_vocal_cut(ch_engine* engine, float amount);
 float   ch_engine_vocal_cut(ch_engine* engine);
+/* Paisaje sonoro bajo la musica (se mezcla antes del limitador): 0 apagado,
+   1 lluvia, 2 ruido marron, 3 vinilo. level 0 .. 1. No reserva memoria en el
+   hilo de audio y el estado se guarda en la app (SessionStore), no en el motor. */
+int32_t ch_engine_set_soundscape(ch_engine* engine, int32_t preset, float level);
+int32_t ch_engine_soundscape(ch_engine* engine, float* level);
 int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float threshold_db);
 int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
@@ -282,6 +287,23 @@ uint64_t ch_engine_skipped_tracks(ch_engine* engine);
 /* Detecta silencio al principio/fin de un archivo (dBFS). lead/tail en segundos. */
 int32_t ch_engine_detect_silence(const char* utf8_path, float threshold_db, double* lead, double* tail);
 
+/* Pulso del archivo en BPM (60 .. 200). 0 si no hay pulso creible. Analiza
+   como mucho los primeros 30 s; no toca el motor ni el audio en curso. */
+double ch_engine_detect_bpm(const char* utf8_path);
+
+/*
+ * Exporta [start_sec, end_sec) a un WAV 48 kHz estereo S16 con dither TPDF.
+ * end_sec <= 0 = hasta el final. Aplica la ganancia ReplayGain de las etiquetas
+ * y limita a -1 dBFS. La version _ex usa el DSP del motor (EQ de 36 bandas, 9D,
+ * ancho/punch, crossfeed, modo noche, paisaje, balance) tal como esta puesto.
+ * Codigos: 0 bien, -1 argumentos, -2 origen, -3 destino, -4 escritura,
+ * -5 demasiado largo para WAV de 32 bits, -6 origen truncado.
+ */
+int32_t ch_engine_render_wav(const char* utf8_src, const char* utf8_dst,
+                             double start_sec, double end_sec);
+int32_t ch_engine_render_wav_ex(ch_engine* engine, const char* utf8_src, const char* utf8_dst,
+                                double start_sec, double end_sec);
+
 /* Biblioteca de audio: escaneo incremental de carpetas (handle opaco void*). */
 void*     ch_library_create(void);
 void      ch_library_destroy(void* lib);
@@ -322,6 +344,7 @@ int32_t ch_waveform_peaks(const char* utf8_path, uint32_t buckets, float* out_ma
 /* Hojas CUE: una imagen de audio dividida en pistas. */
 typedef struct ch_cue ch_cue;
 ch_cue*   ch_cue_read(const char* path);
+ch_cue*   ch_cue_parse(const char* text);
 void      ch_cue_free(ch_cue* cue);
 int32_t   ch_cue_count(const ch_cue* cue);
 const char* ch_cue_album(const ch_cue* cue);

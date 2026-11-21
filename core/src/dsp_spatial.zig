@@ -385,6 +385,45 @@ pub const Dsp = struct {
     crossfeed: Crossfeed = .{},
     night: NightMode = .{},
 
+    /// Ajustes de la cadena sin su estado (retardos, sombras, filtros). Sirve
+    /// para clonar la configuracion de un motor en otro sitio, por ejemplo el
+    /// exportador WAV, sin arrastrar el historial del hilo de audio.
+    pub const Settings = struct {
+        width: f32 = 1,
+        punch: f32 = 0,
+        vocal: f32 = 0,
+        spatial_on: bool = false,
+        spatial_speed: f32 = 0.15,
+        spatial_depth: f32 = 0.65,
+        crossfeed_on: bool = false,
+        crossfeed: f32 = 0,
+        night_on: bool = false,
+        night: f32 = 0,
+    };
+
+    pub fn settings(self: *const Dsp) Settings {
+        return .{
+            .width = self.enhancer.width(),
+            .punch = self.enhancer.punch(),
+            .vocal = self.vocal.amount(),
+            .spatial_on = self.spatial.isEnabled(),
+            .spatial_speed = self.spatial.speed(),
+            .spatial_depth = self.spatial.depth(),
+            .crossfeed_on = self.crossfeed.isEnabled(),
+            .crossfeed = self.crossfeed.level(),
+            .night_on = self.night.isEnabled(),
+            .night = self.night.amount(),
+        };
+    }
+
+    pub fn applySettings(self: *Dsp, s: Settings) void {
+        self.enhancer.set(s.width, s.punch);
+        self.vocal.set(s.vocal);
+        self.spatial.set(s.spatial_on, s.spatial_speed, s.spatial_depth);
+        self.crossfeed.set(s.crossfeed_on, s.crossfeed);
+        self.night.set(s.night_on, s.night);
+    }
+
     pub fn process(self: *Dsp, in_l: f32, in_r: f32) [2]f32 {
         const cut = self.vocal.process(in_l, in_r);
         const space = self.spatial.process(cut[0], cut[1]);
@@ -668,4 +707,29 @@ test "cadena: crossfeed y modo noche entran en el orden correcto" {
     try std.testing.expect(!dsp_chain.isIdle());
     dsp_chain.night.set(false, 0.5);
     try std.testing.expect(dsp_chain.isIdle());
+}
+
+test "dsp: los ajustes se pueden clonar sin estado" {
+    var a: Dsp = .{};
+    a.vocal.set(0.5);
+    a.spatial.set(true, 0.4, 0.7);
+    a.enhancer.set(1.4, 0.3);
+    a.crossfeed.set(true, 0.6);
+    a.night.set(true, 0.45);
+
+    var b: Dsp = .{};
+    b.applySettings(a.settings());
+    try std.testing.expectEqual(@as(f32, 0.5), b.vocal.amount());
+    try std.testing.expect(b.spatial.isEnabled());
+    try std.testing.expectApproxEqAbs(@as(f32, 0.4), b.spatial.speed(), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), b.spatial.depth(), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.4), b.enhancer.width(), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.3), b.enhancer.punch(), 1e-6);
+    try std.testing.expect(b.crossfeed.isEnabled());
+    try std.testing.expectApproxEqAbs(@as(f32, 0.6), b.crossfeed.level(), 1e-6);
+    try std.testing.expect(b.night.isEnabled());
+    try std.testing.expectApproxEqAbs(@as(f32, 0.45), b.night.amount(), 1e-6);
+    // El clon arranca limpio: sin historial, la primera muestra no es basura.
+    const out = b.process(0, 0);
+    try std.testing.expect(@abs(out[0]) < 1e-3 and @abs(out[1]) < 1e-3);
 }

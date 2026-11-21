@@ -82,35 +82,40 @@ static int32_t ensure_cap(ch_cue* c) {
     return 0;
 }
 
-ch_cue* ch_cue_read(const char* path) {
-    if (path == NULL) return NULL;
-    FILE* f = fopen(path, "r");
-    if (f == NULL) return NULL;
+/* Prueba de carga: descarta las pistas sin INDEX 01. */
+static void prune(ch_cue* c) {
+    int32_t w = 0;
+    for (int32_t i = 0; i < c->count; i++) {
+        if (c->tracks[i].start < 0.0) {
+            free(c->tracks[i].file);
+            free(c->tracks[i].title);
+            free(c->tracks[i].performer);
+            continue;
+        }
+        if (w != i) c->tracks[w] = c->tracks[i];
+        w++;
+    }
+    c->count = w;
+}
 
+/* Nucleo del parser: recorre el texto linea a linea. `dir` resuelve FILE. */
+static ch_cue* parse_text(const char* text, const char* dir) {
+    if (text == NULL) return NULL;
     ch_cue* c = calloc(1, sizeof(ch_cue));
-    if (c == NULL) {
-        fclose(f);
-        return NULL;
-    }
-
-    /* Carpeta del .cue para resolver FILE. */
-    char dir[4096];
-    const char* slash = strrchr(path, '/');
-    if (slash == NULL) {
-        snprintf(dir, sizeof dir, ".");
-    } else {
-        const size_t n0 = (size_t)(slash - path);
-        const size_t n = n0 >= sizeof dir ? sizeof dir - 1 : n0;
-        memcpy(dir, path, n);
-        dir[n] = '\0';
-        if (n == 0) snprintf(dir, sizeof dir, "/");
-    }
+    if (c == NULL) return NULL;
 
     char line[4096];
     int in_track = 0;
     cue_track* cur = NULL;
+    const char* p = text;
 
-    while (fgets(line, sizeof line, f) != NULL) {
+    while (*p != '\0') {
+        const char* eol = strchr(p, '\n');
+        size_t len = eol != NULL ? (size_t)(eol - p) : strlen(p);
+        if (len >= sizeof line) len = sizeof line - 1;
+        memcpy(line, p, len);
+        line[len] = '\0';
+        p = eol != NULL ? eol + 1 : p + len;
         trim(line);
         if (line[0] == '\0') continue;
 
@@ -164,29 +169,67 @@ ch_cue* ch_cue_read(const char* path) {
             }
         }
     }
-    fclose(f);
     free(c->current_file);
     c->current_file = NULL;
 
-    /* Descartar pistas sin INDEX 01. */
-    int32_t w = 0;
-    for (int32_t i = 0; i < c->count; i++) {
-        if (c->tracks[i].start < 0.0) {
-            free(c->tracks[i].file);
-            free(c->tracks[i].title);
-            free(c->tracks[i].performer);
-            continue;
-        }
-        if (w != i) c->tracks[w] = c->tracks[i];
-        w++;
-    }
-    c->count = w;
-
+    prune(c);
     if (c->count == 0) {
         ch_cue_free(c);
         return NULL;
     }
     return c;
+}
+
+/* Carpeta del fichero .cue: se queda con lo anterior a la ultima barra. */
+static void dir_of(const char* path, char* dir, size_t cap) {
+    const char* slash = strrchr(path, '/');
+    if (slash == NULL) {
+        snprintf(dir, cap, ".");
+        return;
+    }
+    const size_t n0 = (size_t)(slash - path);
+    const size_t n = n0 >= cap ? cap - 1 : n0;
+    memcpy(dir, path, n);
+    dir[n] = '\0';
+    if (n == 0 && cap > 1) snprintf(dir, cap, "/");
+}
+
+ch_cue* ch_cue_read(const char* path) {
+    if (path == NULL) return NULL;
+    FILE* f = fopen(path, "r");
+    if (f == NULL) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long size = ftell(f);
+    if (size < 0) {
+        fclose(f);
+        return NULL;
+    }
+    if (size > 4 * 1024 * 1024) size = 4 * 1024 * 1024; /* un .cue no llega a tanto */
+    rewind(f);
+    char* buf = malloc((size_t)size + 1);
+    if (buf == NULL) {
+        fclose(f);
+        return NULL;
+    }
+    const size_t got = fread(buf, 1, (size_t)size, f);
+    fclose(f);
+    buf[got] = '\0';
+
+    char dir[4096];
+    dir_of(path, dir, sizeof dir);
+    ch_cue* c = parse_text(buf, dir);
+    free(buf);
+    return c;
+}
+
+/* Igual que ch_cue_read pero sobre el texto ya cargado (Fase 3: el .cue puede
+   venir de un zip, de un servidor o de la intencion de compartir). Los FILE
+   relativos se resuelven contra el directorio actual. */
+ch_cue* ch_cue_parse(const char* text) {
+    return parse_text(text, ".");
 }
 
 void ch_cue_free(ch_cue* c) {

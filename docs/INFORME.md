@@ -136,6 +136,36 @@ Flutter UI (lib/)  ──PlayerController──  native_player.dart
 **Inmutable por diseño y no negociable sin pedido explícito:** 48 000 Hz fijos,
 `CHANNELS = 2`, salida f32, FFI en C plano (sin structs opacos versionados).
 
+### 4.1 Fase 3, pedido 1: paisajes, BPM, CUE en memoria y exportador WAV
+
+Lo nuevo del núcleo (símbolos **añadidos**, ninguno cambiado: la ABI sigue en 3 y
+`lib/`, `android/` y `linux/` no se tocaron):
+
+| Pieza | Símbolo(s) | Dónde |
+|---|---|---|
+| Paisaje sonoro (lluvia, ruido marrón, vinilo) | `ch_engine_set_soundscape`, `ch_engine_soundscape` | `src/dsp_ambient.zig` |
+| Pulso del archivo | `ch_engine_detect_bpm` | `src/bpm.zig` |
+| `.cue` desde texto | `ch_cue_parse` | `src/cue.c` |
+| Exportar a WAV | `ch_engine_render_wav`, `ch_engine_render_wav_ex` | `src/root.zig` |
+
+* **Paisajes**: generador determinista por semilla, un xorshift32 por canal, sin
+  `malloc` y sin candados; preset y nivel son atómicos. Entra en la mezcla
+  **antes del limitador** (contrato 20). A nivel 1 el RMS es ~0.06 y el pico
+  ~0.25, así que la música manda.
+* **BPM**: envolvente de energía (tramas de 10 ms) → flujo suavizado →
+  autocorrelación 60..200 con prior logarítmico en 120 → refinado parabólico.
+  Acierta 62..198 BPM con error ≤ 0.3 % en clicks sintéticos y devuelve 0 ante
+  silencio o ruido; nunca sale del rango.
+* **CUE**: el parser pasa a trabajar sobre un buffer (mismo código para fichero
+  y para texto) y `ch_cue_parse` abre la puerta a `.cue` que llegan de un zip,
+  de la red o de una intención de compartir. Probado con ASan/UBSan.
+* **Exportador**: decodifica a 48 kHz estéreo, aplica la ganancia ReplayGain de
+  las etiquetas, limita a −1 dBFS, cuantiza a S16 con dither TPDF (un PRNG por
+  canal) y escribe la cabecera RIFF primero (frames calculados desde la duración;
+  si falta, doble pasada), así que no necesita buscar en el fichero. La variante
+  `_ex` aplica el DSP del motor en el mismo orden que `render()`.
+  En el smoke: 3 s → 576 044 bytes (44 + 3·48 000·4) y un recorte de 1 s → 192 044.
+
 ---
 
 ## 5. Capa Dart
@@ -395,6 +425,18 @@ lleva su propio *action* y *requestCode* para no colisionar.
 19. La sesión es un JSON pequeño y prescindible: si falta, está vacío o está
     corrupto, la app arranca igual. Nunca se guarda una pista sin ruta y el
     índice se recoloca al filtrarlas.
+20. El **paisaje sonoro** se suma a la mezcla después de crossfeed/modo noche y
+    **antes del balance y del limitador**; con preset 0 o nivel 0 no cuesta nada
+    (`isIdle`). Es determinista por semilla y no reserva memoria en el callback.
+    Su estado **no** viaja en `ch_engine_save_state`: lo guarda la app en
+    `SessionStore`.
+21. El **exportador WAV** es siempre 48 kHz estéreo S16 con dither TPDF y
+    limitador de seguridad a −1 dBFS; nunca remuestrea (el decodificador ya
+    entrega 48 kHz) y devuelve códigos negativos documentados en vez de escribir
+    un fichero a medias.
+22. `ch_engine_detect_bpm` devuelve 0 (no un valor aproximado) cuando no hay
+    pulso, y en cualquier caso un número entre 60 y 200. No toca el motor ni el
+    audio en curso: decodifica aparte, como mucho 30 s.
 
 ---
 
@@ -408,7 +450,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R4 | Pausa cerca del fin de pista | el fundido puede avanzar `played` al segmento siguiente | `root.zig`, render |
 | R5 | A-B se cancela al cambiar de pista | la UI debe re-aplicar si quiere loops persistentes | `addSegment` |
 | R6 | Vúmetro post-limitador | muestra la señal ya limitada | `applyLevels` |
-| R7 | Sin dither a S16 | conversión final sin dithering (inaudible, pero es deuda) | `audio.c` |
+| R7 | ~~Sin dither a S16~~ | **resuelto** en la fase 2: TPDF ±1 LSB opt-in (`ch_engine_set_s16_output`) y también en el exportador WAV | `audio.c`, `root.zig` |
 | R8 | `ffmpeg.tar.xz` en git | ~decenas de MB; decisión de empaquetado pendiente (A4) | `core/third_party/` |
 | R9 | Sin CI | ninguna acción de GitHub valida nada | `.github/` (no existe) |
 | R10 | Android antes de P0.1 | ~~sin MediaSession ni servicio~~ **resuelto** en P0.1 (notificación, bloqueo, foco, auriculares) | `android/` |
@@ -417,6 +459,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R14 | ~~Sesión en Android~~ | **resuelto**: canal `cyberhex/storage` → `filesDir`; en Linux `$XDG_DATA_HOME/cyberhex` o `~/.local/share/cyberhex`; el temporal queda solo como último recurso | `CyberHexApplication.kt`, `session_store.dart` |
 | R16 | DSP sin interfaz todavía | los seis procesadores nuevos se manejan solo por API; la pantalla de ajustes audiófilos es la fase siguiente | `lib/ui/` |
 | R17 | Coste del DSP | la cadena entera (9D + ancho + punch + crossfeed + noche) son ~40 operaciones por muestra a 48 kHz; en el Redmi es despreciable y `isIdle()` la salta por completo cuando todo está apagado | `dsp_spatial.zig` |
+| R18 | Paisaje sin mando en la UI | el núcleo ya lo mezcla, pero hasta la fase 3 de UI no hay control; el nivel interno máximo (0.28) evita sustos | `dsp_ambient.zig` |
+| R19 | Coste del exportador | decodifica y procesa a velocidad de CPU; un tema de 5 min tarda unos segundos y ocupa 57 MB en disco. Si el decodificador no sabe la duración, hace dos pasadas | `root.zig` |
 | R15 | Duración en la biblioteca | el núcleo solo da rutas: no hay consulta de duración por ruta (`ch_loudness_scan` decodifica el archivo entero). La ordenación por duración y el filtro «< 30 s» solo ven las pistas ya reproducidas; el resto sale con «—» y nunca se oculta | `library_page.dart` |
 | R13 | FGS desde segundo plano | Android 12+ prohíbe arrancar un FGS en background salvo excepciones; aquí se arranca al pulsar play con la app delante | `MediaBridge.ensureServiceStarted` |
 
@@ -472,9 +516,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (36 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (37 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 3-1 → core: paisajes sonoros, detector de BPM y exportador WAV
 FASE 2-4 → app(core): bindings y estado Dart de todo el DSP
 FASE 2-3 → core(dsp): crossfeed Bauer, modo noche y dither TPDF en S16
 FASE 2-2 → core(dsp): motor 9D espacial, potenciador estéreo y modo karaoke
