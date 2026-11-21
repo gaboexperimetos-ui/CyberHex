@@ -59,6 +59,11 @@ int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);
 int32_t ch_engine_set_volume(ch_engine* engine, float volume); /* 0.0 .. 1.0 */
 
+/* Temporizador de apagado: pausa tras `seconds` con fundido de `fade_seconds`.
+ * seconds <= 0 lo desactiva. ch_engine_sleep_remaining: segundos restantes o -1. */
+int32_t ch_engine_set_sleep_timer(ch_engine* engine, double seconds, double fade_seconds);
+double  ch_engine_sleep_remaining(ch_engine* engine);
+
 /* ReplayGain (activado por defecto; sin tag el factor es 1.0). */
 int32_t ch_engine_set_replaygain(ch_engine* engine, int32_t enabled);
 float   ch_engine_replaygain_gain_db(ch_engine* engine);
@@ -75,6 +80,9 @@ int32_t ch_engine_queue_add(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_queue_count(ch_engine* engine);
 int32_t ch_engine_queue_index(ch_engine* engine);
 int32_t ch_engine_queue_clear(ch_engine* engine);
+int32_t ch_engine_queue_move(ch_engine* engine, int32_t from, int32_t to);
+int32_t ch_engine_queue_remove(ch_engine* engine, int32_t index);
+int32_t ch_engine_queue_insert(ch_engine* engine, int32_t index, const char* utf8_path);
 int32_t ch_engine_queue_import(ch_engine* engine, const char* list_path);
 int32_t ch_engine_queue_export(ch_engine* engine, const char* list_path);
 int32_t ch_engine_next(ch_engine* engine);

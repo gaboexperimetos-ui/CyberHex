@@ -44,6 +44,7 @@ pub const EV_STATE: c_int = 1;
 pub const EV_TRACK: c_int = 2;
 pub const EV_QUEUE: c_int = 3;
 pub const EV_END: c_int = 4;
+pub const EV_SLEEP: c_int = 5;
 extern fn ch_playlist_read(path: [*c]const u8) ChPlaylist;
 extern fn ch_playlist_free(playlist: *ChPlaylist) void;
 extern fn ch_playlist_write(path: [*c]const u8, items: [*c]const [*c]const u8, count: c_int) i32;
@@ -64,6 +65,13 @@ fn copyAudioError() void {
 
 fn sleepMs(ms: u32) void {
     _ = std.posix.poll(&.{}, @intCast(ms)) catch {};
+}
+
+fn monoMs() u64 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(.MONOTONIC, &ts) != 0) return 0;
+    return @as(u64, @intCast(@max(ts.sec, 0))) * 1000 +
+        @as(u64, @intCast(@divTrunc(@max(ts.nsec, 0), 1_000_000)));
 }
 
 fn parseLeadingFloat(text: []const u8) ?f32 {
@@ -130,6 +138,16 @@ threadlocal var tls_title: [256]u8 = undefined;
 threadlocal var tls_artist: [256]u8 = undefined;
 threadlocal var tls_album: [256]u8 = undefined;
 
+fn moveIndex(from: usize, to: usize, p: usize) usize {
+    if (p == from) return to;
+    if (from < to) {
+        if (p > from and p <= to) return p - 1;
+    } else {
+        if (p >= to and p < from) return p + 1;
+    }
+    return p;
+}
+
 pub const Engine = struct {
     allocator: Allocator,
     audio: ?*anyopaque = null,
@@ -181,6 +199,9 @@ pub const Engine = struct {
     order: std.ArrayListUnmanaged(usize) = .empty,
     order_pos: usize = 0,
     fade_gain: f32 = 0,
+    sleep_end_ms: u64 = 0,
+    sleep_fade_ms: u32 = 8000,
+    sleep_fired: bool = false,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     ev_lock: SpinLock = .{},
@@ -405,6 +426,20 @@ pub const Engine = struct {
         self.running_end = seg.end;
         self.seg_lock.unlock();
         return true;
+    }
+
+    fn remapSegments(self: *Engine, from: usize, to: usize, is_move: bool) void {
+        self.seg_lock.lock();
+        var k: usize = 0;
+        while (k < self.seg_count) : (k += 1) {
+            const idx = self.segments[k].index;
+            if (is_move) {
+                self.segments[k].index = moveIndex(from, to, idx);
+            } else if (idx >= from) {
+                self.segments[k].index = idx + 1;
+            }
+        }
+        self.seg_lock.unlock();
     }
 
     fn audibleIndex(self: *Engine) ?usize {
@@ -877,6 +912,33 @@ pub const Engine = struct {
         self.seg_lock.unlock();
     }
 
+    fn sleepRemainingMs(self: *Engine) i64 {
+        const end = @atomicLoad(u64, &self.sleep_end_ms, .acquire);
+        if (end == 0) return -1;
+        const now = monoMs();
+        if (now >= end) return 0;
+        return @intCast(end - now);
+    }
+
+    fn sleepGain(self: *Engine) ?f32 {
+        const remaining = self.sleepRemainingMs();
+        if (remaining < 0) return null;
+        const fade: i64 = @intCast(self.sleep_fade_ms);
+        if (remaining == 0) return 0;
+        if (remaining >= fade) return 1;
+        if (fade <= 0) return 1;
+        return @as(f32, @floatFromInt(remaining)) / @as(f32, @floatFromInt(fade));
+    }
+
+    fn fireSleep(self: *Engine) void {
+        if (self.sleep_fired) return;
+        self.sleep_fired = true;
+        @atomicStore(u64, &self.sleep_end_ms, 0, .release);
+        @atomicStore(bool, &self.playing, false, .release);
+        self.pushEvent(EV_SLEEP, 0, 0, 0);
+        self.pushEvent(EV_STATE, 0, 0, 0);
+    }
+
     fn render(self: *Engine, out: []f32) void {
         const frames_out = out.len / CHANNELS;
         @memset(out, 0);
@@ -893,6 +955,9 @@ pub const Engine = struct {
         }
 
         const playing = @atomicLoad(bool, &self.playing, .acquire);
+        if (self.sleepGain()) |sg| {
+            if (sg <= 0) self.fireSleep();
+        }
         if (!playing and self.fade_gain < 0.001) {
             self.fade_gain = 0;
             return;
@@ -924,6 +989,10 @@ pub const Engine = struct {
         if (playing) {
             target = self.volume();
             if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) target *= self.audibleGain();
+            if (self.sleepGain()) |sg| {
+                target *= sg;
+                if (sg <= 0) self.fireSleep();
+            }
         }
         if (take > 0) {
             var g = self.fade_gain;
@@ -949,7 +1018,7 @@ pub const Engine = struct {
         if (take == 0) {
             const seeking = @atomicLoad(usize, &self.seek_req, .acquire) != NO_SEEK;
             const skipping = @atomicLoad(usize, &self.skip_req, .acquire) != NO_SEEK;
-            if (!seeking and !skipping and @atomicLoad(bool, &self.eof, .acquire)) {
+            if (playing and !seeking and !skipping and @atomicLoad(bool, &self.eof, .acquire)) {
                 self.seg_lock.lock();
                 const last_end = if (self.seg_count > 0) self.segments[self.seg_count - 1].end else 0;
                 self.seg_lock.unlock();
@@ -1419,6 +1488,140 @@ export fn ch_engine_queue_clear(self: ?*Engine) i32 {
     return 0;
 }
 
+export fn ch_engine_queue_move(self: ?*Engine, from: i32, to: i32) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    if (from < 0 or to < 0 or from >= @as(i32, @intCast(n)) or to >= @as(i32, @intCast(n))) {
+        e.list_mutex.unlock();
+        return e.fail("indice de cola fuera de rango", -1);
+    }
+    if (from == to) {
+        e.list_mutex.unlock();
+        return 0;
+    }
+    const f: usize = @intCast(from);
+    const t: usize = @intCast(to);
+    const item = e.playlist.items[f];
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    if (f < t) {
+        var i = f;
+        while (i < t) : (i += 1) e.playlist.items[i] = e.playlist.items[i + 1];
+    } else {
+        var i = t;
+        while (i < f) : (i += 1) e.playlist.items[i + 1] = e.playlist.items[i];
+    }
+    e.playlist.items[t] = item;
+
+    e.remapSegments(f, t, true);
+    e.queue_index = moveIndex(f, t, e.queue_index);
+    const count: c_int = @intCast(n);
+    e.list_mutex.unlock();
+    e.pushEvent(EV_QUEUE, count, @intCast(e.queue_index), 0);
+    return 0;
+}
+
+export fn ch_engine_queue_remove(self: ?*Engine, index: i32) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    if (index < 0 or index >= @as(i32, @intCast(n))) {
+        e.list_mutex.unlock();
+        return e.fail("indice de cola fuera de rango", -1);
+    }
+    const i: usize = @intCast(index);
+    // La pista que suena puede ir por detras del decodificador (precarga
+    // gapless): lo que importa es el indice audible.
+    const active = e.audibleIndex() orelse e.queue_index;
+    const was_active = i == active;
+
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    e.allocator.free(e.playlist.items[i]);
+    _ = e.playlist.orderedRemove(i);
+    const remaining = e.playlist.items.len;
+
+    if (was_active) {
+        if (remaining == 0) {
+            e.list_mutex.unlock();
+            @atomicStore(bool, &e.playing, false, .release);
+            @atomicStore(usize, &e.seek_req, NO_SEEK, .release);
+            @atomicStore(usize, &e.skip_req, NO_SEEK, .release);
+            _ = e.waitIdle(2000);
+            e.flushRing();
+            e.list_mutex.lock();
+            if (e.decoder) |d| {
+                ch_decode_close(d);
+                e.decoder = null;
+            }
+            e.list_mutex.unlock();
+            e.resetSegments();
+            @atomicStore(usize, &e.played, 0, .release);
+            @atomicStore(bool, &e.eof, true, .release);
+            e.pushEvent(EV_QUEUE, 0, -1, 0);
+            e.pushEvent(EV_STATE, 0, 0, 0);
+            return 0;
+        }
+        const target = @min(i, remaining - 1);
+        const was_playing = @atomicLoad(bool, &e.playing, .acquire);
+        e.list_mutex.unlock();
+
+        // Cambio sincrono: la cola queda coherente al volver de la llamada.
+        @atomicStore(bool, &e.playing, false, .release);
+        @atomicStore(usize, &e.seek_req, NO_SEEK, .release);
+        _ = e.waitIdle(2000);
+        e.flushRing();
+        const ok = e.beginAt(target);
+        if (ok == 0 and was_playing) {
+            @atomicStore(bool, &e.playing, true, .release);
+            e.pushEvent(EV_STATE, 1, 0, 0);
+        }
+        e.pushEvent(EV_QUEUE, @intCast(remaining), @intCast(target), 0);
+        return 0;
+    }
+
+    if (i < e.queue_index) e.queue_index -= 1;
+
+    // Los segmentos guardan el indice de lista: los posteriores bajan uno.
+    e.seg_lock.lock();
+    var k: usize = 0;
+    while (k < e.seg_count) : (k += 1) {
+        if (e.segments[k].index > i) e.segments[k].index -= 1;
+    }
+    e.seg_lock.unlock();
+
+    const count: c_int = @intCast(remaining);
+    const cur: c_int = @intCast(e.queue_index);
+    e.list_mutex.unlock();
+    e.pushEvent(EV_QUEUE, count, cur, 0);
+    return 0;
+}
+
+export fn ch_engine_queue_insert(self: ?*Engine, index: i32, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    const p = path orelse return e.fail("ruta nula", -1);
+    const copy = e.allocator.dupeSentinel(u8, std.mem.span(p), 0) catch
+        return e.fail("sin memoria para la lista", -2);
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    var at: usize = if (index < 0) n else @intCast(@min(index, @as(i32, @intCast(n))));
+    if (at > n) at = n;
+    e.playlist.insert(e.allocator, at, copy) catch {
+        e.allocator.free(copy);
+        e.list_mutex.unlock();
+        return e.fail("sin memoria para la lista", -2);
+    };
+    e.remapSegments(at, 0, false);
+    if (at <= e.queue_index) e.queue_index += 1;
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    const count: c_int = @intCast(e.playlist.items.len);
+    e.list_mutex.unlock();
+    e.pushEvent(EV_QUEUE, count, @intCast(e.queue_index), 0);
+    return @intCast(at);
+}
+
 export fn ch_engine_next(self: ?*Engine) i32 {
     const e = self orelse return -1;
     const audible = e.audibleIndex();
@@ -1563,6 +1766,28 @@ export fn ch_engine_set_volume(self: ?*Engine, volume: f32) i32 {
     const clamped = std.math.clamp(volume, 0, 1);
     @atomicStore(u32, &e.volume_bits, @bitCast(clamped), .monotonic);
     return 0;
+}
+
+export fn ch_engine_set_sleep_timer(self: ?*Engine, seconds: f64, fade_seconds: f64) i32 {
+    const e = self orelse return -1;
+    if (!(seconds > 0)) {
+        @atomicStore(u64, &e.sleep_end_ms, 0, .release);
+        e.sleep_fired = false;
+        return 0;
+    }
+    const now = monoMs();
+    const ms: u64 = @intFromFloat(@min(seconds * 1000.0, 604800000.0));
+    @atomicStore(u64, &e.sleep_end_ms, now + ms, .release);
+    e.sleep_fade_ms = @intFromFloat(std.math.clamp(fade_seconds * 1000.0, 0.0, 60000.0));
+    e.sleep_fired = false;
+    return 0;
+}
+
+export fn ch_engine_sleep_remaining(self: ?*Engine) f64 {
+    const e = self orelse return -1;
+    const remaining = e.sleepRemainingMs();
+    if (remaining < 0) return -1;
+    return @as(f64, @floatFromInt(remaining)) / 1000.0;
 }
 
 export fn ch_engine_set_replaygain(self: ?*Engine, enabled: i32) i32 {

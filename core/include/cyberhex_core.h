@@ -18,7 +18,22 @@ int32_t ch_engine_load(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_play(ch_engine* engine);
 int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);
+
+/* Cola editable: mover, quitar e insertar pistas sin cortar el audio. */
+int32_t ch_engine_queue_move(ch_engine* engine, int32_t from, int32_t to);
+int32_t ch_engine_queue_remove(ch_engine* engine, int32_t index);
+int32_t ch_engine_queue_insert(ch_engine* engine, int32_t index, const char* utf8_path);
+
 int32_t ch_engine_set_volume(ch_engine* engine, float volume);
+
+/*
+ * Temporizador de apagado: pausa (o termina) tras `seconds`, con fundido
+ * final de `fade_seconds`. `seconds <= 0` lo desactiva. `ch_engine_sleep_remaining`
+ * devuelve los segundos que faltan o -1 si no hay temporizador activo.
+ * Al agotarse se emite CH_EVENT_SLEEP y CH_EVENT_STATE(0).
+ */
+int32_t ch_engine_set_sleep_timer(ch_engine* engine, double seconds, double fade_seconds);
+double  ch_engine_sleep_remaining(ch_engine* engine);
 
 /* ReplayGain: aplica la ganancia de pista si el archivo trae la etiqueta. */
 int32_t ch_engine_set_replaygain(ch_engine* engine, int32_t enabled);
@@ -36,6 +51,12 @@ int32_t ch_engine_queue_add(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_queue_count(ch_engine* engine);
 int32_t ch_engine_queue_index(ch_engine* engine);
 int32_t ch_engine_queue_clear(ch_engine* engine);
+/* Mueve la pista `from` a la posición `to` (reordena sin cortar el audio). */
+int32_t ch_engine_queue_move(ch_engine* engine, int32_t from, int32_t to);
+/* Quita la pista `index`. Si es la que suena, continúa con la siguiente. */
+int32_t ch_engine_queue_remove(ch_engine* engine, int32_t index);
+/* Inserta `utf8_path` en la posición `index` (<=0 = principio, negativo = final). */
+int32_t ch_engine_queue_insert(ch_engine* engine, int32_t index, const char* utf8_path);
 /* Importa M3U/M3U8/PLS y añade sus pistas al final; devuelve cuántas añadió. */
 int32_t ch_engine_queue_import(ch_engine* engine, const char* list_path);
 /* Exporta la cola actual como M3U8. */
@@ -111,6 +132,7 @@ typedef struct ch_event {
 #define CH_EVENT_TRACK 2
 #define CH_EVENT_QUEUE 3
 #define CH_EVENT_END   4
+#define CH_EVENT_SLEEP 5
 
 int32_t ch_engine_poll_event(ch_engine* engine, ch_event* out);
 
