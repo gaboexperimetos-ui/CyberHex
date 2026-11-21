@@ -289,6 +289,20 @@ class NativePlayer implements PlayerApi {
   }
 
   @override
+  void next() {
+    if (_disposed) return;
+    // El motor avisa del cambio de pista con CH_EVENT_TRACK; el controlador
+    // relee etiquetas entonces. Aquí no se toca el estado.
+    _bindings.next?.call(_engine);
+  }
+
+  @override
+  void previous() {
+    if (_disposed) return;
+    _bindings.previous?.call(_engine);
+  }
+
+  @override
   void seek(double seconds) => _bindings.seek(_engine, seconds);
 
   @override
@@ -428,6 +442,12 @@ class _Bindings {
         play = lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_play'),
         pause = lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_pause'),
         seek = lib.lookupFunction<_SeekNative, _SeekDart>('ch_engine_seek'),
+        next = lib.providesSymbol('ch_engine_next')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_next')
+            : null,
+        previous = lib.providesSymbol('ch_engine_previous')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_previous')
+            : null,
         setVolume = lib.lookupFunction<_VolumeNative, _VolumeDart>('ch_engine_set_volume'),
         eqBandCount = lib.lookupFunction<_EqCountNative, _EqCountDart>('ch_engine_eq_band_count'),
         eqBandFreq = lib.providesSymbol('ch_engine_eq_band_freq')
@@ -503,6 +523,10 @@ class _Bindings {
   final _LoadDart load;
   final _ControlDart play;
   final _ControlDart pause;
+
+  /// `null` si la librería cargada es anterior a la ABI 2 (sin next/previous).
+  final _ControlDart? next;
+  final _ControlDart? previous;
   final _SeekDart seek;
   final _VolumeDart setVolume;
   final _EqCountDart eqBandCount;

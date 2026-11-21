@@ -129,6 +129,13 @@ abstract class PlayerApi {
   void play();
   void pause();
   void toggle();
+
+  /// Salta a la pista siguiente de la cola (si la hay).
+  void next();
+
+  /// Vuelve a la pista anterior de la cola (si la hay).
+  void previous();
+
   void seek(double seconds);
   void setVolume(double value);
 

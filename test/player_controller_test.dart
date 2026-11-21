@@ -94,6 +94,30 @@ void main() {
     expect(fake.pauseCalls, 1);
   });
 
+  test('next y previous llegan al motor y refrescan', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.next();
+    controller.previous();
+
+    expect(fake.nextCalls, 1);
+    expect(fake.previousCalls, 1);
+  });
+
+  test('next se ignora tras dispose', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    controller.dispose();
+
+    controller.next();
+    controller.previous();
+
+    expect(fake.nextCalls, 0);
+    expect(fake.previousCalls, 0);
+  });
+
   test('dispose libera el motor', () {
     final fake = FakePlayer();
     final controller = PlayerController(fake);

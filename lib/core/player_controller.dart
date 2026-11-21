@@ -131,6 +131,23 @@ class PlayerController extends ChangeNotifier {
     _refresh();
   }
 
+  /// Siguiente pista de la cola.
+  ///
+  /// El motor puede tardar en abrirla (decodificador aparte): el título nuevo
+  /// llega por `CH_EVENT_TRACK`, no aquí.
+  void next() {
+    if (_disposed) return;
+    _player.next();
+    _refresh();
+  }
+
+  /// Pista anterior de la cola.
+  void previous() {
+    if (_disposed) return;
+    _player.previous();
+    _refresh();
+  }
+
   void seek(double seconds) {
     if (_disposed) return;
     _player.seek(seconds);

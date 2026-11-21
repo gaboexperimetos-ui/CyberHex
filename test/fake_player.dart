@@ -59,6 +59,8 @@ class FakePlayer implements PlayerApi {
 
   int playCalls = 0;
   int pauseCalls = 0;
+  int nextCalls = 0;
+  int previousCalls = 0;
   bool disposed = false;
 
   final List<PlayerEvent> _events = [];
@@ -107,6 +109,18 @@ class FakePlayer implements PlayerApi {
     } else {
       play();
     }
+  }
+
+  @override
+  void next() {
+    nextCalls++;
+    position = 0;
+  }
+
+  @override
+  void previous() {
+    previousCalls++;
+    position = 0;
   }
 
   @override
