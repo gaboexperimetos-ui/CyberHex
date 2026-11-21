@@ -34,6 +34,11 @@ extern fn ch_decode_artist(decoder: *ch_decoder) [*c]const u8;
 extern fn ch_decode_album(decoder: *ch_decoder) [*c]const u8;
 extern fn ch_decode_tag(decoder: *ch_decoder, key: [*c]const u8) [*c]const u8;
 extern fn ch_decode_cover(decoder: *ch_decoder, size: *u64) [*c]const u8;
+
+const ChPlaylist = extern struct { items: [*c][*c]u8, count: c_int };
+extern fn ch_playlist_read(path: [*c]const u8) ChPlaylist;
+extern fn ch_playlist_free(playlist: *ChPlaylist) void;
+extern fn ch_playlist_write(path: [*c]const u8, items: [*c]const [*c]const u8, count: c_int) i32;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -975,6 +980,47 @@ export fn ch_engine_queue_count(self: ?*Engine) i32 {
     e.list_mutex.lock();
     defer e.list_mutex.unlock();
     return @intCast(e.playlist.items.len);
+}
+
+export fn ch_engine_queue_import(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    const p = path orelse return e.fail("ruta nula", -1);
+    var pl = ch_playlist_read(p);
+    if (pl.count < 0) return e.fail("no se pudo leer la lista", -2);
+    defer ch_playlist_free(&pl);
+
+    var added: i32 = 0;
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    var i: usize = 0;
+    const n: usize = @intCast(pl.count);
+    while (i < n) : (i += 1) {
+        const item = pl.items[i];
+        if (item == null) continue;
+        if (addPath(e, std.mem.span(item)) != null) added += 1;
+    }
+    return added;
+}
+
+export fn ch_engine_queue_export(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    const p = path orelse return e.fail("ruta nula", -1);
+
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const arr = e.allocator.alloc([*c]const u8, n) catch {
+        e.list_mutex.unlock();
+        return e.fail("sin memoria para exportar la lista", -2);
+    };
+    var i: usize = 0;
+    while (i < n) : (i += 1) arr[i] = e.playlist.items[i].ptr;
+    e.list_mutex.unlock();
+    defer e.allocator.free(arr);
+
+    if (ch_playlist_write(p, arr.ptr, @intCast(n)) != 0) {
+        return e.fail("no se pudo escribir la lista", -2);
+    }
+    return 0;
 }
 
 export fn ch_engine_queue_index(self: ?*Engine) i32 {

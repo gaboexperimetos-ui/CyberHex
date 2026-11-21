@@ -75,6 +75,8 @@ int32_t ch_engine_queue_add(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_queue_count(ch_engine* engine);
 int32_t ch_engine_queue_index(ch_engine* engine);
 int32_t ch_engine_queue_clear(ch_engine* engine);
+int32_t ch_engine_queue_import(ch_engine* engine, const char* list_path);
+int32_t ch_engine_queue_export(ch_engine* engine, const char* list_path);
 int32_t ch_engine_next(ch_engine* engine);
 int32_t ch_engine_previous(ch_engine* engine);
 int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);
@@ -132,6 +134,9 @@ ch_engine_destroy(e);
 - **Carga**: `ch_engine_load` reemplaza la cola por el archivo indicado y lo
   deja listo para reproducir. `ch_engine_queue_add` añade al final y devuelve
   el índice; `queue_clear` vacía la cola.
+- **Listas**: `queue_import` añade las pistas de un M3U/M3U8 o PLS (rutas
+  relativas resueltas contra el directorio del archivo) y devuelve cuántas
+  añadió. `queue_export` escribe la cola actual como M3U8 con rutas absolutas.
 - **Gapless** (activado por defecto): al terminar una pista el decodificador
   abre la siguiente sin silencio. `ch_engine_next/previous` saltan de pista;
   `queue_index` refleja la pista que **suena**, no la que se está precargando.

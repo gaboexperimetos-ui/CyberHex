@@ -36,6 +36,10 @@ int32_t ch_engine_queue_add(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_queue_count(ch_engine* engine);
 int32_t ch_engine_queue_index(ch_engine* engine);
 int32_t ch_engine_queue_clear(ch_engine* engine);
+/* Importa M3U/M3U8/PLS y añade sus pistas al final; devuelve cuántas añadió. */
+int32_t ch_engine_queue_import(ch_engine* engine, const char* list_path);
+/* Exporta la cola actual como M3U8. */
+int32_t ch_engine_queue_export(ch_engine* engine, const char* list_path);
 int32_t ch_engine_next(ch_engine* engine);
 int32_t ch_engine_previous(ch_engine* engine);
 int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);

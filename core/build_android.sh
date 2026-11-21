@@ -76,7 +76,7 @@ EOF
   (
     cd "$CORE_DIR"
     "$ZIG" build-lib \
-      -cflags -std=c23 -O2 -- ./src/audio.c ./src/decode_ffmpeg.c \
+      -cflags -std=c23 -O2 -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c \
       -Ofast -target "$ZT" --libc "$LIBC" -mcpu baseline \
       -L "$LIBDIR" -L "$FFDIR/lib" -I vendor -I src -I "$FFDIR/include" \
       -lavformat -lavcodec -lavutil -lswresample -lm -ldl \
