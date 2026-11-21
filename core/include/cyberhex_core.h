@@ -45,6 +45,14 @@ int32_t ch_engine_gapless(ch_engine* engine);
 int32_t ch_engine_set_crossfade(ch_engine* engine, float seconds);
 float   ch_engine_crossfade(ch_engine* engine);
 
+/* Velocidad de reproduccion sin cambiar el tono (0.25 - 4.0, 1 = normal). */
+int32_t ch_engine_set_speed(ch_engine* engine, float speed);
+float   ch_engine_speed(ch_engine* engine);
+
+/* Tono en semitonos sin cambiar la duracion (-12 a +12, 0 = normal). */
+int32_t ch_engine_set_pitch(ch_engine* engine, float semitones);
+float   ch_engine_pitch(ch_engine* engine);
+
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);

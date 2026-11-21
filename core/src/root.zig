@@ -1,5 +1,6 @@
 const std = @import("std");
 const eq = @import("eq.zig");
+const Stretch = @import("stretch.zig").Stretch;
 
 pub const SAMPLE_RATE: u32 = 48000;
 pub const CHANNELS: u32 = 2;
@@ -125,6 +126,11 @@ pub const Engine = struct {
     ring: Ring = .{},
     scratch: []f32 = undefined,
     scratch_frames: usize = 0,
+    stretch: ?Stretch = null,
+    stretch_buf: []f32 = &.{},
+    stretch_buf_frames: usize = 0,
+    speed_bits: u32 = @bitCast(@as(f32, 1)),
+    pitch_bits: u32 = @bitCast(@as(f32, 0)),
 
     thread: ?std.Thread = null,
     stop: bool = false,
@@ -171,6 +177,43 @@ pub const Engine = struct {
 
     fn volume(self: *const Engine) f32 {
         return @bitCast(@atomicLoad(u32, &self.volume_bits, .monotonic));
+    }
+
+    fn speedValue(self: *const Engine) f32 {
+        return @bitCast(@atomicLoad(u32, &self.speed_bits, .monotonic));
+    }
+
+    fn pitchValue(self: *const Engine) f32 {
+        return @bitCast(@atomicLoad(u32, &self.pitch_bits, .monotonic));
+    }
+
+    fn stretchActive(self: *const Engine) bool {
+        return self.speedValue() != 1 or self.pitchValue() != 0;
+    }
+
+    fn resetStretch(self: *Engine) void {
+        if (self.stretch) |*st| st.reset();
+    }
+
+    fn ringFree(self: *Engine) usize {
+        const w = @atomicLoad(usize, &self.ring.write, .acquire);
+        const r = @atomicLoad(usize, &self.ring.read, .acquire);
+        var used = w -% r;
+        if (used > self.ring.cap) used = 0;
+        return self.ring.cap - used;
+    }
+
+    fn drainStretch(self: *Engine, st: *Stretch) bool {
+        while (st.available() > 0) {
+            const free = self.ringFree();
+            if (free == 0) return false;
+            const chunk = @min(@min(free, st.available()), self.stretch_buf_frames);
+            if (chunk == 0) return false;
+            const n = st.drain(self.stretch_buf[0 .. chunk * CHANNELS]);
+            if (n == 0) break;
+            _ = self.writeRing(self.stretch_buf[0 .. n * CHANNELS]);
+        }
+        return st.available() == 0;
     }
 
     fn findSegment(self: *Engine, frame: usize) ?usize {
@@ -397,6 +440,7 @@ pub const Engine = struct {
 
     fn beginAt(self: *Engine, index: usize) i32 {
         self.resetSegments();
+        self.resetStretch();
         if (!self.openDecoderOnly(index)) {
             const msg = std.mem.span(ch_decode_last_error());
             return self.fail(if (msg.len == 0) "no se pudo decodificar el archivo" else msg, -2);
@@ -426,6 +470,7 @@ pub const Engine = struct {
         self.list_mutex.unlock();
 
         if (old) |o| ch_decode_close(o);
+        self.resetStretch();
         _ = self.addSegment(next, d, 0);
         @atomicStore(bool, &self.eof, false, .release);
         @atomicStore(bool, &self.playing, true, .release);
@@ -458,6 +503,7 @@ pub const Engine = struct {
     fn crossfadeIntoNext(self: *Engine) bool {
         const want = self.crossfadeFrames();
         if (want == 0) return false;
+        if (self.stretchActive()) return false;
 
         var prev_end: usize = 0;
         var a_frames: usize = 0;
@@ -560,6 +606,7 @@ pub const Engine = struct {
 
         if (!found) {
             self.flushRing();
+            self.resetStretch();
             _ = ch_decode_seek_frame(d, target);
             @atomicStore(bool, &self.eof, false, .release);
             @atomicStore(usize, &self.played, @intCast(target), .release);
@@ -571,6 +618,7 @@ pub const Engine = struct {
         }
         const dd = self.decoder orelse return;
         self.flushRing();
+        self.resetStretch();
         _ = ch_decode_seek_frame(dd, target);
 
         const span = seg_end - seg_start;
@@ -608,7 +656,13 @@ pub const Engine = struct {
         if (take > 0) {
             self.readRingAt(r, out[0 .. take * CHANNELS]);
             @atomicStore(usize, &self.ring.read, r +% take, .release);
-            _ = @atomicRmw(usize, &self.played, .Add, take, .monotonic);
+            const sp = self.speedValue();
+            var adv: usize = take;
+            if (sp != 1) {
+                const f = @as(f64, @floatFromInt(take)) * @as(f64, sp);
+                adv = @intFromFloat(@round(f));
+            }
+            _ = @atomicRmw(usize, &self.played, .Add, adv, .monotonic);
         }
 
         const produced = take * CHANNELS;
@@ -622,11 +676,14 @@ pub const Engine = struct {
 
         if (take == 0) {
             const seeking = @atomicLoad(usize, &self.seek_req, .acquire) != NO_SEEK;
-            if (!seeking and @atomicLoad(bool, &self.eof, .acquire)) {
+            const skipping = @atomicLoad(usize, &self.skip_req, .acquire) != NO_SEEK;
+            if (!seeking and !skipping and @atomicLoad(bool, &self.eof, .acquire)) {
                 self.seg_lock.lock();
                 const last_end = if (self.seg_count > 0) self.segments[self.seg_count - 1].end else 0;
                 self.seg_lock.unlock();
-                if (@atomicLoad(usize, &self.played, .acquire) >= last_end) {
+                const p = @atomicLoad(usize, &self.played, .acquire);
+                const tol = SAMPLE_RATE / 5;
+                if (p + tol >= last_end) {
                     @atomicStore(bool, &self.playing, false, .release);
                 }
             }
@@ -667,6 +724,43 @@ fn decoderLoop(self: *Engine) void {
             continue;
         };
 
+        if (self.stretchActive()) {
+            const st = &self.stretch.?;
+            const sp = self.speedValue();
+            const pt = self.pitchValue();
+            if (st.speed != sp or st.pitch != pt) {
+                st.configure(sp, pt);
+                st.reset();
+                self.flushRing();
+            }
+
+            if (!self.drainStretch(st)) {
+                sleepMs(2);
+                continue;
+            }
+            if (st.inFree() < self.scratch_frames or st.outFree() < self.scratch_frames) {
+                sleepMs(2);
+                continue;
+            }
+
+            const got = ch_decode_read(d, self.scratch.ptr, self.scratch_frames);
+            if (got == 0) {
+                st.flush();
+                while (!self.drainStretch(st)) {
+                    if (!@atomicLoad(bool, &self.playing, .acquire)) break;
+                    sleepMs(2);
+                }
+                self.resetStretch();
+                if (@atomicLoad(bool, &self.gapless, .acquire)) {
+                    if (self.openNextAuto()) continue;
+                }
+                @atomicStore(bool, &self.eof, true, .release);
+                continue;
+            }
+            st.push(self.scratch[0 .. @as(usize, @intCast(got)) * CHANNELS]);
+            continue;
+        }
+
         const w = @atomicLoad(usize, &self.ring.write, .acquire);
         const r = @atomicLoad(usize, &self.ring.read, .acquire);
         var used = w -% r;
@@ -706,13 +800,15 @@ fn destroyEngine(e: *Engine) void {
     e.retired_covers.deinit(e.allocator);
     for (e.playlist.items) |p| e.allocator.free(p);
     e.playlist.deinit(e.allocator);
+    if (e.stretch) |*st| st.deinit();
+    e.allocator.free(e.stretch_buf);
     e.allocator.free(e.scratch);
     e.allocator.free(e.ring.buf);
     e.allocator.destroy(e);
 }
 
 export fn ch_core_version() [*c]const u8 {
-    return @ptrCast("0.3.0");
+    return @ptrCast("0.4.0");
 }
 
 export fn ch_core_last_error() [*c]const u8 {
@@ -742,10 +838,29 @@ export fn ch_engine_create() ?*Engine {
     };
     self.scratch_frames = SCRATCH_FRAMES;
 
+    self.stretch = Stretch.init(alloc) catch {
+        setGlobalError("no se pudo reservar el motor de velocidad/tono");
+        alloc.free(self.scratch);
+        alloc.free(self.ring.buf);
+        alloc.destroy(self);
+        return null;
+    };
+    self.stretch_buf = alloc.alloc(f32, SCRATCH_FRAMES * CHANNELS) catch {
+        setGlobalError("no se pudo reservar el búfer de estiramiento");
+        self.stretch.?.deinit();
+        alloc.free(self.scratch);
+        alloc.free(self.ring.buf);
+        alloc.destroy(self);
+        return null;
+    };
+    self.stretch_buf_frames = SCRATCH_FRAMES;
+
     @atomicStore(bool, &self.idle, true, .release);
 
     self.audio = ch_audio_create(&renderAudio, self, SAMPLE_RATE, CHANNELS, self.output_device) orelse {
         copyAudioError();
+        if (self.stretch) |*st| st.deinit();
+        alloc.free(self.stretch_buf);
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
         alloc.destroy(self);
@@ -756,6 +871,8 @@ export fn ch_engine_create() ?*Engine {
         setGlobalError("no se pudo iniciar el hilo de audio");
         ch_audio_destroy(self.audio);
         self.audio = null;
+        if (self.stretch) |*st| st.deinit();
+        alloc.free(self.stretch_buf);
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
         alloc.destroy(self);
@@ -933,6 +1050,31 @@ export fn ch_engine_crossfade(self: ?*Engine) f32 {
     return @bitCast(@atomicLoad(u32, &e.xfade_bits, .monotonic));
 }
 
+export fn ch_engine_set_speed(self: ?*Engine, speed: f32) i32 {
+    const e = self orelse return -1;
+    if (!(speed > 0)) return -1;
+    const s = std.math.clamp(speed, 0.25, 4.0);
+    @atomicStore(u32, &e.speed_bits, @bitCast(s), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_speed(self: ?*Engine) f32 {
+    const e = self orelse return 1;
+    return e.speedValue();
+}
+
+export fn ch_engine_set_pitch(self: ?*Engine, semitones: f32) i32 {
+    const e = self orelse return -1;
+    const p = std.math.clamp(semitones, -12, 12);
+    @atomicStore(u32, &e.pitch_bits, @bitCast(p), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_pitch(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.pitchValue();
+}
+
 export fn ch_engine_seek(self: ?*Engine, seconds: f64) i32 {
     const e = self orelse return -1;
     if (e.decoder == null) return e.fail("no hay pista cargada", -2);
@@ -1061,6 +1203,9 @@ export fn ch_engine_position(self: ?*Engine) f64 {
         const s = &e.segments[pos];
         if (p >= s.start and p <= s.end) {
             return @as(f64, @floatFromInt(p - s.start)) / SAMPLE_RATE;
+        }
+        if (p > s.end) {
+            return @as(f64, @floatFromInt(s.end - s.start)) / SAMPLE_RATE;
         }
     }
     return 0;

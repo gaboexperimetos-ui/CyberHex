@@ -84,6 +84,12 @@ int32_t ch_engine_gapless(ch_engine* engine);
 int32_t ch_engine_set_crossfade(ch_engine* engine, float seconds);
 float   ch_engine_crossfade(ch_engine* engine);
 
+/* Velocidad sin cambiar el tono (0.25 - 4.0) y tono en semitonos (-12 a +12). */
+int32_t ch_engine_set_speed(ch_engine* engine, float speed);
+float   ch_engine_speed(ch_engine* engine);
+int32_t ch_engine_set_pitch(ch_engine* engine, float semitones);
+float   ch_engine_pitch(ch_engine* engine);
+
 /* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB. */
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
@@ -135,6 +141,13 @@ ch_engine_destroy(e);
   reportada de A se acorta en el solape, y la posición avanza de forma continua
   hacia B.
 - **Play desde el final**: rebobina a 0 automáticamente.
+- **Velocidad**: `set_speed(0.25..4)` aplica time-stretch WSOLA que preserva el
+  tono; la posición y la duración siguen en tiempo musical (una pista de 2 s a
+  velocidad 2 suena en ~1 s y termina en posición 2 s). El cambio se aplica al
+  vaciarse el búfer; el crossfade se desactiva mientras hay velocidad/tono.
+- **Tono**: `set_pitch(-12..+12)` remuestrea con interpolación cúbica y
+  time-stretch compensatorio, así que cambia la frecuencia sin cambiar la
+  duración. Velocidad y tono se combinan (p. ej. +12 semitonos a 2x).
 - **Seek**: relativo al inicio de la pista audible, acotado a su duración. La
   posición se actualiza al instante aunque el audio tarde un bloque.
 - **ReplayGain**: se aplica por pista al pasar a ella; la ganancia se limita
@@ -159,4 +172,4 @@ creación del motor, p. ej. sin dispositivo de audio).
 
 ## Aún no implementado
 
-Velocidad/tono, motor de conversión, descargador y funciones de IA.
+Motor de conversión, descargador y funciones de IA.
