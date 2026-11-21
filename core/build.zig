@@ -116,6 +116,10 @@ pub fn build(b: *std.Build) void {
             "src/lyrics.c",
             "src/library.c",
             "src/markers.c",
+            // Nuevas del núcleo de main: R128/picos, hojas CUE y guardado de carátula.
+            "src/cue.c",
+            "src/fileio.c",
+            "src/analysis.c",
         },
         .flags = &.{ "-std=c23", "-O2" },
     });

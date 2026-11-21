@@ -34,7 +34,7 @@
 
 - Reproductor **Flutter + motor nativo propio** (Zig 0.17.1 + C23). Un solo
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
-- Núcleo: **5 691 líneas**, **97 funciones FFI**, ABI **3**, versión **0.8.0**.
+- Núcleo (tras fusionar `main`): **6 807 líneas**, **173 funciones FFI**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
 - App: **2 074 líneas Dart** + **578 de tests**. Estado centralizado en
   `PlayerController` (testeable **sin** la `.so`).
@@ -51,8 +51,9 @@
 ## 2. Inventario
 
 ```
-core/                       motor nativo (Zig 0.17.1 + C23)          5 691 líneas
-  src/root.zig              97 exports FFI, hilo de audio, render, cola, EQ, eventos
+core/                       motor nativo (Zig 0.17.1 + C23)          6 807 líneas
+  src/root.zig              173 exports FFI, hilo de audio, render, cola, EQ, eventos
+  src/{cue,fileio,analysis}.c  hojas CUE, guardado de carátula, R128 y picos
   src/{eq,stft,fft,stretch}.zig   DSP puro (con tests)
   src/audio.c               miniaudio: dispositivo, callback
   src/decode_ffmpeg.c       decodificador FFmpeg (formato completo)
@@ -321,6 +322,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 |---|---|---|---|
 | P0.1 | ~~`MediaSession` + servicio en primer plano~~ **HECHO** (turno 9): servicio, foco, notificación y bloqueo, sin dependencias nuevas | Kotlin + manifest + Dart | falta compilar y probar en el teléfono |
 | P0.4 | `FlutterEngine` cacheado en una `Application` propia para que la música sobreviva a "quitar de Recientes" | Kotlin (archivo nuevo) + manifest | requiere otra clase y cambiar el `android:name` del `<application>` |
+| P0.5 | Bindear en Dart la API que trajo `main`: R128 (`ch_engine_analyze_loudness`), picos de forma de onda, ganancia manual en dB, crossfeed, hojas CUE y guardado de carátula | Dart | círculo de 1 turno; el núcleo ya está fusionado y verificado |
 | P0.2 | Pantallas de **biblioteca** (escaneo con `ch_library_*`) y **cola** (reordenar, quitar, saltar) | Dart | no verificable aquí |
 | P0.3 | Abrir archivos desde el gestor: `Intent.ACTION_VIEW` (Android) y `%U` en `.desktop` | Kotlin/Dart + runner C | requiere pasar argv a Dart |
 
@@ -361,9 +363,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (29 commits desde `eca1490`)
+## 12. Changelog (29 commits + fusión de `main` desde `eca1490`)
 
 ```
+FUSIÓN → main en la rama: 3 conflictos de núcleo resueltos (build.zig, root.zig, API.md)
 PEDIDO 3 → android: servicio en primer plano, MediaSession, foco y notificación
 PEDIDO 2 → app(platform): puente Dart ↔ servicio de medios por MethodChannel
 PEDIDO 1 → app(core): next/previous desde el FFI hasta el controlador

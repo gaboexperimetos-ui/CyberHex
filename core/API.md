@@ -19,41 +19,18 @@ zig build smoke                   # prueba de humo con audio real (ver más abaj
 ./build_android.sh                # -> jniLibs/arm64-v8a/libcyberhex_core.so
 ```
 
-### Un núcleo, dos plataformas
+### Android: `arm64-v8a` portable (objetivo: Redmi Note 13, Snapdragon 685)
 
-Ojo con las banderas: en Zig 0.17 el modo de optimización se elige con
-`--release=fast|safe|small` o `-Drelease=true|false`. `-Doptimize=...` ya no
-existe. El `build.zig` fija `ReleaseFast` como modo preferido.
+El build de Android compila **solo `arm64-v8a`** para cualquier móvil 64-bit
+(ARMv8-A + NEON, obligatorio en AArch64). No asume un SoC concreto: sirve igual
+en Snapdragon, Helio, Exynos o Tensor.
 
-`-Ddecoder` (por defecto `auto`) decide el decodificador en las dos:
-
-| Plataforma | `auto` hace |
-|---|---|
-| Escritorio (Linux/macOS) | FFmpeg del sistema si `pkg-config --exists libavcodec libavformat`; si no, miniaudio con un aviso |
-| Android | FFmpeg estático de `third_party/ffmpeg-android/<abi>` si está compilado; si no, miniaudio con un aviso |
-
-Así `zig build` funciona en un PC pelado (sin `libav*-dev`) y el APK se puede
-compilar sin haber generado el FFmpeg estático: solo se pierden los formatos que
-aporta FFmpeg (AAC, ALAC, WMA...). Con `-Ddecoder=ffmpeg` se obliga y un falta de
-dependencias se para el build en vez de degradar en silencio.
-
-`zig build smoke` compila y ejecuta `tests/smoke.c` contra el motor de verdad:
-sintetiza un WAV, lo reproduce y comprueba niveles RMS/pico, pausa sin deriva,
-loop A-B, eventos, preamp, ReplayGain por álbum, balance y modo de canales. El
-mismo binario corre en el teléfono:
-
-```bash
-adb push zig-out/bin/cyberhex_smoke /data/local/tmp/
-adb shell /data/local/tmp/cyberhex_smoke /data/local/tmp   # 0 = todo bien
-```
-
-### Objetivo: Redmi Note 13 (Snapdragon 685)
-
-El build de Android compila **solo `arm64-v8a`**, optimizado para el SoC del
-Redmi Note 13 (4× Cortex-A73 @ 2.8 GHz + 4× Cortex-A53 @ 1.9 GHz, Adreno 610):
-
-- `-mcpu cortex_a73` (tuning de pipeline del núcleo grande; el código sigue
-  siendo ARMv8-A genérico y corre en cualquier Android 64-bit).
+- Por defecto `-mcpu baseline` (ARMv8-A genérico), sin riesgo de instrucciones
+  no soportadas.
+- Para afinar a un SoC concreto sin cambiar nada más:
+  `CYBERHEX_CPU=cortex_a76 ./build_android.sh` (nombres válidos:
+  `zig build-lib -target aarch64-linux-android -mcpu help`). El binario afinado
+  sigue siendo ARMv8-A y corre en ese SoC; no lo uses en otros.
 - `-O3 -ffast-math -fno-math-errno` en el código C.
 - `abiFilters = arm64-v8a` en `android/app/build.gradle.kts`: el APK solo
   empaqueta ese ABI (menos tamaño, sin librerías muertas).
@@ -107,6 +84,46 @@ int32_t ch_engine_play(ch_engine* engine);
 int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);
 int32_t ch_engine_set_volume(ch_engine* engine, float volume); /* 0.0 .. 1.0 */
+float   ch_engine_volume(ch_engine* engine);
+
+/* DSP: crossfeed de auriculares, mono, balance y medidores (dBFS). */
+int32_t ch_engine_set_crossfeed(ch_engine* engine, int32_t enabled, float strength);
+int32_t ch_engine_crossfeed(ch_engine* engine, float* strength);
+int32_t ch_engine_set_mono(ch_engine* engine, int32_t enabled);
+int32_t ch_engine_mono(ch_engine* engine);
+int32_t ch_engine_set_balance(ch_engine* engine, float balance); /* -1 .. +1 */
+float   ch_engine_balance(ch_engine* engine);
+int32_t ch_engine_set_gain_db(ch_engine* engine, float gain_db); /* -24 .. +24 */
+float   ch_engine_gain_db(ch_engine* engine);
+int32_t ch_engine_save_cover(ch_engine* engine, int32_t index, const char* path);
+int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
+
+/* Bucle A-B. */
+int32_t ch_engine_set_ab_loop(ch_engine* engine, double a_seconds, double b_seconds);
+int32_t ch_engine_clear_ab_loop(ch_engine* engine);
+int32_t ch_engine_ab_loop(ch_engine* engine, double* a_seconds, double* b_seconds);
+
+/* Estado persistente (cola, pista, posicion y ajustes). */
+int32_t ch_engine_save_state(ch_engine* engine, const char* path);
+int32_t ch_engine_load_state(ch_engine* engine, const char* path, double* position_out);
+
+/* Sonoridad y picos (analisis offline). */
+typedef struct { double integrated_lufs; double sample_peak_dbfs; double duration_s; } ch_loudness_result;
+int32_t ch_loudness_scan(const char* utf8_path, ch_loudness_result* out);
+int32_t ch_waveform_peaks(const char* utf8_path, uint32_t buckets, float* out_max);
+
+/* Hojas CUE. */
+ch_cue*   ch_cue_read(const char* path);
+void      ch_cue_free(ch_cue* cue);
+int32_t   ch_cue_count(const ch_cue* cue);
+const char* ch_cue_album(const ch_cue* cue);
+const char* ch_cue_album_performer(const ch_cue* cue);
+const char* ch_cue_file(const ch_cue* cue, int32_t index);
+const char* ch_cue_title(const ch_cue* cue, int32_t index);
+const char* ch_cue_performer(const ch_cue* cue, int32_t index);
+double    ch_cue_start(const ch_cue* cue, int32_t index);
+double    ch_cue_end(const ch_cue* cue, int32_t index);
+int32_t   ch_cue_number(const ch_cue* cue, int32_t index);
 
 /* Temporizador de apagado: pausa tras `seconds` con fundido de `fade_seconds`.
  * seconds <= 0 lo desactiva. ch_engine_sleep_remaining: segundos restantes o -1. */
@@ -296,6 +313,50 @@ un archivo de texto (una marca por línea, separada por tabuladores, con
 escapes), y `ch_markers_load` lo recupera. La escritura es atómica: se escribe
 un `.tmp` y se renombra encima. Para saltar a una marca basta con
 `ch_engine_seek(e, position)`.
+
+### DSP y medidores
+
+- **Crossfeed** (`set_crossfeed`): mezcla el canal opuesto filtrado a ~700 Hz
+  para reducir la fatiga al escuchar con auriculares. `strength` 0..1.
+- **Mono** y **balance** se aplican antes del limitador.
+- **Medidores** (`ch_engine_meter`): pico por canal y RMS en dBFS de la ventana
+  transcurrida desde la llamada anterior; cada lectura reinicia la ventana.
+  Con la pista en pausa devuelve -120 dB.
+
+### Bucle A-B
+
+`set_ab_loop(a, b)` requiere `0 <= a < b`. Al llegar a B, el motor vuelve a A
+(se pide un seek al hilo decodificador). `ab_loop()` devuelve 1 y los valores
+actuales, o 0 si está desactivado.
+
+### Estado persistente
+
+`ch_engine_save_state` escribe cola completa, pista actual, posición y ajustes
+(volumen, repeat, shuffle, crossfade, velocidad, tono, ReplayGain, limitador,
+mono, balance, crossfeed). `ch_engine_load_state` reconstruye la cola, carga la
+pista actual en pausa y devuelve en `position_out` la posición guardada; la UI
+decide si llama a `play` y a `seek`. Formato de texto versionado (`CHSTATE 1`),
+escritura atómica.
+
+### Ganancia, carátulas y análisis
+
+- `ch_engine_set_gain_db` aplica una ganancia fija (-24..+24 dB) después del
+  volumen y ReplayGain; se incluye en el estado persistente.
+- `ch_engine_save_cover(index, path)` escribe la carátula i-ésima de la pista
+  audible en un archivo (escritura atómica).
+- `ch_loudness_scan` calcula sonoridad integrada ITU-R BS.1770-4 (K-weighting,
+  bloques de 400 ms al 75%, puertas -70 LUFS absoluta y -10 LU relativa) y pico
+  de muestra, sin tocar el motor. Sirve para generar ReplayGain propio.
+- `ch_waveform_peaks(path, buckets, out)` devuelve el máximo por tramo en [0..1]
+  para dibujar la forma de onda en la UI.
+
+### Hojas CUE
+
+`ch_cue_read` parsea un `.cue` (FILE/TRACK/TITLE/PERFORMER/INDEX 01) y resuelve
+el `FILE` relativo a la carpeta del `.cue`. `ch_cue_end` devuelve el inicio de
+la pista siguiente, o -1 en la última. Para reproducir una pista: cargar
+`ch_cue_file`, hacer `seek` a `ch_cue_start` y, si hay fin, detener o saltar en
+`ch_cue_end`.
 
 ### Eventos de reproducción
 

@@ -18,6 +18,46 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 10 · Fusión de `main` y primer merge a `main`
+
+- **PEDIDO:** "mergea todo". Antes hubo que integrar los dos commits que `main`
+  ganó mientras trabajábamos (`core: A-B loop, crossfeed, mono/balance,
+  medidores, estado persistente y hojas CUE; Android portable ARMv8-A` y
+  `core: sonoridad EBU R128, picos, ganancia manual y guardar carátula`).
+- **CONFLICTOS (3) y resolución:**
+  - `core/build.zig`: la versión de `main` duplicaba la selección de
+    decodificador ya refactorizada aquí. Se conserva la de la rama
+    (`-Ddecoder=auto|ffmpeg|miniaudio`, `haveFfmpeg*`, mensajes claros) y se
+    añaden las tres fuentes C nuevas de `main` (`cue.c`, `fileio.c`,
+    `analysis.c`).
+  - `core/src/root.zig`: fusión automática dejó **duplicados** que Zig no
+    acepta (`balance_bits`, `ab_start`, `ab_end`, `ch_engine_set_balance`,
+    `ch_engine_balance`) y un bucle `render` con dos versiones del mismo tramo.
+    Se unificó: un solo `balance_bits`, un solo par A-B, un solo export de
+    balance; `mono` desaparece como campo y **`ch_engine_set_mono` ahora escribe
+    `chan_mode`** (0 estéreo, 1 mono, 2 intercambiados), así que la API vieja
+    sigue funcionando y hay un solo mando de canales. El bucle quedó:
+    fade con `fade_coeff` (respeta el fundido de pausa de ~50 ms) → modo de
+    canales → **crossfeed Bauer** de `main` → balance por canal → limitador →
+    medidores.
+  - `core/API.md`: una sola cabecera
+    `### Android: arm64-v8a portable (objetivo: Redmi Note 13, Snapdragon 685)`,
+    conservando la sección de `-Ddecoder` y `zig build smoke`.
+- **VERIFICADO AQUÍ:** `zig build test -Ddecoder=miniaudio` → *test success*
+  (13 tests, ahora compilando también `cue.c`, `fileio.c` y `analysis.c`);
+  `zig build -Drelease=true` → `.so` de 4,3 MB con **173 exports `ch_*`**;
+  `gcc -fsyntax-only -std=c2x -Wall -Wextra` limpio en las 9 fuentes C;
+  comprobador de símbolos: los **40** que pide `native_player.dart` están en la
+  `.so` (ninguno queda sin `providesSymbol`); ABI sigue en **3**.
+- **NO VERIFICABLE AQUÍ:** nada nuevo; sigue sin haber SDK de Flutter ni JDK.
+- **COMMITS:** merge `main` → `arena/3351fdb0-cyberhex`, y el merge de la rama a
+  `main` por PR.
+- **ABIERTO / RIESGOS:** R11 (Recientes mata el motor), R12 (icono de
+  notificación), R13 (FGS desde background). La nueva API de `main` (R128, CUE,
+  picos) **no está bindeada en Dart todavía**: es P0.5.
+
+---
+
 ## 2026-11-21 · turno 9 · P0.1: next/previous, canal de medios y servicio Kotlin
 
 - **PEDIDO:** tres pedidos estrictos, un commit reversible cada uno: (1) exponer
