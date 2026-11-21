@@ -45,6 +45,15 @@ int32_t ch_engine_previous(ch_engine* engine);
 int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_gapless(ch_engine* engine);
 
+/* Repeticion: 0 = apagada, 1 = toda la cola, 2 = pista actual. */
+int32_t ch_engine_set_repeat(ch_engine* engine, int32_t mode);
+int32_t ch_engine_repeat(ch_engine* engine);
+
+/* Orden aleatorio reproducible: la semilla manda en el orden de la cola. */
+int32_t ch_engine_set_shuffle(ch_engine* engine, int32_t enabled);
+int32_t ch_engine_shuffle(ch_engine* engine);
+int32_t ch_engine_set_shuffle_seed(ch_engine* engine, uint32_t seed);
+
 /* Crossfade entre pistas al pasar de una a otra (0 = desactivado). */
 int32_t ch_engine_set_crossfade(ch_engine* engine, float seconds);
 float   ch_engine_crossfade(ch_engine* engine);

@@ -15,6 +15,7 @@ const NO_SEEK: usize = std.math.maxInt(usize);
 const MAX_SEGMENTS: usize = 256;
 const MAX_XFADE_FRAMES: usize = SAMPLE_RATE * 12;
 const SP_FRAMES: usize = 2048; // ventana del analizador de espectro (~43 ms)
+const FADE_COEFF: f32 = 1.0 - @exp(-1.0 / (0.008 * @as(f32, @floatFromInt(SAMPLE_RATE))));
 
 const ch_decoder = opaque {};
 
@@ -169,6 +170,12 @@ pub const Engine = struct {
     list_mutex: SpinLock = .{},
     gapless: bool = true,
     xfade_bits: u32 = @bitCast(@as(f32, 0)),
+    repeat_mode: u32 = 0,
+    shuffle: bool = false,
+    rng_state: u32 = 0x9E3779B9,
+    order: std.ArrayListUnmanaged(usize) = .empty,
+    order_pos: usize = 0,
+    fade_gain: f32 = 0,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     err: [256]u8 = @splat(0),
@@ -294,8 +301,43 @@ pub const Engine = struct {
         return @intFromFloat(f);
     }
 
+    fn rebaseLocked(self: *Engine) void {
+        if (self.seg_count == 0) return;
+        const p = @atomicLoad(usize, &self.played, .acquire);
+        var keep: usize = 0;
+        while (keep + 1 < self.seg_count and self.segments[keep].end <= p) keep += 1;
+        if (keep == 0) return;
+        const offset = self.segments[keep].start;
+        if (offset == 0) return;
+
+        var i: usize = 0;
+        while (i < keep) : (i += 1) {
+            if (self.segments[i].cover) |c| {
+                self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            }
+            self.segments[i].cover = null;
+        }
+
+        const remaining = self.seg_count - keep;
+        var j: usize = 0;
+        while (j < remaining) : (j += 1) {
+            self.segments[j] = self.segments[keep + j];
+            self.segments[j].start -= offset;
+            self.segments[j].end -= offset;
+        }
+        self.seg_count = remaining;
+        self.running_end -= offset;
+        _ = @atomicRmw(usize, &self.played, .Sub, offset, .release);
+    }
+
     fn addSegment(self: *Engine, index: usize, d: *ch_decoder, overlap: usize) bool {
-        if (self.seg_count >= MAX_SEGMENTS) return false;
+        if (self.seg_count >= MAX_SEGMENTS) {
+            self.seg_lock.lock();
+            self.rebaseLocked();
+            const full = self.seg_count >= MAX_SEGMENTS;
+            self.seg_lock.unlock();
+            if (full) return false;
+        }
 
         var seg = Segment{};
         seg.index = index;
@@ -350,6 +392,127 @@ pub const Engine = struct {
         const p = @atomicLoad(usize, &self.played, .acquire);
         if (self.findSegment(p)) |pos| return self.segments[pos].index;
         return null;
+    }
+
+    fn rand(self: *Engine) u32 {
+        var x = self.rng_state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.rng_state = x;
+        return x;
+    }
+
+    fn rebuildOrderLocked(self: *Engine, current: usize) void {
+        const n = self.playlist.items.len;
+        self.order.clearRetainingCapacity();
+        self.order.ensureTotalCapacity(self.allocator, n) catch return;
+        var i: usize = 0;
+        while (i < n) : (i += 1) self.order.appendAssumeCapacity(i);
+        i = n;
+        while (i > 1) {
+            i -= 1;
+            const j = @as(usize, self.rand()) % (i + 1);
+            const tmp = self.order.items[i];
+            self.order.items[i] = self.order.items[j];
+            self.order.items[j] = tmp;
+        }
+        self.order_pos = 0;
+        if (n > 0 and current < n) {
+            var k: usize = 0;
+            while (k < n) : (k += 1) {
+                if (self.order.items[k] == current) {
+                    self.order.items[k] = self.order.items[0];
+                    self.order.items[0] = current;
+                    break;
+                }
+            }
+        }
+    }
+
+    fn syncOrderLocked(self: *Engine, current: usize) void {
+        const n = self.playlist.items.len;
+        if (n == 0) {
+            self.order.clearRetainingCapacity();
+            self.order_pos = 0;
+            return;
+        }
+        if (self.order.items.len != n) {
+            self.rebuildOrderLocked(current);
+            return;
+        }
+        if (self.order_pos >= n) self.order_pos = 0;
+        var pos: usize = 0;
+        while (pos < n and self.order.items[pos] != current) pos += 1;
+        if (pos == n) {
+            self.rebuildOrderLocked(current);
+            return;
+        }
+        if (pos == self.order_pos) return;
+        self.order_pos = pos;
+    }
+
+    fn nextAfterLocked(self: *Engine, current: usize) ?usize {
+        const n = self.playlist.items.len;
+        if (n == 0) return null;
+        const repeat_all = @atomicLoad(u32, &self.repeat_mode, .monotonic) == 1;
+        if (@atomicLoad(bool, &self.shuffle, .monotonic)) {
+            self.syncOrderLocked(current);
+            if (self.order.items.len != n) return if (repeat_all) current else null;
+            if (self.order_pos + 1 < n) {
+                self.order_pos += 1;
+                return self.order.items[self.order_pos];
+            }
+            if (!repeat_all) return null;
+            self.rebuildOrderLocked(current);
+            if (n <= 1) return self.order.items[0];
+            self.order_pos = 1;
+            return self.order.items[1];
+        }
+        if (current + 1 < n) return current + 1;
+        if (repeat_all) return 0;
+        return null;
+    }
+
+    fn prevBeforeLocked(self: *Engine, current: usize) ?usize {
+        const n = self.playlist.items.len;
+        if (n == 0) return null;
+        const repeat_all = @atomicLoad(u32, &self.repeat_mode, .monotonic) == 1;
+        if (@atomicLoad(bool, &self.shuffle, .monotonic)) {
+            self.syncOrderLocked(current);
+            if (self.order.items.len != n) return if (repeat_all) current else null;
+            if (self.order_pos > 0) {
+                self.order_pos -= 1;
+                return self.order.items[self.order_pos];
+            }
+            if (!repeat_all) return null;
+            self.order_pos = n - 1;
+            return self.order.items[self.order_pos];
+        }
+        if (current > 0) return current - 1;
+        if (repeat_all) return n - 1;
+        return null;
+    }
+
+    fn noteAddedLocked(self: *Engine, index: usize) void {
+        if (!@atomicLoad(bool, &self.shuffle, .monotonic)) return;
+        if (self.order.items.len != index) return;
+        if (index == 0) {
+            self.order.append(self.allocator, 0) catch {};
+            self.order_pos = 0;
+            return;
+        }
+        const span = index - self.order_pos;
+        const pos = self.order_pos + 1 + @as(usize, self.rand()) % span;
+        self.order.insert(self.allocator, pos, index) catch {
+            self.order.append(self.allocator, index) catch {};
+        };
+    }
+
+    fn rollbackOrder(self: *Engine, saved_pos: usize) void {
+        self.list_mutex.lock();
+        self.order_pos = saved_pos;
+        self.list_mutex.unlock();
     }
 
     fn audibleGain(self: *Engine) f32 {
@@ -495,7 +658,12 @@ pub const Engine = struct {
 
     fn openNextAuto(self: *Engine) bool {
         self.list_mutex.lock();
-        const next = self.queue_index + 1;
+        const mode = @atomicLoad(u32, &self.repeat_mode, .monotonic);
+        const target: ?usize = if (mode == 2) self.queue_index else self.nextAfterLocked(self.queue_index);
+        const next = target orelse {
+            self.list_mutex.unlock();
+            return false;
+        };
         if (next >= self.playlist.items.len) {
             self.list_mutex.unlock();
             return false;
@@ -558,13 +726,22 @@ pub const Engine = struct {
         self.seg_lock.unlock();
 
         self.list_mutex.lock();
-        const next = self.queue_index + 1;
+        if (@atomicLoad(u32, &self.repeat_mode, .monotonic) == 2) {
+            self.list_mutex.unlock();
+            return false;
+        }
+        const saved_pos = self.order_pos;
+        const next = self.nextAfterLocked(self.queue_index) orelse {
+            self.list_mutex.unlock();
+            return false;
+        };
         if (next >= self.playlist.items.len) {
             self.list_mutex.unlock();
             return false;
         }
         const path = self.playlist.items[next];
         const d = ch_decode_open(path.ptr, SAMPLE_RATE, CHANNELS) orelse {
+            self.order_pos = saved_pos;
             self.list_mutex.unlock();
             return false;
         };
@@ -588,6 +765,7 @@ pub const Engine = struct {
         }
         const min_overlap: usize = SAMPLE_RATE / 50;
         if (overlap < min_overlap) {
+            self.rollbackOrder(saved_pos);
             ch_decode_close(d);
             return false;
         }
@@ -605,6 +783,7 @@ pub const Engine = struct {
             got += @intCast(n);
         }
         if (got < min_overlap) {
+            self.rollbackOrder(saved_pos);
             ch_decode_close(d);
             return false;
         }
@@ -685,9 +864,14 @@ pub const Engine = struct {
             if (avail > self.ring.cap) avail = 0;
             const skip = @min(d, avail);
             @atomicStore(usize, &self.ring.read, r +% skip, .release);
+            self.fade_gain = 0;
         }
 
-        if (!@atomicLoad(bool, &self.playing, .acquire)) return;
+        const playing = @atomicLoad(bool, &self.playing, .acquire);
+        if (!playing and self.fade_gain < 0.001) {
+            self.fade_gain = 0;
+            return;
+        }
 
         const r = @atomicLoad(usize, &self.ring.read, .acquire);
         const w = @atomicLoad(usize, &self.ring.write, .acquire);
@@ -697,22 +881,32 @@ pub const Engine = struct {
         if (take > 0) {
             self.readRingAt(r, out[0 .. take * CHANNELS]);
             @atomicStore(usize, &self.ring.read, r +% take, .release);
-            const sp = self.speedValue();
-            var adv: usize = take;
-            if (sp != 1) {
-                const f = @as(f64, @floatFromInt(take)) * @as(f64, sp);
-                adv = @intFromFloat(@round(f));
+            if (playing) {
+                const sp = self.speedValue();
+                var adv: usize = take;
+                if (sp != 1) {
+                    const f = @as(f64, @floatFromInt(take)) * @as(f64, sp);
+                    adv = @intFromFloat(@round(f));
+                }
+                _ = @atomicRmw(usize, &self.played, .Add, adv, .monotonic);
             }
-            _ = @atomicRmw(usize, &self.played, .Add, adv, .monotonic);
         }
 
         const produced = take * CHANNELS;
         self.equalizer.process(out[0..produced], take);
 
-        var gain = self.volume();
-        if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) gain *= self.audibleGain();
-        if (gain != 1) {
-            for (out[0..produced]) |*s| s.* *= gain;
+        var target: f32 = 0;
+        if (playing) {
+            target = self.volume();
+            if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) target *= self.audibleGain();
+        }
+        if (take > 0) {
+            var g = self.fade_gain;
+            for (out[0..produced]) |*s| {
+                g += (target - g) * FADE_COEFF;
+                s.* *= g;
+            }
+            self.fade_gain = if (!playing and g < 0.001) 0 else g;
         }
 
         if (take > 0) {
@@ -896,6 +1090,7 @@ fn destroyEngine(e: *Engine) void {
     e.retired_covers.deinit(e.allocator);
     for (e.playlist.items) |p| e.allocator.free(p);
     e.playlist.deinit(e.allocator);
+    e.order.deinit(e.allocator);
     if (e.stretch) |*st| st.deinit();
     e.allocator.free(e.stretch_buf);
     e.allocator.free(e.sp_im);
@@ -907,7 +1102,7 @@ fn destroyEngine(e: *Engine) void {
 }
 
 export fn ch_core_version() [*c]const u8 {
-    return @ptrCast("0.5.0");
+    return @ptrCast("0.6.0");
 }
 
 export fn ch_core_last_error() [*c]const u8 {
@@ -1089,13 +1284,17 @@ fn addPath(self: *Engine, path: []const u8) ?usize {
         self.allocator.free(copy);
         return null;
     };
-    return self.playlist.items.len - 1;
+    const index = self.playlist.items.len - 1;
+    self.noteAddedLocked(index);
+    return index;
 }
 
 fn clearPlaylist(self: *Engine) void {
     for (self.playlist.items) |p| self.allocator.free(p);
     self.playlist.clearRetainingCapacity();
     self.queue_index = 0;
+    self.order.clearRetainingCapacity();
+    self.order_pos = 0;
 }
 
 export fn ch_engine_queue_add(self: ?*Engine, path: [*c]const u8) i32 {
@@ -1186,23 +1385,65 @@ export fn ch_engine_queue_clear(self: ?*Engine) i32 {
 
 export fn ch_engine_next(self: ?*Engine) i32 {
     const e = self orelse return -1;
-    const current = e.audibleIndex() orelse e.queue_index;
-    const target = current + 1;
+    const audible = e.audibleIndex();
     e.list_mutex.lock();
-    const ok = target < e.playlist.items.len;
+    const current = audible orelse e.queue_index;
+    const target = e.nextAfterLocked(current);
     e.list_mutex.unlock();
-    if (!ok) return e.fail("no hay pista siguiente", -2);
-    @atomicStore(usize, &e.skip_req, target, .release);
+    const t = target orelse return e.fail("no hay pista siguiente", -2);
+    @atomicStore(usize, &e.skip_req, t, .release);
     @atomicStore(bool, &e.playing, true, .release);
     return 0;
 }
 
 export fn ch_engine_previous(self: ?*Engine) i32 {
     const e = self orelse return -1;
-    const current = e.audibleIndex() orelse e.queue_index;
-    if (current == 0) return e.fail("no hay pista anterior", -2);
-    @atomicStore(usize, &e.skip_req, current - 1, .release);
+    const audible = e.audibleIndex();
+    e.list_mutex.lock();
+    const current = audible orelse e.queue_index;
+    const target = e.prevBeforeLocked(current);
+    e.list_mutex.unlock();
+    const t = target orelse return e.fail("no hay pista anterior", -2);
+    @atomicStore(usize, &e.skip_req, t, .release);
     @atomicStore(bool, &e.playing, true, .release);
+    return 0;
+}
+
+export fn ch_engine_set_repeat(self: ?*Engine, mode: i32) i32 {
+    const e = self orelse return -1;
+    if (mode < 0 or mode > 2) return e.fail("modo de repeticion invalido", -1);
+    @atomicStore(u32, &e.repeat_mode, @intCast(mode), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_repeat(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return @intCast(@atomicLoad(u32, &e.repeat_mode, .monotonic));
+}
+
+export fn ch_engine_set_shuffle(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    const on = enabled != 0;
+    e.list_mutex.lock();
+    @atomicStore(bool, &e.shuffle, on, .monotonic);
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    e.list_mutex.unlock();
+    return 0;
+}
+
+export fn ch_engine_shuffle(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (@atomicLoad(bool, &e.shuffle, .monotonic)) 1 else 0;
+}
+
+export fn ch_engine_set_shuffle_seed(self: ?*Engine, seed: u32) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    e.rng_state = if (seed == 0) 0x9E3779B9 else seed;
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
     return 0;
 }
 

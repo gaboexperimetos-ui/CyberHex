@@ -82,6 +82,15 @@ int32_t ch_engine_previous(ch_engine* engine);
 int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_gapless(ch_engine* engine);
 
+/* Repeticion: 0 = apagada, 1 = toda la cola, 2 = pista actual. */
+int32_t ch_engine_set_repeat(ch_engine* engine, int32_t mode);
+int32_t ch_engine_repeat(ch_engine* engine);
+
+/* Orden aleatorio reproducible (la semilla define el orden). */
+int32_t ch_engine_set_shuffle(ch_engine* engine, int32_t enabled);
+int32_t ch_engine_shuffle(ch_engine* engine);
+int32_t ch_engine_set_shuffle_seed(ch_engine* engine, uint32_t seed);
+
 /* Crossfade equal-power entre pistas (0 = desactivado, máximo 12 s). */
 int32_t ch_engine_set_crossfade(ch_engine* engine, float seconds);
 float   ch_engine_crossfade(ch_engine* engine);
@@ -148,6 +157,18 @@ ch_engine_destroy(e);
   con el inicio de B en el ring, así que no hay silencio ni salto. La duración
   reportada de A se acorta en el solape, y la posición avanza de forma continua
   hacia B.
+- **Repetición**: `set_repeat(0|1|2)` = apagada, toda la cola o pista actual.
+  Con `2`, al terminar la pista se vuelve a abrir desde el principio sin
+  silencio. `next`/`previous` manuales siempre saltan de pista; el modo 2 solo
+  afecta al avance automático.
+- **Aleatorio**: `set_shuffle(1)` recorre la cola en orden aleatorio;
+  `set_shuffle_seed(seed)` fija la semilla para que el orden sea reproducible
+  (misma semilla, misma secuencia). Cada ciclo recorre todas las pistas sin
+  repetir antes de volver a barajar. `next`/`previous` se refieren a la pista
+  audible aunque el decodificador ya tenga la siguiente precargada.
+- **Sin clics**: el volumen, el ReplayGain y los cambios de pausa/seek se
+  aplican con una rampa de ~8 ms en el hilo de audio. Pausar no corta la onda
+  en seco.
 - **Play desde el final**: rebobina a 0 automáticamente.
 - **Velocidad**: `set_speed(0.25..4)` aplica time-stretch WSOLA que preserva el
   tono; la posición y la duración siguen en tiempo musical (una pista de 2 s a
