@@ -161,6 +161,14 @@ uint64_t ch_engine_buffer_underflows(ch_engine* engine);
 /* Detecta silencio al principio/fin de un archivo (dBFS). */
 int32_t  ch_engine_detect_silence(const char* utf8_path, float threshold_db,
                                    double* lead, double* tail);
+
+/* Biblioteca de audio: escaneo incremental de carpetas (handle opaco void*). */
+void*     ch_library_create(void);
+void      ch_library_destroy(void* lib);
+int32_t   ch_library_scan(void* lib, const char* root);
+int32_t   ch_library_count(const void* lib);
+const char* ch_library_path(const void* lib, int32_t index);
+int32_t   ch_library_removed(const void* lib);
 ```
 
 ### Eventos de reproducción

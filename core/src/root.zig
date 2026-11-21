@@ -55,6 +55,14 @@ extern fn ch_lyrics_free(lyrics: ?*ch_lyrics) void;
 extern fn ch_lyrics_count(lyrics: ?*ch_lyrics) c_int;
 extern fn ch_lyrics_line_at(lyrics: ?*ch_lyrics, time_s: f64, line_start: ?*f64, index: ?*c_int) [*c]const u8;
 extern fn ch_lyrics_offset_ms(lyrics: ?*ch_lyrics) [*c]const u8;
+
+const ch_library = opaque {};
+extern fn c_lib_create() ?*ch_library;
+extern fn c_lib_destroy(lib: ?*ch_library) void;
+extern fn c_lib_scan(lib: ?*ch_library, root: [*c]const u8, exts: [*c]const [*c]const u8, ext_count: c_int) c_int;
+extern fn c_lib_count(lib: ?*const ch_library) c_int;
+extern fn c_lib_path(lib: ?*const ch_library, index: c_int) [*c]const u8;
+extern fn c_lib_removed(lib: ?*const ch_library) c_int;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -225,9 +233,11 @@ pub const Engine = struct {
     limit_ceiling: f32 = 0.891, // ~ -1 dBFS
     limit_gain: f32 = 1.0,
     sleep_end_ms: u64 = 0,
+    sleep_lock: SpinLock = .{},
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
     buf_underflows: u64 = 0,
+    buf_lock: SpinLock = .{},
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     ev_lock: SpinLock = .{},
@@ -976,7 +986,9 @@ fn audibleLyricsOffset(self: *Engine) f64 {
     }
 
     fn sleepRemainingMs(self: *Engine) i64 {
-        const end = @atomicLoad(u64, &self.sleep_end_ms, .acquire);
+        self.sleep_lock.lock();
+        const end = self.sleep_end_ms;
+        self.sleep_lock.unlock();
         if (end == 0) return -1;
         const now = monoMs();
         if (now >= end) return 0;
@@ -996,7 +1008,9 @@ fn audibleLyricsOffset(self: *Engine) f64 {
     fn fireSleep(self: *Engine) void {
         if (self.sleep_fired) return;
         self.sleep_fired = true;
-        @atomicStore(u64, &self.sleep_end_ms, 0, .release);
+        self.sleep_lock.lock();
+        self.sleep_end_ms = 0;
+        self.sleep_lock.unlock();
         @atomicStore(bool, &self.playing, false, .release);
         self.pushEvent(EV_SLEEP, 0, 0, 0);
         self.pushEvent(EV_STATE, 0, 0, 0);
@@ -1032,7 +1046,9 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         if (avail > self.ring.cap) avail = 0;
         const take = @min(frames_out, avail);
         if (playing and take < frames_out) {
-            _ = @atomicRmw(u64, &self.buf_underflows, .Add, 1, .monotonic);
+            self.buf_lock.lock();
+            self.buf_underflows +%= 1;
+            self.buf_lock.unlock();
         }
         if (take > 0) {
             self.readRingAt(r, out[0 .. take * CHANNELS]);
@@ -1862,13 +1878,17 @@ export fn ch_engine_set_volume(self: ?*Engine, volume: f32) i32 {
 export fn ch_engine_set_sleep_timer(self: ?*Engine, seconds: f64, fade_seconds: f64) i32 {
     const e = self orelse return -1;
     if (!(seconds > 0)) {
-        @atomicStore(u64, &e.sleep_end_ms, 0, .release);
+        e.sleep_lock.lock();
+        e.sleep_end_ms = 0;
+        e.sleep_lock.unlock();
         e.sleep_fired = false;
         return 0;
     }
     const now = monoMs();
     const ms: u64 = @intFromFloat(@min(seconds * 1000.0, 604800000.0));
-    @atomicStore(u64, &e.sleep_end_ms, now + ms, .release);
+    e.sleep_lock.lock();
+    e.sleep_end_ms = now + ms;
+    e.sleep_lock.unlock();
     e.sleep_fade_ms = @intFromFloat(std.math.clamp(fade_seconds * 1000.0, 0.0, 60000.0));
     e.sleep_fired = false;
     return 0;
@@ -2154,7 +2174,38 @@ export fn ch_engine_buffered_seconds(self: ?*Engine) f64 {
 /// Nº de veces que el hilo de audio se quedo sin datos (underrun).
 export fn ch_engine_buffer_underflows(self: ?*Engine) u64 {
     const e = self orelse return 0;
-    return @atomicLoad(u64, &e.buf_underflows, .monotonic);
+    e.buf_lock.lock();
+    defer e.buf_lock.unlock();
+    return e.buf_underflows;
+}
+
+// ---- Biblioteca de audio (escaneo incremental de carpetas) ----
+
+export fn ch_library_create() ?*ch_library {
+    return c_lib_create();
+}
+
+export fn ch_library_destroy(lib: ?*ch_library) void {
+    c_lib_destroy(lib);
+}
+
+export fn ch_library_scan(lib: ?*ch_library, root: [*c]const u8) i32 {
+    if (root == null) return -1;
+    return @intCast(c_lib_scan(lib, root, null, 0));
+}
+
+export fn ch_library_count(lib: ?*const ch_library) i32 {
+    return @intCast(c_lib_count(lib));
+}
+
+export fn ch_library_path(lib: ?*const ch_library, index: i32) [*c]const u8 {
+    if (index < 0) return @ptrCast("");
+    const p = c_lib_path(lib, index);
+    return if (p == null) @ptrCast("") else p;
+}
+
+export fn ch_library_removed(lib: ?*const ch_library) i32 {
+    return @intCast(c_lib_removed(lib));
 }
 
 /// Analiza `path` y devuelve en `lead`/`tail` los segundos de silencio al
