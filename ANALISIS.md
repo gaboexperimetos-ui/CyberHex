@@ -46,11 +46,30 @@ Ya aplicadas en esta rama (cada una en su commit):
 | B4 EQ reiniciaba los 36 filtros al mover un slider | ✅ reinicio por banda | `core(eq): reinicia solo…` |
 | B5 spinlocks en el hilo de audio | ✅ en su mayor parte (eventos, sleep, underflows, espectro, seqlock acotado) | `core: cola sin vaciar…` |
 | B7 symlinks circulares / O(n²) en la biblioteca | ✅ detección de ciclos, profundidad, hash | `core(library): escaneo…` |
-| B9 sin pruebas del núcleo | ✅ 12 tests Zig (5 nuevos) | `core: cola sin vaciar…` |
+| B9 sin pruebas del núcleo | ✅ 13 tests Zig + 10 tests Dart sin la `.so` | `core: cola sin vaciar…` / `app: PlayerController…` |
+| B6 deriva de ~50 ms en cada pausa | ✅ la posición cuenta el audio del fundido | `core(audio): vúmetro, preamp…` |
+| B8 (parcial) pistas rotas cortaban la cola | ✅ el avance automático salta la pista ilegible | `core(audio): vúmetro, preamp…` |
+| Estado de UI disperso en `NativePlayer` | ✅ `PlayerApi` + `PlayerController` + `PlayerSnapshot` | `app: PlayerController…` |
+| `ch_engine_poll_event` exportado y sin usar | ✅ consumido cada 80 ms por el controlador | `app(core): PlayerApi, PlayerEvent…` |
 
-Siguen pendientes: A4 (FFmpeg versionado, decisión de empaquetado), B6 (deriva
-de ~50 ms en cada pausa), B8 (background en Android), B9 ampliado (motor y capa
-FFI), y las funciones del núcleo aún sin UI (cola, letras, espectro, marcadores).
+Siguen pendientes: A4 (FFmpeg versionado, decisión de empaquetado), B8
+(reproducción en segundo plano en Android, MediaSession/audio focus), B9
+ampliado (motor y capa FFI), y las funciones del núcleo aún sin UI (cola,
+letras, espectro, vúmetro, loop A-B, ReplayGain por álbum).
+
+### Motor de audio: novedades de esta tanda
+
+| Función | Para qué |
+|---|---|
+| `ch_engine_levels` | RMS y pico por canal, post-EQ y post-limitador: vúmetro real sin tocar el callback |
+| `ch_engine_set_eq_preamp` | baja la señal antes del EQ (0 a -24 dB) para no recortar al subir bandas |
+| `ch_engine_set_replaygain_mode` | ReplayGain por álbum (sin saltos entre pistas) y soporte de `R128_*_GAIN` |
+| `ch_engine_set_pause_fade` | fundido de pausa configurable (0 = corte seco); arregla B6 |
+| `ch_engine_set_loop` | loop A-B sobre el mismo camino que un seek (crossfade y estiramiento intactos) |
+| `ch_engine_skipped_tracks` | contador de pistas rotas saltadas por el avance automático |
+
+Todo viaja ya bindeado en `lib/core/native_player.dart` (con `providesSymbol`,
+así que una `.so` antigua sigue cargando).
 
 ---
 
