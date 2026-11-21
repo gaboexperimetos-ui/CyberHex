@@ -6,7 +6,7 @@
 > aquí y qué falta. Se actualiza al final de cada turno; el detalle cronológico
 > vive en [`BITACORA.md`](BITACORA.md).
 >
-> Última actualización: 2026-11-21 · rama `arena/3351fdb0-cyberhex` · HEAD `c2755c3`
+> Última actualización: 2026-11-21 · rama `arena/108ff38d-cyberhex` · base `8f392f7` + este pedido
 
 ---
 
@@ -36,14 +36,17 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **16 909 líneas Dart** + **4 941 de tests** (198 casos). Estado
+- App: **20 295 líneas Dart** + **5 565 de tests** (226 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
   núcleo, **toda** la API del motor expuesta a Dart con el DSP persistido en la
   sesión, el **laboratorio de audio** («toda la fase 2 en pantalla»), la fase 4
   de letras, etiquetas y tarjetas, la fase 5 de listas, multi-cola, automix,
-  estadísticas y descargas, y la fase 6A de temas, gestos y mini-reproductor.
+  estadísticas y descargas, la fase 6A de temas, gestos y mini-reproductor, la
+  6B de escritorio (MPRIS, drag & drop, atajos) y la **7B: radios por Internet,
+  WebDAV/nube, exportador de rango con DSP, scrobbling y copia de seguridad
+  unificada**.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -71,7 +74,7 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                 16 909 líneas
+lib/                        app Flutter                                 20 295 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
@@ -83,6 +86,9 @@ lib/                        app Flutter                                 16 909 l
   core/automix_engine.dart  plan de mezcla por BPM (±8 %) y máquina de estados
   core/audio_downloader.dart  Internet Archive y URLs directas con dart:io
   core/theme_controller.dart 4 temas, color de carátula, gestos y barra configurable
+  core/radio_store.dart     emisoras propias, .m3u/.m3u8/.pls y ventana de 12 s por HTTP
+  core/scrobbler.dart       ListenBrainz y Last.fm (MD5 propio), cola con reintentos
+  core/backup_service.dart  copia .json unificada de todos los almacenes
   theme.dart                4 paletas (neón, AMOLED, claro, Material You) y estilos
   platform/media_session_channel.dart  puente Dart del canal cyberhex/media
   ui/audio_lab_sheet.dart   laboratorio: todo el DSP, BPM, WAV, .cue, loop y sueño
@@ -94,12 +100,15 @@ lib/                        app Flutter                                 16 909 l
   ui/stats_page.dart        totales, gráfico por hora, top e historial
   ui/downloader_page.dart   buscar en Archive o pegar URL, con barra de progreso
   ui/mini_player.dart       barra flotante en biblioteca y listas
-  ui/settings_page.dart     tema, color dinámico, carátula, bolsillo y acciones
+  ui/settings_page.dart     tema, carátula, salida, scrobbling y copia de seguridad
+  ui/radio_page.dart        emisoras propias, sugeridas, importar/exportar m3u
+  ui/network_page.dart      WebDAV (Basic/Bearer), enlaces de nube y caché local
+  ui/audio_export_sheet.dart  rango inicio/fin → WAV master o tono de llamada
   ui/visualizer_widget.dart vúmetro + espectro (barras o hexágonos) a 30 Hz
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       198 tests Dart                             4 941 líneas
+test/                       226 tests Dart                             5 565 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -471,6 +480,53 @@ cuatro estilos y el diseño de dos paneles; más mini-reproductor y ajustes.
 
 ---
 
+### 5.8 Fase 7B: radios, red, exportador con DSP, scrobbling y copia de seguridad
+
+Cierra la fase 7 en la app: **entrar audio que no está en el disco** (radio y
+nube), **sacar audio con el DSP puesto** y **no perder nada** de lo que el
+usuario ha construido (escuchas y copia de seguridad). Sin un solo paquete nuevo.
+
+| Pieza | Qué hace |
+|---|---|
+| `RadioStore` | Emisoras propias (`radios.json`, escritura atómica) + importar `.m3u`/`.m3u8`/`.pls` (absolutas y relativas, `#EXTINF` como nombre) + exportar `.m3u`. Resuelve listas encadenadas (`.m3u` → flujo, 2 saltos) y **baja una ventana** del flujo a `${systemTemp}/cyberhex_radio` (12 s o 24 MB) para que el núcleo, que abre **archivos**, la reproduzca |
+| `RadioPage` | «Mis emisoras» y cuatro sugeridas de fábrica (SomaFM Groove Salad y Lush, Radio Paradise, FIP), alta con nombre/URL/género, renombrar, borrar, importar/exportar y nota honesta: es radio **con búfer**, no directo continuo |
+| `NetworkStore` + `WebDavClient` | Servidores WebDAV (Basic o Bearer) y enlaces de nube directos. `PROPFIND Depth: 1` parseado con expresiones regulares (los namespaces reales rompen un parser ingenuo), navegación por carpetas, subida de nivel, descarga atómica a `cloud_cache` y reproducción de lo bajado |
+| `NetworkPage` | Añadir servidor o enlace, explorar, ver tamaño por entrada, descargar + reproducir, y aviso de que las credenciales se guardan **en claro** |
+| `AudioExportSheet` | Rango inicio/fin sobre la pista actual → `renderWav` con **EQ + 9D + ancho estéreo** (o plano), en dos salidas: **pista masterizada** y **tono de llamada** (recorta a 30 s). Nombre sugerido, `getSaveLocation` y estado del render |
+| `Scrobbler` | Cuenta la escucha si suena **más de la mitad o más de 4 min** (mínimo 30 s por pista) y la envía a **ListenBrainz** (`/1/submit-listens`, `Authorization: Token`) y **Last.fm** (`track.scrobble` firmado con MD5 propio). Cola persistente con 5 reintentos; se vacía al arrancar |
+| `BackupService` | Un `.json` con las secciones que existan (favoritos, listas, colas, pistas largas, estadísticas, emisoras, tema, scrobbling, presets de EQ, sesión). Exportar/restaurar desde **Ajustes**, copiando el JSON tal cual para que la restauración quede idéntica |
+
+Decisiones y límites:
+
+* **El núcleo solo abre archivos**, así que ni la radio ni la nube son flujos
+  continuos: se capturan 12 s (o 24 MB) y se reproducen (R35). Para la radio es
+  suficiente para escuchar; para un disco en la nube se baja el archivo entero.
+* **Sin paquetes nuevos**: `dart:io` para HTTP, `file_selector` (ya estaba) para
+  elegir archivos y un **MD5 portado a mano** (RFC 1321) para Last.fm, con los
+  vectores de siempre probados en `flutter test`.
+* **Credenciales en claro** en `network.json`/`scrobbler.json`, que viven en el
+  directorio privado de la app: es lo mismo que ya hacía la sesión y se avisa en
+  la UI. Cifrarlas pediría `flutter_secure_storage`, es decir, un paquete (R36).
+* **El scrobbling vive en la app, no en Ajustes**: `main.dart` crea el
+  `Scrobbler` al arrancar y lo publica en `ScrobblerHost`; Ajustes solo lo
+  configura. Hay que añadir esa línea fuera del alcance del pedido porque, si no,
+  la escucha solo se contaría con Ajustes abierto.
+* **«Ahora suena» no se publica**: solo se envía la escucha cerrada, que es lo
+  que de verdad pide el 50 %/4 min.
+
+Tests nuevos (28, `test/backup_and_radio_test.dart`): emisoras (alta, idempotencia
+por URL, renombrado, baja, `.m3u`/`.pls` reales, exportación, persistencia y JSON
+roto), bajada contra un `HttpServer` local con ventana y extensión por
+content-type, resolución de listas y 404; MD5 y firma de Last.fm, umbral del
+50 %/4 min, pistas cortas, scrobbling apagado, envío real a los dos servicios
+contra un servidor local, sin red (queda pendiente) y persistencia; copia
+(secciones presentes, restauración, secciones desconocidas/rotas, rechazo de un
+JSON ajeno y nombre sugerido); WebDAV (`207` con espacios codificados, listado
+real y `network.json`); y cinco de widget (Ajustes con las dos secciones nuevas,
+interruptor de scrobbling, exportador con y sin pista).
+
+---
+
 ## 6. Plataformas
 
 ### Escritorio (PC, Arch)
@@ -627,7 +683,7 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 49/49 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 56/56 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -637,6 +693,8 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 3/3 balanceados |
 | Layout FFI | `sizeof/offsetof` en C vs `_ChEvent` | 24 B, 0/4/8/16 |
 | Integración CMake | harness con CMake 4.4 + Zig 0.17.1 | compila; 2ª pasada no-op |
+| MD5 propio (Last.fm) | transliteración a Python comparada con `hashlib` | `''`, `abc` y el pangrama coinciden |
+| Canales y JSON de la 7B | lectura cruzada de nombres de archivo/miembro | los 10 `.json` y los miembros usados por las páginas existen |
 
 ### 7.2 Lo que **no** se puede verificar aquí (lo hace el usuario)
 
@@ -752,7 +810,7 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | R17 | Coste del DSP | la cadena entera (9D + ancho + punch + crossfeed + noche) son ~40 operaciones por muestra a 48 kHz; en el Redmi es despreciable y `isIdle()` la salta por completo cuando todo está apagado | `dsp_spatial.zig` |
 | R20 | ReplayGain on/off sin getter | el núcleo solo exporta `ch_engine_set_replaygain`; el valor se recuerda en `NativePlayer` (arranca activado, como el motor) y se reenvía al restaurar | `native_player.dart` |
 | R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run` y la hoja solo muestra «Exportando…»: no hay barra de progreso | `native_player.dart`, `audio_lab_sheet.dart` |
-| R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
+| R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (56/56), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
 | R28 | Paleta solo en parte de la app | el reproductor, el mini-reproductor y los ajustes leen `paletteOf(context)`; el resto de pantallas siguen con las constantes neón, así que el tema Claro se ve a medias fuera del reproductor | `lib/ui/` |
 | R29 | Gestos sin probar en pantalla táctil | doble toque, arrastres y modo bolsillo están probados simulados en `flutter test`; falta verlos con el dedo (zonas, umbrales de velocidad y pulsación larga) | `player_page.dart` |
 | R33 | Runner GTK sin compilar aquí | `my_application.cc` y `mpris_bridge.cc` están escritos contra GTK3/GIO, pero en el sandbox no hay `pkg-config`, cabeceras de GTK ni `cmake`: solo se comprobó el balanceo de llaves/paréntesis y que los `#include` propios existen. Falta verlos con `flutter run -d linux` | `linux/runner/` |
@@ -763,6 +821,9 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | R26 | Descargas sin verificar en red real | el descargador se prueba contra un `HttpServer` local y contra los parsers del JSON de Archive; falta comprobar la API real (límites, ítems enormes, redirecciones) y que el archivo descargado suene | `audio_downloader.dart` |
 | R27 | Automix sin audio real | el plan y la máquina de estados están probados con un `BpmProbe` inyectado; falta oír una mezcla de verdad y decidir si ±8 % es el límite bueno | `automix_engine.dart` |
 | R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
+| R35 | Radio y nube con búfer, no continuas | el núcleo abre archivos: la radio se captura en ventanas de 12 s/24 MB y suena desde el temporal (hay un salto entre ventanas y no hay metadatos en directo); un archivo de nube se baja entero antes de sonar | `radio_store.dart` |
+| R36 | Credenciales en claro | usuario/contraseña de WebDAV y tokens de ListenBrainz/Last.fm se guardan legibles en el directorio privado de la app; cifrarlos exige `flutter_secure_storage` (paquete nuevo) | `network_page.dart`, `scrobbler.dart` |
+| R37 | WebDAV mínimo | solo `PROPFIND Depth: 1`, Basic/Bearer y descarga por URL; sin `MKCOL`, `PUT`, `LOCK`, ni paginación. Los enlaces «compartidos» de Nextcloud/Dropbox/Drive solo funcionan si la URL descarga el archivo directamente | `network_page.dart` |
 | R25 | Forma de onda decorativa | la tarjeta compartible dibuja una silueta determinista, no los picos reales, porque el núcleo no los expone | `share_card_sheet.dart` |
 | R23 | Presets a 36 llamadas | aplicar un preset dispara 36 `ch_engine_set_band_gain` seguidos (cada uno recalcula los coeficientes de su banda): es instantáneo, pero si algún día la cadena se vuelve pesada hará falta un volcado en bloque en el núcleo | `eq_presets.dart` |
 | R18 | ~~Paisaje sin mando en la UI~~ | **resuelto**: atajo en el pie del reproductor y control con nivel en el laboratorio | `player_page.dart` |
@@ -822,9 +883,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (44 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (45 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 7B → app: radios por Internet, WebDAV/nube, exportador con DSP, scrobbling y copia
 FASE 7A → linux: MPRIS2, %U, drag & drop, siempre encima y notificaciones
 FASE 6B → android: widget 4x1/4x2, azulejo, coche, doble clic del casco y auto-play
 FASE 6A → app(ui): cuatro temas, color de carátula, gestos, mini-reproductor y bolsillo

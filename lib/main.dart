@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'core/native_player.dart';
 import 'core/player_controller.dart';
+import 'core/scrobbler.dart';
 import 'core/session_store.dart';
 import 'core/theme_controller.dart';
 import 'platform/external_file_channel.dart';
@@ -39,6 +40,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
   MediaSessionChannel? _mediaSession;
   ExternalFileChannel? _externalFiles;
   DesktopChannel? _desktop;
+  Scrobbler? _scrobbler;
   SessionKeeper? _session;
   late final ThemeController _theme = ThemeController();
   bool _ownsController = false;
@@ -87,6 +89,18 @@ class _CyberHexAppState extends State<CyberHexApp> {
     _attachMediaSession(controller);
     _attachExternalFiles(controller);
     _attachDesktop(controller);
+    _attachScrobbler(controller);
+  }
+
+  /// Scrobbling de toda la app (ListenBrainz y Last.fm). Se crea una vez y se
+  /// expone por [ScrobblerHost] para que Ajustes lo configure sin recibirlo por
+  /// constructor. Sin token no manda nada, así que no molesta.
+  void _attachScrobbler(PlayerController controller) {
+    final scrobbler = Scrobbler(controller);
+    _scrobbler = scrobbler;
+    ScrobblerHost.attach(scrobbler);
+    // Al cargar los ajustes se reintenta lo que quedara pendiente.
+    unawaited(scrobbler.load().then((_) => scrobbler.flush()));
   }
 
   /// Solo en Linux: MPRIS2, siempre encima, notificaciones de escritorio y el
@@ -143,6 +157,9 @@ class _CyberHexAppState extends State<CyberHexApp> {
     _mediaSession = null;
     _desktop?.dispose();
     _desktop = null;
+    ScrobblerHost.attach(null);
+    _scrobbler?.dispose();
+    _scrobbler = null;
     if (_ownsController) {
       _controller?.dispose();
     }

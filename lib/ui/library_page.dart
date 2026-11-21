@@ -8,9 +8,13 @@ import '../core/favorites_store.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
+import '../core/radio_store.dart';
 import '../core/stats_store.dart';
 import '../theme.dart';
+import 'audio_export_sheet.dart';
 import 'downloader_page.dart';
+import 'network_page.dart';
+import 'radio_page.dart';
 import 'mini_player.dart';
 import 'playlists_page.dart';
 import 'stats_page.dart';
@@ -152,6 +156,36 @@ class _LibraryPageState extends State<LibraryPage>
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => StatsPage(stats: stats)),
     );
+  }
+
+  /// Radios por Internet. El almacén se lee de disco al abrir la página, así
+  /// que no hace falta compartir instancia con el resto de la app.
+  void _openRadio() {
+    final store = RadioStore();
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => RadioPage(store: store, controller: _controller),
+          ),
+        )
+        .whenComplete(store.dispose);
+  }
+
+  /// Explorador WebDAV / enlaces de nube.
+  void _openNetwork() {
+    final store = NetworkStore();
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => NetworkPage(store: store, controller: _controller),
+          ),
+        )
+        .whenComplete(store.dispose);
+  }
+
+  /// Exportador de la pista actual (rango + DSP → WAV/tono).
+  void _openExport() {
+    unawaited(AudioExportSheet.show(context, _controller));
   }
 
   Future<void> _openDownloads() async {
@@ -447,12 +481,21 @@ class _LibraryPageState extends State<LibraryPage>
                   _openStats();
                 case 'downloads':
                   _openDownloads();
+                case 'radio':
+                  _openRadio();
+                case 'network':
+                  _openNetwork();
+                case 'export':
+                  _openExport();
               }
             },
             itemBuilder: (context) => const <PopupMenuEntry<String>>[
               PopupMenuItem(value: 'playlists', child: Text('Listas y colas')),
               PopupMenuItem(value: 'stats', child: Text('Estadísticas')),
               PopupMenuItem(value: 'downloads', child: Text('Descargas')),
+              PopupMenuItem(value: 'radio', child: Text('Radios por Internet')),
+              PopupMenuItem(value: 'network', child: Text('Red y nube')),
+              PopupMenuItem(value: 'export', child: Text('Exportar la pista actual')),
             ],
           ),
         ],

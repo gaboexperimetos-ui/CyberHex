@@ -18,6 +18,75 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 22 · FASE 7B, pedido 9 de 10: radios, red, exportador, scrobbling y copia
+
+- **PEDIDO:** emisoras propias con `.m3u`/`.pls` y streams HTTP/HTTPS (escritura
+  `.tmp`→rename); WebDAV (Basic/Bearer) y enlaces de nube con `dart:io`,
+  explorar/reproducir/cachear; exportador de rango (inicio/fin) → `renderWav`
+  con EQ + 9D + estéreo, como master o tono de llamada; scrobbling >50 % o
+  >4 min a ListenBrainz y Last.fm; copia `.json` unificada con export/import
+  desde Ajustes. PROHIBIDO `core/`, `android/`, `pubspec.yaml`. RIESGO: no
+  (sin cambios de comportamiento no pedidos).
+- **HECHO:**
+  - `lib/core/radio_store.dart` (600): `RadioStation` (+`builtin`, `host`,
+    `isPlaylist`, JSON), `RadioSeed`, `RadioBuffer`, `RadioException` y
+    `RadioStore` en `radios.json`; cuatro emisoras de fábrica; id estable por
+    FNV-1a; `add/remove/rename/clear`; `parsePlaylistText` (m3u/m3u8/PLSv2),
+    `importPlaylist`, `exportM3u`; `resolve` (listas encadenadas, 2 saltos) y
+    `buffer` (ventana 12 s / 24 MB → `${systemTemp}/cyberhex_radio`, `.part` →
+    `rename`, extensión por content-type, limpieza del `.part` si falla).
+  - `lib/core/scrobbler.dart` (620): `ScrobbleSettings`, `PendingScrobble`,
+    `Scrobbler` en `scrobbler.json`; umbral `max(4 min, mitad)` con mínimo 30 s;
+    sigue la pista por `queue[queueIndex].path` con listeners de controlador y
+    posición; `flush()` compartido entre llamadas simultáneas (no duplica),
+    ListenBrainz (`/1/submit-listens`, `Token`), Last.fm (`track.scrobble` con
+    `api_sig`), reintentos hasta 5 y tope de 200 en cola; endpoints inyectables;
+    **MD5 propio** (RFC 1321) al final del archivo; `ScrobblerHost` para la
+    instancia de la app.
+  - `lib/core/backup_service.dart` (330): `BackupSection`/`BackupSummary`/
+    `BackupReport` (resumen en español), 10 secciones, `snapshot()` que omite
+    archivos corruptos, `suggestedName()`, `exportTo`/`importFrom` atómicos,
+    `looksLikeBackup` y `availableSections`.
+  - `lib/ui/radio_page.dart` (450): «Mis emisoras» + sugeridas, alta/renombrar/
+    borrar, importar/exportar lista, progreso de bajada, reproducción desde el
+    temporal y nota honesta de radio con búfer.
+  - `lib/ui/network_page.dart` (720): `RemoteKind`, `RemoteServer`,
+    `RemoteEntry`, `WebDavClient` (`PROPFIND Depth: 1`, Basic/Bearer, parser por
+    regex de `response`/`href`/`collection`/`getcontentlength`, descarga
+    `.part`→rename) y `NetworkStore` en `network.json`; vista de servidores,
+    explorador con subida de nivel, descarga + reproducción en `cloud_cache`,
+    enlace de nube directo y aviso de credenciales en claro.
+  - `lib/ui/audio_export_sheet.dart` (330): rango sobre la duración de la pista,
+    presets master/tono (30 s), interruptor de DSP, `getSaveLocation` y
+    `renderWav(source, destino, start:, end:, withDsp:)`; nombre sugerido.
+  - `lib/ui/settings_page.dart`: pasa a `StatefulWidget` (sin cambios de API:
+    `SettingsPage(theme:, player:, desktop:)` sigue igual) y gana las secciones
+    **Scrobbling** (interruptor, token de ListenBrainz, clave/secreto/sesión de
+    Last.fm, pendientes y «Enviar ahora») y **Copia de seguridad** (exportar y
+    restaurar con el diálogo del sistema), más el acceso al exportador.
+  - `lib/ui/library_page.dart`: tres entradas nuevas en el menú (radios, red y
+    nube, exportar la pista actual).
+  - `lib/main.dart`: crea el `Scrobbler` al arrancar y lo publica en
+    `ScrobblerHost` (una línea fuera del ALCANCE, sin tocar lo PROHIBIDO: sin
+    ella la escucha solo se contaría con Ajustes abierto).
+  - `test/backup_and_radio_test.dart` (28 casos): emisoras, listas reales,
+    ventana contra `HttpServer`, MD5 y firma, umbral, envío a los dos servicios,
+    sin red, copia/restauración, `207` con espacios codificados y cinco de
+    widget.
+- **VERIFICADO:** tree-sitter-dart 56/56; paridad de `PlayerApi` 112/112
+  intacta; MD5 portado contra `hashlib` (tres vectores); lectura cruzada de los
+  nombres de archivo JSON y de los miembros usados por las páginas nuevas;
+  balanceo de llaves y revisadas las rutas de error del `.part`.
+- **NO VERIFICABLE AQUÍ:** `flutter test`/`flutter analyze` (sin SDK), la
+  descarga real desde radios públicas y WebDAV de verdad, y el sonido del tono
+  de llamada exportado. RIESGO: el `Scrobbler` de `main.dart` no se puede
+  ejercitar sin la app.
+- **COMMITS:** `fase 7B` (este turno).
+- **ABIERTO:** R35 (radio con búfer), R36 (credenciales en claro), R37 (WebDAV
+  mínimo). Sigue el pedido 10 (cierre maestro).
+
+---
+
 ## 2026-11-21 · turno 21 · FASE 7A, pedido 8 de 10: escritorio Linux (MPRIS2, %U, DnD)
 
 - **PEDIDO:** `%U` al canal `cyberhex/intent`, MPRIS2 por GDBus, siempre encima,
