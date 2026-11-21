@@ -82,6 +82,8 @@ typedef _SetLoopNative = Int32 Function(Pointer<Void>, Double, Double);
 typedef _SetLoopDart = int Function(Pointer<Void>, double, double);
 typedef _U64Native = Uint64 Function(Pointer<Void>);
 typedef _U64Dart = int Function(Pointer<Void>);
+typedef _NoArgIntNative = Int32 Function();
+typedef _NoArgIntDart = int Function();
 
 const String _libraryName = 'libcyberhex_core.so';
 
@@ -356,6 +358,20 @@ class NativePlayer implements PlayerApi {
   /// Pistas que el motor se saltó por no poder abrirlas.
   int get skippedTracks => _bindings.skippedTracks?.call(_engine) ?? 0;
 
+  /// Balance estéreo: -1 izquierda, 0 centro, +1 derecha.
+  void setBalance(double balance) => _bindings.setBalance?.call(_engine, balance);
+
+  double get balance => _bindings.balance?.call(_engine) ?? 0;
+
+  /// 0 = estéreo, 1 = mono, 2 = canales intercambiados.
+  void setChannelMode(int mode) =>
+      _bindings.setChannelMode?.call(_engine, mode);
+
+  int get channelMode => _bindings.channelMode?.call(_engine) ?? 0;
+
+  /// ABI del núcleo cargado (0 si la librería es tan antigua que no lo expone).
+  static int get coreAbiVersion => _Bindings.instance.abiVersion?.call() ?? 0;
+
   @override
   PlayerEvent? pollEvent() {
     if (_disposed) return null;
@@ -456,6 +472,21 @@ class _Bindings {
         skippedTracks = lib.providesSymbol('ch_engine_skipped_tracks')
             ? lib.lookupFunction<_U64Native, _U64Dart>('ch_engine_skipped_tracks')
             : null,
+        abiVersion = lib.providesSymbol('ch_engine_abi_version')
+            ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>('ch_engine_abi_version')
+            : null,
+        setBalance = lib.providesSymbol('ch_engine_set_balance')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_balance')
+            : null,
+        balance = lib.providesSymbol('ch_engine_balance')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_balance')
+            : null,
+        setChannelMode = lib.providesSymbol('ch_engine_set_channel_mode')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_channel_mode')
+            : null,
+        channelMode = lib.providesSymbol('ch_engine_channel_mode')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_channel_mode')
+            : null,
         titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
         artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
         albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
@@ -492,6 +523,11 @@ class _Bindings {
   final _DoubleDart? loopStart;
   final _DoubleDart? loopEnd;
   final _U64Dart? skippedTracks;
+  final _NoArgIntDart? abiVersion;
+  final _SetFloatDart? setBalance;
+  final _GetFloatDart? balance;
+  final _SetIntDart? setChannelMode;
+  final _IntDart? channelMode;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;
