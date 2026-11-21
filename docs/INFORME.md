@@ -36,8 +36,11 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **5 691 líneas**, **97 funciones FFI**, ABI **3**, versión **0.8.0**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **1 762 líneas Dart** + **327 de tests**. Estado centralizado en
+- App: **2 074 líneas Dart** + **578 de tests**. Estado centralizado en
   `PlayerController` (testeable **sin** la `.so`).
+- Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
+  reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
+  Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
 - Verificado aquí: 13 tests Zig, `.so` ReleaseFast nativa y cruzada aarch64,
   prueba de humo con audio real y el build de escritorio con CMake real.
 - **No verificado aquí** (falta SDK): `flutter analyze`, `flutter test`,
@@ -59,14 +62,18 @@ core/                       motor nativo (Zig 0.17.1 + C23)          5 691 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                  1 762 líneas
+lib/                        app Flutter                                  2 074 líneas
   core/player_api.dart      contrato PlayerApi + PlayerSnapshot + PlayerEvent
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
+  platform/media_session_channel.dart  puente Dart del canal cyberhex/media
   ui/{player_page,eq_sheet,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       11 tests Dart                                327 líneas
+test/                       20 tests Dart                                578 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
+  app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
+  app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
+  app/src/main/kotlin/…/MediaSessionService.kt 566 líneas, FGS + MediaSession
 linux/                      CMake: compila y empaqueta el núcleo en bundle/lib
 packaging/linux/            PKGBUILD de Arch + .desktop + icono SVG
 docs/                       este informe y la bitácora
@@ -134,10 +141,16 @@ Flutter UI (lib/)  ──PlayerController──  native_player.dart
 | `player_api.dart` | `PlayerApi` (contrato), `PlayerSnapshot` (inmutable, `==`), `PlayerEvent` |
 | `player_controller.dart` | `ChangeNotifier`; drena eventos, refresca snapshot, `ValueNotifier<double> position` |
 | `native_player.dart` | Implementa `PlayerApi` sobre FFI; **todo símbolo opcional con `providesSymbol`** (una `.so` vieja sigue cargando) |
+| `platform/media_session_channel.dart` | Puente con Android: `updateMetadata`/`updateState` (throttle 1 s) hacia Kotlin y comandos (`play`, `pause`, `toggle`, `next`, `previous`, `seek`, `setVolume`, `duck`) hacia el controlador |
 | `ui/player_page.dart` | Consume `ListenableBuilder` + `ValueListenableBuilder`; teclado (espacio) |
 | `ui/eq_sheet.dart` | 36 bandas contra el controlador |
 
-Tests: 7 del controlador + 3 de widget con `FakePlayer` (sin FFI) + 1 de tema.
+`PlayerApi` incluye `next()`/`previous()`; `NativePlayer` los bindea con
+`providesSymbol` y quedan en `null` (no-op) si la `.so` es anterior a la ABI que
+los exporta.
+
+Tests: 9 del controlador + 7 del canal de medios + 3 de widget + 1 de tema, todos
+con `FakePlayer`/canal simulado (sin FFI, sin teléfono).
 
 ---
 
@@ -164,10 +177,60 @@ flutter build apk --release                       # Gradle compila el núcleo
 
 - `abiFilters = arm64-v8a`; tarea `buildCyberHexCore` incremental y saltable con
   `--android-project-arg=skipCoreBuild=true`.
-- Manifest: `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE` (≤12), `WAKE_LOCK`.
-  Permisos de servicio en primer plano **comentados** a la espera del servicio.
+- Manifest: `READ_MEDIA_AUDIO`, `READ_EXTERNAL_STORAGE` (≤12), `WAKE_LOCK`,
+  `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MEDIA_PLAYBACK` y
+  `POST_NOTIFICATIONS`; `<service android:name=".MediaSessionService"
+  android:foregroundServiceType="mediaPlayback" android:stopWithTask="false">`.
 - **Riesgo actual**: sin FFmpeg estático, el APK no reproduce `.m4a/.aac`
   (miniaudio solo trae WAV/FLAC/MP3/Vorbis).
+
+#### Reproducción en segundo plano (P0.1, escrito)
+
+El motor de audio sigue en Dart; Kotlin **no** reproduce nada. Tres piezas:
+
+```
+PlayerController ──updateMetadata/updateState──▶ MediaBridge ──▶ MediaSessionService
+      ▲                                                              │
+      └──── play/pause/toggle/next/previous/seek/duck ◀── MediaSession.Callback,
+                                                          acciones de la notificación,
+                                                          audio focus, becoming-noisy
+```
+
+| Pieza | Detalle |
+|---|---|
+| `MediaBridge.kt` (205) | Dueño del `MethodChannel("cyberhex/media")`. Guarda el último snapshot y lo reenvía al servicio cuando se engancha (servicio recreado). Si el canal no existe, **encola hasta 16 comandos** y los drena en `connect()`. |
+| `MediaSessionService.kt` (566) | Servicio en primer plano `mediaPlayback`. Publica `MediaSession` + `PlaybackState` (`ACTION_PLAY/PAUSE/PLAY_PAUSE/SKIP_TO_NEXT/SKIP_TO_PREVIOUS/SEEK_TO/STOP`) y `MediaMetadata` (título, artista, álbum, duración y carátula reducida a ≤1024 px). |
+| `MainActivity.kt` (52) | `configureFlutterEngine` → `MediaBridge.connect`; `cleanUpFlutterEngine` → `disconnect`; `POST_NOTIFICATIONS` en runtime desde `onPostResume` (API 33+). |
+
+Estados de la notificación:
+
+- **Suena**: `startForeground()` (con `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK` en
+  API 29+), notificación `ongoing` — no se puede deslizar. Tres acciones (anterior,
+  play/pausa, siguiente) en la vista compacta vía `Notification.MediaStyle`.
+- **Pausa**: `stopForeground(STOP_FOREGROUND_DETACH)`; en API < 24
+  `stopForeground(false)`. Se repinta con `setOngoing(false)` y `deleteIntent`, así
+  que **deslizarla cierra** la reproducción (`pause` a Dart + `stopSelf()`).
+- **Cierre**: `START_NOT_STICKY` y `stopWithTask="false"`: quitar la tarea de
+  Recientes no mata el servicio.
+
+Audio focus (`AudioFocusRequest` en API 26+, API clásica por debajo):
+
+| Evento | Reacción |
+|---|---|
+| `LOSS` | `pause` (definitiva, no se reanuda) |
+| `LOSS_TRANSIENT` | `pause` y **reanuda** al llegar `GAIN` |
+| `LOSS_TRANSIENT_CAN_DUCK` | `duck(true)`; `duck(false)` en `GAIN` (25 % del volumen del usuario, restaurado exacto) |
+
+Si el foco se **niega** al empezar, se manda `pause` a Dart: nunca suena sin
+foco. Auriculares fuera: receptor dinámico de `ACTION_AUDIO_BECOMING_NOISY` →
+`pause`. Todos los `PendingIntent` usan `FLAG_IMMUTABLE` en API ≥ 23; cada acción
+lleva su propio *action* y *requestCode* para no colisionar.
+
+> **Limitación conocida (P0.4):** el `FlutterEngine` pertenece a `MainActivity`;
+> si se quita la tarea de Recientes, la actividad —y con ella el motor de
+> audio— se destruye aunque el servicio siga vivo. Para que la música sobreviva
+> a Recientes hace falta un `FlutterEngine` cacheado en una clase `Application`
+> (un cuarto archivo Kotlin, fuera del ALCANCE de este pedido).
 
 ---
 
@@ -182,7 +245,11 @@ flutter build apk --release                       # Gradle compila el núcleo
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 12/12 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 14/14 sin errores |
+| Firmas de `PlayerApi` | comprobador propio: 25 miembros en `NativePlayer` y `FakePlayer` | 25/25 en ambos |
+| Coherencia del canal | grep cruzado Dart↔Kotlin de nombres de método | 2/2 y 7/7 sin huérfanos |
+| XML de Android | `ElementTree` sobre `AndroidManifest.xml` | válido; 6 permisos, 1 servicio `mediaPlayback` |
+| Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 3/3 balanceados |
 | Layout FFI | `sizeof/offsetof` en C vs `_ChEvent` | 24 B, 0/4/8/16 |
 | Integración CMake | harness con CMake 4.4 + Zig 0.17.1 | compila; 2ª pasada no-op |
 
@@ -194,6 +261,9 @@ flutter build apk --release                       # Gradle compila el núcleo
 - `flutter build linux` / `flutter build apk` — sin GTK, sin NDK, sin FFmpeg de
   desarrollo, sin `pub.dev` (no se pueden añadir dependencias nuevas y validarlas).
 - Cualquier prueba en el teléfono.
+
+- `kotlinc` / Gradle: tampoco hay JDK ni caché de Maven en este entorno, así que
+  **el Kotlin del servicio tampoco compila aquí**.
 
 > **Regla para el arquitecto:** todo pedido que toque Dart, Kotlin, Gradle o
 > `pubspec.yaml` sale de aquí como "escrito y revisado", nunca como "probado".
@@ -210,6 +280,16 @@ flutter build apk --release                       # Gradle compila el núcleo
 6. Los símbolos FFI nuevos se bindean con `providesSymbol` (compatibilidad hacia atrás).
 7. `PlayerController` no conoce FFI: `PlayerApi` inyectable, tests sin `.so`.
 8. Commits pequeños y reversibles, mensajes en español, un pedido por commit.
+9. `next()`/`previous()` son **void** y no tocan el estado: el cambio de pista lo
+   anuncia `CH_EVENT_TRACK` y el controlador relee etiquetas.
+10. Canal `cyberhex/media` (contrato congelado):
+    - **Dart → Kotlin**: `updateMetadata{title,artist,album,durationMs,art}`,
+      `updateState{playing,positionMs,durationMs,buffering}` (≤1 Hz).
+    - **Kotlin → Dart**: `play`, `pause`, `toggle`, `next`, `previous`,
+      `seek(double segundos)`, `setVolume(double 0..1)`, `duck(bool)`.
+    - Todo devuelve `Future<bool>`/`Boolean`; `MissingPluginException` se ignora.
+    - Sin `androidx.media` ni media3: `android.media.session.MediaSession` +
+      `Notification.MediaStyle` (API 21+), cero dependencias nuevas.
 
 ---
 
@@ -217,7 +297,7 @@ flutter build apk --release                       # Gradle compila el núcleo
 
 | # | Riesgo | Detalle | Dónde |
 |---|---|---|---|
-| R1 | Dart/Kotlin sin compilar | nadie ha pasado `flutter analyze` desde que empezó el trabajo | `lib/`, `android/` |
+| R1 | Dart/Kotlin sin compilar | nadie ha pasado `flutter analyze`/`kotlinc`; el puente y el servicio son lo más nuevo y lo más frágil | `lib/`, `android/` |
 | R2 | Sin FFmpeg en Android | `.m4a/.aac/.alac` no suenan si no se compila el estático | `build_android.sh` |
 | R3 | 48 kHz fijos | en PC con DAC a 44,1 kHz todo pasa por resample | `root.zig` |
 | R4 | Pausa cerca del fin de pista | el fundido puede avanzar `played` al segmento siguiente | `root.zig`, render |
@@ -226,7 +306,10 @@ flutter build apk --release                       # Gradle compila el núcleo
 | R7 | Sin dither a S16 | conversión final sin dithering (inaudible, pero es deuda) | `audio.c` |
 | R8 | `ffmpeg.tar.xz` en git | ~decenas de MB; decisión de empaquetado pendiente (A4) | `core/third_party/` |
 | R9 | Sin CI | ninguna acción de GitHub valida nada | `.github/` (no existe) |
-| R10 | App de Android incompleta | sin MediaSession ni servicio: la música se corta al salir | `android/` |
+| R10 | Android antes de P0.1 | ~~sin MediaSession ni servicio~~ **resuelto** en P0.1 (notificación, bloqueo, foco, auriculares) | `android/` |
+| R11 | Recientes mata el motor | el `FlutterEngine` vive en la actividad: quitar la tarea corta el audio aunque el servicio siga | `MainActivity.kt` → P0.4 |
+| R12 | Icono de la notificación | `android.R.drawable.ic_media_play` como *small icon* (monocromo del sistema); falta un vector propio | `MediaSessionService.kt` |
+| R13 | FGS desde segundo plano | Android 12+ prohíbe arrancar un FGS en background salvo excepciones; aquí se arranca al pulsar play con la app delante | `MediaBridge.ensureServiceStarted` |
 
 ---
 
@@ -236,7 +319,8 @@ flutter build apk --release                       # Gradle compila el núcleo
 
 | # | Tarea | Alcance | Bloqueos |
 |---|---|---|---|
-| P0.1 | `MediaSession` + servicio en primer plano (`mediaPlayback`), audio focus, controles en notificación y pantalla de bloqueo | Kotlin + manifest + MethodChannel | no verificable aquí; decidir si se escribe a mano (sin dependencias nuevas) |
+| P0.1 | ~~`MediaSession` + servicio en primer plano~~ **HECHO** (turno 9): servicio, foco, notificación y bloqueo, sin dependencias nuevas | Kotlin + manifest + Dart | falta compilar y probar en el teléfono |
+| P0.4 | `FlutterEngine` cacheado en una `Application` propia para que la música sobreviva a "quitar de Recientes" | Kotlin (archivo nuevo) + manifest | requiere otra clase y cambiar el `android:name` del `<application>` |
 | P0.2 | Pantallas de **biblioteca** (escaneo con `ch_library_*`) y **cola** (reordenar, quitar, saltar) | Dart | no verificable aquí |
 | P0.3 | Abrir archivos desde el gestor: `Intent.ACTION_VIEW` (Android) y `%U` en `.desktop` | Kotlin/Dart + runner C | requiere pasar argv a Dart |
 
@@ -277,9 +361,12 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (26 commits desde `eca1490`)
+## 12. Changelog (29 commits desde `eca1490`)
 
 ```
+PEDIDO 3 → android: servicio en primer plano, MediaSession, foco y notificación
+PEDIDO 2 → app(platform): puente Dart ↔ servicio de medios por MethodChannel
+PEDIDO 1 → app(core): next/previous desde el FFI hasta el controlador
 2a330cd core: EQ de 36 bandas consultable y set_band_gain que conserva el resto
 cb70420 app: metadatos, carátula y ecualizador real de 36 bandas
 db40214 build(android): tarea del núcleo incremental y opcional

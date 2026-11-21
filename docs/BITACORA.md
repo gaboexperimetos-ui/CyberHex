@@ -18,6 +18,57 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 9 · P0.1: next/previous, canal de medios y servicio Kotlin
+
+- **PEDIDO:** tres pedidos estrictos, un commit reversible cada uno: (1) exponer
+  `next()`/`previous()` desde el FFI hasta `PlayerApi`; (2) puente Dart del canal
+  `cyberhex/media` enganchado en `main.dart` solo en Android; (3) servicio en
+  primer plano con `MediaSession` en Kotlin. `RIESGO ACEPTABLE`: no, no, **sí**.
+- **HECHO (P1, commit `f43f040`):** `_Bindings` enlaza `ch_engine_next` y
+  `ch_engine_previous` con `providesSymbol` (si la `.so` no los exporta quedan en
+  `null` y son no-op); `PlayerApi` declara `next()`/`previous()`; `NativePlayer`,
+  `PlayerController` (con `_refresh()`) y `FakePlayer` los implementan; 2 tests
+  nuevos (llegan al motor / se ignoran tras `dispose`). No toca `core/`,
+  `android/`, `pubspec.yaml` ni `lib/ui/`.
+- **HECHO (P2, commit `fdf07ed`):** `lib/platform/media_session_channel.dart`
+  (247 líneas): escucha el controlador y su `position`; `updateMetadata` al
+  cambiar pista/etiquetas/duración/carátula; `updateState` con throttle por
+  **segundo entero** de posición; comandos entrantes `play`, `pause`, `toggle`,
+  `next`, `previous`, `seek` (recortado a `[0, duración]`), `setVolume`, `duck`
+  (25 % del volumen guardado, restaurado exacto; `duck(true)` repetido no pierde
+  el original); `MissingPluginException` ignorado; `main.dart` lo engancha bajo
+  `Platform.isAndroid` y lo suelta en `dispose()` antes del controlador. 7 tests
+  con `TestDefaultBinaryMessengerBinding`. Sin paquetes nuevos.
+- **HECHO (P3, este commit):** `MediaSessionService.kt` (566 líneas) y
+  `MediaBridge.kt` (205), `MainActivity.kt` (52), `AndroidManifest.xml`.
+  FGS `mediaPlayback` (`START_NOT_STICKY`, `stopWithTask="false"`); pausa →
+  `STOP_FOREGROUND_DETACH` (`stopForeground(false)` < API 24) con
+  `setOngoing(false)` + `deleteIntent` para cerrar deslizando; `MediaMetadata`
+  con duración y carátula (≤1024 px); `PlaybackState` con play/pause/play-pause/
+  skip next/skip previous/seek/stop; receptor dinámico de
+  `ACTION_AUDIO_BECOMING_NOISY`; audio focus completo (LOSS→pausa,
+  LOSS_TRANSIENT→pausa+reanuda en GAIN, CAN_DUCK→`duck(true)`/`duck(false)`);
+  `FLAG_IMMUTABLE` desde API 23; ramas por SDK en 26/29/33; `POST_NOTIFICATIONS`
+  en runtime desde `onPostResume`. `MediaBridge` encola hasta 16 comandos si el
+  canal no está adjunto y los drena en `configureFlutterEngine`.
+- **VERIFICADO:** tree-sitter-dart 14/14 sin errores; comprobador de firmas
+  (25/25 miembros en `NativePlayer` y `FakePlayer`); grep cruzado del canal
+  (Dart acepta los 7 comandos que Kotlin emite; Kotlin acepta los 2 métodos que
+  Dart envía; mismo nombre de canal); `ElementTree` valida el manifest (6
+  permisos, servicio `mediaPlayback`); escáner de llaves/paréntesis en los 3
+  `.kt` (balanceados). Sin `core/`, `build.gradle.kts`, `settings.gradle.kts` ni
+  `libs.versions.toml` en el diff.
+- **NO VERIFICABLE AQUÍ:** `flutter analyze`, `flutter test`, `kotlinc`, Gradle y
+  cualquier prueba en el teléfono (no hay SDK ni JDK). El Kotlin se entrega
+  "escrito, no compilado".
+- **COMMITS:** `f43f040` (P1), `fdf07ed` (P2), este (P3).
+- **ABIERTO / RIESGOS:** R11 (quitar la tarea de Recientes destruye el
+  `FlutterEngine` y con él el audio → P0.4), R12 (falta un *small icon*
+  monocromo propio), R13 (Android 12+ prohíbe arrancar el FGS desde background:
+  hoy se arranca al pulsar play con la app delante).
+
+---
+
 ## 2026-11-21 · turno 8 · Informe para el arquitecto
 
 - **PEDIDO:** resumen del trabajo y traspaso a un arquitecto externo; todo lo
