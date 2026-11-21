@@ -48,6 +48,13 @@ pub const EV_SLEEP: c_int = 5;
 extern fn ch_playlist_read(path: [*c]const u8) ChPlaylist;
 extern fn ch_playlist_free(playlist: *ChPlaylist) void;
 extern fn ch_playlist_write(path: [*c]const u8, items: [*c]const [*c]const u8, count: c_int) i32;
+
+const ch_lyrics = opaque {};
+extern fn ch_lyrics_read_file(path: [*c]const u8) ?*ch_lyrics;
+extern fn ch_lyrics_free(lyrics: ?*ch_lyrics) void;
+extern fn ch_lyrics_count(lyrics: ?*ch_lyrics) c_int;
+extern fn ch_lyrics_line_at(lyrics: ?*ch_lyrics, time_s: f64, line_start: ?*f64, index: ?*c_int) [*c]const u8;
+extern fn ch_lyrics_offset_ms(lyrics: ?*ch_lyrics) [*c]const u8;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -97,6 +104,19 @@ fn copyCString(dst: *[256]u8, src: [*c]const u8) void {
     dst[n] = 0;
 }
 
+/// Sustituye la extension de `path` por `.lrc` (nueva cadena del allocador).
+fn lrcPathFor(allocator: Allocator, path: []const u8) ![:0]u8 {
+    var base = path;
+    if (std.mem.lastIndexOfScalar(u8, base, '.')) |dot| {
+        const slash = std.mem.lastIndexOfScalar(u8, base, '/');
+        if (slash == null or dot > slash.?) base = base[0..dot];
+    }
+    const out = try allocator.allocSentinel(u8, base.len + 4, 0);
+    @memcpy(out[0..base.len], base);
+    @memcpy(out[base.len..], ".lrc");
+    return out;
+}
+
 const Ring = struct {
     buf: []f32 = undefined,
     cap: usize = 0,
@@ -132,6 +152,8 @@ const Segment = struct {
     rg_gain_db: f32 = 0,
     rg_peak: f32 = 0,
     cover: ?[]u8 = null,
+    lyrics: ?*ch_lyrics = null,
+    lyrics_offset: f64 = 0,
 };
 
 threadlocal var tls_title: [256]u8 = undefined;
@@ -319,6 +341,7 @@ pub const Engine = struct {
         if (pos + 1 >= self.seg_count) return;
         for (self.segments[pos + 1 .. self.seg_count]) |*s| {
             if (s.cover) |c| self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            if (s.lyrics) |ly| ch_lyrics_free(ly);
             s.* = .{};
         }
         self.seg_count = pos + 1;
@@ -328,6 +351,7 @@ pub const Engine = struct {
         self.seg_lock.lock();
         for (self.segments[0..self.seg_count]) |*s| {
             if (s.cover) |c| self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            if (s.lyrics) |ly| ch_lyrics_free(ly);
             s.* = .{};
         }
         self.seg_count = 0;
@@ -358,6 +382,8 @@ pub const Engine = struct {
                 self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
             }
             self.segments[i].cover = null;
+            if (self.segments[i].lyrics) |ly| ch_lyrics_free(ly);
+            self.segments[i].lyrics = null;
         }
 
         const remaining = self.seg_count - keep;
@@ -370,6 +396,18 @@ pub const Engine = struct {
         self.seg_count = remaining;
         self.running_end -= offset;
         _ = @atomicRmw(usize, &self.played, .Sub, offset, .release);
+    }
+
+    fn loadLyricsFor(self: *Engine, index: usize, seg: *Segment) void {
+        if (index >= self.playlist.items.len) return;
+        const path = self.playlist.items[index];
+        const lrc = lrcPathFor(self.allocator, path) catch return;
+        defer self.allocator.free(lrc);
+        const lyrics = ch_lyrics_read_file(lrc.ptr);
+        if (lyrics) |ly| {
+            seg.lyrics = ly;
+            seg.lyrics_offset = parseLeadingFloat(std.mem.span(ch_lyrics_offset_ms(ly))) orelse 0;
+        }
     }
 
     fn addSegment(self: *Engine, index: usize, d: *ch_decoder, overlap: usize) bool {
@@ -411,6 +449,9 @@ pub const Engine = struct {
             } else |_| {}
         }
 
+        // Letra sincronizada: se busca un .lrc junto al audio (mismo nombre).
+        self.loadLyricsFor(index, &seg);
+
         self.seg_lock.lock();
         if (overlap > 0 and self.seg_count > 0) {
             const prev = &self.segments[self.seg_count - 1];
@@ -441,6 +482,22 @@ pub const Engine = struct {
         }
         self.seg_lock.unlock();
     }
+
+fn audibleLyrics(self: *Engine) ?*ch_lyrics {
+    self.seg_lock.lock();
+    defer self.seg_lock.unlock();
+    const p = @atomicLoad(usize, &self.played, .acquire);
+    if (self.findSegment(p)) |pos| return self.segments[pos].lyrics;
+    return null;
+}
+
+fn audibleLyricsOffset(self: *Engine) f64 {
+    self.seg_lock.lock();
+    defer self.seg_lock.unlock();
+    const p = @atomicLoad(usize, &self.played, .acquire);
+    if (self.findSegment(p)) |pos| return self.segments[pos].lyrics_offset;
+    return 0;
+}
 
     fn audibleIndex(self: *Engine) ?usize {
         self.seg_lock.lock();
@@ -1181,6 +1238,7 @@ fn destroyEngine(e: *Engine) void {
     if (e.decoder) |d| ch_decode_close(d);
     for (e.segments[0..e.seg_count]) |*s| {
         if (s.cover) |c| e.allocator.free(c);
+        if (s.lyrics) |ly| ch_lyrics_free(ly);
     }
     for (e.retired_covers.items) |c| e.allocator.free(c);
     e.retired_covers.deinit(e.allocator);
@@ -1944,6 +2002,35 @@ export fn ch_engine_album(self: ?*Engine) [*c]const u8 {
     const e = self orelse return @ptrCast("");
     e.copyMetaField(&tls_album, "album");
     return @ptrCast(&tls_album);
+}
+
+export fn ch_engine_lyrics_count(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return @intCast(ch_lyrics_count(e.audibleLyrics()));
+}
+
+/// Texto de la linea activa en la posicion actual, o "" si no hay letra.
+export fn ch_engine_lyric_line(self: ?*Engine, out: [*c]u8, out_size: u32) i32 {
+    const e = self orelse return -1;
+    if (out == null or out_size == 0) return -1;
+    const lyrics = e.audibleLyrics() orelse {
+        out[0] = 0;
+        return 0;
+    };
+    const pos = @as(f64, @floatFromInt(@atomicLoad(usize, &e.played, .acquire))) /
+        @as(f64, @floatFromInt(SAMPLE_RATE));
+    const adjusted = pos - e.audibleLyricsOffset() / 1000.0;
+    const line = ch_lyrics_line_at(lyrics, adjusted, null, null);
+    const dst = out[0..@as(usize, out_size)];
+    if (line == null) {
+        dst[0] = 0;
+        return 0;
+    }
+    const src = std.mem.span(line);
+    const n = @min(src.len, dst.len - 1);
+    @memcpy(dst[0..n], src[0..n]);
+    dst[n] = 0;
+    return @intCast(n);
 }
 
 export fn ch_engine_cover(self: ?*Engine, size: ?*u64) [*c]const u8 {

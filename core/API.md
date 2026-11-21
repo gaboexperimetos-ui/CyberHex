@@ -123,6 +123,10 @@ const char*    ch_engine_artist(ch_engine* engine);
 const char*    ch_engine_album(ch_engine* engine);
 const uint8_t* ch_engine_cover(ch_engine* engine, uint64_t* size);
 
+/* Letra sincronizada (LRC): se busca un .lrc junto al audio. */
+int32_t ch_engine_lyrics_count(ch_engine* engine);
+int32_t ch_engine_lyric_line(ch_engine* engine, char* out, uint32_t out_size);
+
 double  ch_engine_position(ch_engine* engine);   /* segundos */
 double  ch_engine_duration(ch_engine* engine);   /* segundos, 0 si se desconoce */
 double  ch_engine_sample_rate(ch_engine* engine);

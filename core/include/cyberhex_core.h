@@ -104,6 +104,11 @@ const char* ch_engine_album(ch_engine* engine);
 /* Devuelve la carátula embebida (JPEG/PNG) o NULL; escribe el tamaño en bytes. */
 const uint8_t* ch_engine_cover(ch_engine* engine, uint64_t* size);
 
+/* Letra sincronizada (LRC) buscada junto al audio (.lrc con el mismo nombre). */
+int32_t ch_engine_lyrics_count(ch_engine* engine);
+/* Copia la linea activa en `out` (UTF-8). Devuelve bytes escritos o -1. */
+int32_t ch_engine_lyric_line(ch_engine* engine, char* out, uint32_t out_size);
+
 double ch_engine_position(ch_engine* engine);
 double ch_engine_duration(ch_engine* engine);
 double ch_engine_sample_rate(ch_engine* engine);
