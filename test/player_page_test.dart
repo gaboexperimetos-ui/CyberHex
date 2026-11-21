@@ -1,0 +1,66 @@
+import 'package:cyberhex/core/player_controller.dart';
+import 'package:cyberhex/theme.dart';
+import 'package:cyberhex/ui/player_page.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
+
+import 'fake_player.dart';
+
+void main() {
+  testWidgets('sin pista muestra la bienvenida y el botón de abrir',
+      (tester) async {
+    final controller = PlayerController(FakePlayer());
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildCyberHexTheme(),
+      home: PlayerPage(controller: controller),
+    ));
+
+    expect(find.text('Tu música, en tu máquina'), findsOneWidget);
+    expect(find.text('Abrir audio'), findsOneWidget);
+    expect(find.text('CYBERHEX'), findsOneWidget);
+  });
+
+  testWidgets('con pista muestra título, artista, álbum y duración',
+      (tester) async {
+    final fake = FakePlayer()
+      ..hasTrack = true
+      ..title = 'Canción'
+      ..artist = 'Artista'
+      ..album = 'Álbum'
+      ..duration = 185;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.pump();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildCyberHexTheme(),
+      home: PlayerPage(controller: controller),
+    ));
+
+    expect(find.text('Canción'), findsOneWidget);
+    expect(find.text('Artista · Álbum'), findsOneWidget);
+    expect(find.text('3:05 · motor nativo 48 kHz'), findsOneWidget);
+  });
+
+  testWidgets('el icono cambia a pausa cuando el motor reproduce',
+      (tester) async {
+    final fake = FakePlayer()
+      ..hasTrack = true
+      ..title = 'Canción';
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.pump();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildCyberHexTheme(),
+      home: PlayerPage(controller: controller),
+    ));
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+
+    controller.play();
+    await tester.pump();
+    expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+  });
+}

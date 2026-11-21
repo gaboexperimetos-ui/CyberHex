@@ -1,15 +1,15 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../core/native_player.dart';
+import '../core/player_controller.dart';
 import '../theme.dart';
 
 /// Ecualizador real del núcleo: 36 bandas logarítmicas de 20 Hz a 20 kHz,
 /// con ±18 dB de recorrido. Las etiquetas salen de `ch_engine_eq_band_freq`,
 /// no de una tabla fija, para que no vuelvan a desincronizarse.
 class EqualizerSheet extends StatefulWidget {
-  const EqualizerSheet({super.key, required this.player});
+  const EqualizerSheet({super.key, required this.controller});
 
-  final NativePlayer player;
+  final PlayerController controller;
 
   @override
   State<EqualizerSheet> createState() => _EqualizerSheetState();
@@ -28,8 +28,8 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final gains = widget.player.eqGains;
-    final frequencies = widget.player.eqBandFrequencies;
+    final gains = widget.controller.eqGains;
+    final frequencies = widget.controller.eqBandFrequencies;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
@@ -46,7 +46,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => setState(widget.player.resetEq),
+                  onPressed: () => setState(widget.controller.resetEq),
                   child: const Text('Plano'),
                 ),
               ],
@@ -73,7 +73,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                             label: _formatHz(frequencies[i]),
                             value: gains[i],
                             onChanged: (value) =>
-                                setState(() => widget.player.setBand(i, value)),
+                                setState(() => widget.controller.setBand(i, value)),
                           ),
                         ),
                     ],

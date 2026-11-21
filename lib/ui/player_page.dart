@@ -1,84 +1,61 @@
-import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
-import '../core/native_player.dart';
+import '../core/player_api.dart';
+import '../core/player_controller.dart';
 import '../theme.dart';
 import 'eq_sheet.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key});
+  const PlayerPage({super.key, required this.controller});
+
+  final PlayerController controller;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateMixin {
-  NativePlayer? _player;
-  String? _initError;
-
-  Timer? _poll;
-  final _position = ValueNotifier<double>(0);
+class _PlayerPageState extends State<PlayerPage>
+    with SingleTickerProviderStateMixin {
   double _dragPosition = 0;
   bool _dragging = false;
-  bool _busy = false;
-  bool _lastPlaying = false;
-  Future<bool>? _loading;
-  double _volume = 1;
 
   late final AnimationController _spin = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 12),
   );
 
+  PlayerController get _controller => widget.controller;
+
   @override
   void initState() {
     super.initState();
-    _player = NativePlayer.open();
-    if (_player == null) {
-      _initError = NativePlayer.lastCoreError();
-    }
-    _poll = Timer.periodic(const Duration(milliseconds: 250), (_) => _tick());
+    _controller.addListener(_syncSpin);
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (reduceMotion || !(_player?.isPlaying ?? false)) {
-      _spin.stop();
-    }
+  void dispose() {
+    _controller.removeListener(_syncSpin);
+    _spin.dispose();
+    super.dispose();
   }
 
-  void _tick() {
-    final player = _player;
-    if (player == null || !mounted) {
-      return;
-    }
-    if (!_dragging) {
-      _position.value = player.position;
-    }
-    // Si la pista trae carátula, el disco se queda quieto y no gastamos frames.
-    final shouldSpin = player.isPlaying && player.cover == null && !_busy;
+  /// El disco solo gira con audio sonando y sin carátula (arte estático).
+  void _syncSpin() {
+    final snapshot = _controller.snapshot;
+    final shouldSpin = snapshot.playing && snapshot.cover == null && !snapshot.busy;
     if (shouldSpin && !_spin.isAnimating) {
       _spin.repeat();
     } else if (!shouldSpin && _spin.isAnimating) {
       _spin.stop();
     }
-    // La posición la pinta _SeekBar con su ValueNotifier: aquí solo hay que
-    // reconstruir cuando cambia algo que se ve en el resto de la pantalla.
-    if (player.isPlaying != _lastPlaying) {
-      _lastPlaying = player.isPlaying;
-      setState(() {});
-    }
   }
 
   Future<void> _openFile() async {
-    if (_busy) {
+    if (_controller.snapshot.busy) {
       return;
     }
     const group = XTypeGroup(
@@ -86,152 +63,117 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
       extensions: ['mp3', 'flac', 'wav', 'ogg', 'opus', 'm4a', 'aac', 'aiff'],
     );
     final file = await openFile(acceptedTypeGroups: const [group]);
-    final player = _player;
-    if (file == null || player == null || !mounted) {
+    if (file == null || !mounted) {
       return;
     }
-    setState(() => _busy = true);
-    final loading = player.loadAsync(file.path);
-    _loading = loading;
-    final ok = await loading;
-    _loading = null;
-    if (!mounted) {
+    final error = await _controller.openFile(file.path);
+    if (!mounted || error == null) {
       return;
     }
-    setState(() => _busy = false);
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(player.lastError)),
-      );
-      return;
-    }
-    _position.value = 0;
-    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(error)),
+    );
   }
 
-  @override
-  void dispose() {
-    _poll?.cancel();
-    _spin.dispose();
-    _position.dispose();
-    final player = _player;
-    final pending = _loading;
-    if (pending != null) {
-      // La carga corre en otro isolate: liberar el motor antes de que termine
-      // dejaría un puntero colgado.
-      pending.whenComplete(() => player?.dispose());
-    } else {
-      player?.dispose();
+  void _toggle() {
+    final snapshot = _controller.snapshot;
+    if (snapshot.busy || !snapshot.hasTrack) {
+      return;
     }
-    super.dispose();
+    _controller.toggle();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_initError != null) {
-      return _ErrorScreen(message: _initError!);
-    }
-    final player = _player!;
-    return Shortcuts(
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.space): _ToggleIntent(),
-      },
-      child: Actions(
-        actions: {
-          _ToggleIntent: CallbackAction<_ToggleIntent>(
-            onInvoke: (_) {
-              if (_busy) return null;
-              player.toggle();
-              setState(() {});
-              return null;
-            },
-          ),
-        },
-        child: Scaffold(
-          body: DecoratedBox(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFF141433), chBackground, Color(0xFF090912)],
-                stops: [0, 0.45, 1],
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) {
+        final snapshot = _controller.snapshot;
+        return Shortcuts(
+          shortcuts: const {
+            SingleActivator(LogicalKeyboardKey.space): _ToggleIntent(),
+          },
+          child: Actions(
+            actions: {
+              _ToggleIntent: CallbackAction<_ToggleIntent>(
+                onInvoke: (_) {
+                  _toggle();
+                  return null;
+                },
               ),
-            ),
-            child: SafeArea(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 460),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Header(onOpen: _openFile),
-                        const SizedBox(height: 28),
-                        RepaintBoundary(
-                          child: _Disc(
-                            spin: _spin,
-                            playing: player.isPlaying,
-                            hasTrack: player.hasTrack,
-                            cover: player.cover,
-                            busy: _busy,
-                          ),
+            },
+            child: Scaffold(
+              body: DecoratedBox(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Color(0xFF141433), chBackground, Color(0xFF090912)],
+                    stops: [0, 0.45, 1],
+                  ),
+                ),
+                child: SafeArea(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 460),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _Header(onOpen: _openFile),
+                            const SizedBox(height: 28),
+                            RepaintBoundary(
+                              child: _Disc(spin: _spin, snapshot: snapshot),
+                            ),
+                            const SizedBox(height: 28),
+                            _TrackInfo(snapshot: snapshot, onOpen: _openFile),
+                            const SizedBox(height: 20),
+                            _SeekBar(
+                              position: _controller.position,
+                              snapshot: snapshot,
+                              dragging: _dragging,
+                              dragPosition: _dragPosition,
+                              onChangeStart: (value) => setState(() {
+                                _dragging = true;
+                                _dragPosition = value;
+                              }),
+                              onChanged: (value) =>
+                                  setState(() => _dragPosition = value),
+                              onChangeEnd: (value) {
+                                _controller.seek(value);
+                                setState(() => _dragging = false);
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            _Controls(
+                              snapshot: snapshot,
+                              position: _controller.position,
+                              onToggle: _toggle,
+                              onSeek: _controller.seek,
+                            ),
+                            const SizedBox(height: 24),
+                            _FooterRow(
+                              snapshot: snapshot,
+                              onVolume: _controller.setVolume,
+                              onEq: () => showModalBottomSheet<void>(
+                                context: context,
+                                showDragHandle: true,
+                                builder: (_) =>
+                                    EqualizerSheet(controller: _controller),
+                              ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 28),
-                        _TrackInfo(player: player, onOpen: _openFile),
-                        const SizedBox(height: 20),
-                        _SeekBar(
-                          player: player,
-                          position: _position,
-                          dragging: _dragging,
-                          dragPosition: _dragPosition,
-                          onChangeStart: (value) => setState(() {
-                            _dragging = true;
-                            _dragPosition = value;
-                          }),
-                          onChanged: (value) => setState(() => _dragPosition = value),
-                          onChangeEnd: (value) {
-                            player.seek(value);
-                            _position.value = value;
-                            setState(() => _dragging = false);
-                          },
-                        ),
-                        const SizedBox(height: 8),
-                        _Controls(
-                          player: player,
-                          busy: _busy,
-                          onToggle: () {
-                            player.toggle();
-                            setState(() {});
-                          },
-                          onSeek: (value) {
-                            player.seek(value);
-                            _position.value = player.position;
-                          },
-                        ),
-                        const SizedBox(height: 24),
-                        _FooterRow(
-                          player: player,
-                          volume: _volume,
-                          onVolume: (value) {
-                            player.setVolume(value);
-                            setState(() => _volume = value);
-                          },
-                          onEq: () => showModalBottomSheet<void>(
-                            context: context,
-                            showDragHandle: true,
-                            builder: (_) => EqualizerSheet(player: player),
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -267,24 +209,15 @@ class _Header extends StatelessWidget {
 }
 
 class _Disc extends StatelessWidget {
-  const _Disc({
-    required this.spin,
-    required this.playing,
-    required this.hasTrack,
-    this.cover,
-    this.busy = false,
-  });
+  const _Disc({required this.spin, required this.snapshot});
 
   final AnimationController spin;
-  final bool playing;
-  final bool hasTrack;
-  final Uint8List? cover;
-  final bool busy;
+  final PlayerSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final image = cover;
+    final image = snapshot.cover;
     return Center(
       child: SizedBox(
         width: 260,
@@ -297,9 +230,9 @@ class _Disc extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: chAccent.withValues(alpha: playing ? 0.28 : 0.10),
-                    blurRadius: playing ? 70 : 40,
-                    spreadRadius: playing ? 12 : 4,
+                    color: chAccent.withValues(alpha: snapshot.playing ? 0.28 : 0.10),
+                    blurRadius: snapshot.playing ? 70 : 40,
+                    spreadRadius: snapshot.playing ? 12 : 4,
                   ),
                 ],
               ),
@@ -313,12 +246,12 @@ class _Disc extends StatelessWidget {
                   fit: BoxFit.cover,
                   gaplessPlayback: true,
                   cacheWidth: 472,
-                  errorBuilder: (_, __, ___) => _vinyl(reduceMotion, hasTrack),
+                  errorBuilder: (_, __, ___) => _vinyl(reduceMotion),
                 ),
               )
             else
-              _vinyl(reduceMotion, hasTrack),
-            if (busy)
+              _vinyl(reduceMotion),
+            if (snapshot.busy)
               Container(
                 width: 236,
                 height: 236,
@@ -340,7 +273,7 @@ class _Disc extends StatelessWidget {
     );
   }
 
-  Widget _vinyl(bool reduceMotion, bool hasTrack) {
+  Widget _vinyl(bool reduceMotion) {
     return RotationTransition(
       turns: reduceMotion ? const AlwaysStoppedAnimation(0.1) : spin,
       child: Container(
@@ -370,9 +303,11 @@ class _Disc extends StatelessWidget {
               border: Border.all(color: chBorder),
             ),
             child: Icon(
-              hasTrack ? Icons.graphic_eq_rounded : Icons.music_note_rounded,
+              snapshot.hasTrack
+                  ? Icons.graphic_eq_rounded
+                  : Icons.music_note_rounded,
               size: 34,
-              color: hasTrack ? chAccent : chMuted,
+              color: snapshot.hasTrack ? chAccent : chMuted,
             ),
           ),
         ),
@@ -382,14 +317,14 @@ class _Disc extends StatelessWidget {
 }
 
 class _TrackInfo extends StatelessWidget {
-  const _TrackInfo({required this.player, required this.onOpen});
+  const _TrackInfo({required this.snapshot, required this.onOpen});
 
-  final NativePlayer player;
+  final PlayerSnapshot snapshot;
   final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    if (!player.hasTrack) {
+    if (!snapshot.hasTrack) {
       return Column(
         children: [
           const Text(
@@ -418,13 +353,13 @@ class _TrackInfo extends StatelessWidget {
       );
     }
 
-    final artist = player.artist;
-    final album = player.album;
-    final subtitle = [artist, album].where((s) => s.isNotEmpty).join(' · ');
+    final subtitle = [snapshot.artist, snapshot.album]
+        .where((part) => part.isNotEmpty)
+        .join(' · ');
     return Column(
       children: [
         Text(
-          player.title ?? '',
+          snapshot.title,
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
@@ -442,7 +377,7 @@ class _TrackInfo extends StatelessWidget {
         ],
         const SizedBox(height: 6),
         Text(
-          '${_clock(player.duration)} · motor nativo 48 kHz',
+          '${_clock(snapshot.duration)} · motor nativo 48 kHz',
           style: const TextStyle(color: chMuted, fontSize: 12, letterSpacing: 0.4),
         ),
       ],
@@ -452,8 +387,8 @@ class _TrackInfo extends StatelessWidget {
 
 class _SeekBar extends StatelessWidget {
   const _SeekBar({
-    required this.player,
     required this.position,
+    required this.snapshot,
     required this.dragging,
     required this.dragPosition,
     required this.onChangeStart,
@@ -461,8 +396,8 @@ class _SeekBar extends StatelessWidget {
     required this.onChangeEnd,
   });
 
-  final NativePlayer player;
-  final ValueNotifier<double> position;
+  final ValueListenable<double> position;
+  final PlayerSnapshot snapshot;
   final bool dragging;
   final double dragPosition;
   final ValueChanged<double> onChangeStart;
@@ -471,7 +406,8 @@ class _SeekBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final duration = math.max(player.duration, 0.001);
+    final duration = math.max(snapshot.duration, 0.001);
+    final enabled = snapshot.hasTrack && !snapshot.busy;
     return ValueListenableBuilder<double>(
       valueListenable: position,
       builder: (context, value, _) {
@@ -484,11 +420,11 @@ class _SeekBar extends StatelessWidget {
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
               ),
               child: Slider(
-                value: current,
+                value: current.toDouble(),
                 max: duration,
-                onChangeStart: player.hasTrack ? onChangeStart : null,
-                onChanged: player.hasTrack ? onChanged : null,
-                onChangeEnd: player.hasTrack ? onChangeEnd : null,
+                onChangeStart: enabled ? onChangeStart : null,
+                onChanged: enabled ? onChanged : null,
+                onChangeEnd: enabled ? onChangeEnd : null,
               ),
             ),
             Padding(
@@ -496,9 +432,10 @@ class _SeekBar extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(_clock(current), style: const TextStyle(fontSize: 11, color: chMuted)),
+                  Text(_clock(current.toDouble()),
+                      style: const TextStyle(fontSize: 11, color: chMuted)),
                   Text(
-                    player.hasTrack ? _clock(player.duration) : '--:--',
+                    snapshot.hasTrack ? _clock(snapshot.duration) : '--:--',
                     style: const TextStyle(fontSize: 11, color: chMuted),
                   ),
                 ],
@@ -513,25 +450,26 @@ class _SeekBar extends StatelessWidget {
 
 class _Controls extends StatelessWidget {
   const _Controls({
-    required this.player,
+    required this.snapshot,
+    required this.position,
     required this.onToggle,
     required this.onSeek,
-    this.busy = false,
   });
 
-  final NativePlayer player;
+  final PlayerSnapshot snapshot;
+  final ValueListenable<double> position;
   final VoidCallback onToggle;
   final ValueChanged<double> onSeek;
-  final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = player.hasTrack && !busy;
+    final enabled = snapshot.hasTrack && !snapshot.busy;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          onPressed: enabled ? () => onSeek(math.max(player.position - 10, 0)) : null,
+          onPressed:
+              enabled ? () => onSeek(math.max(position.value - 10, 0)) : null,
           tooltip: 'Retroceder 10 s',
           iconSize: 30,
           icon: const Icon(Icons.replay_10_rounded),
@@ -550,7 +488,7 @@ class _Controls extends StatelessWidget {
               padding: EdgeInsets.zero,
             ),
             child: Icon(
-              player.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              snapshot.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
               size: 42,
             ),
           ),
@@ -558,7 +496,7 @@ class _Controls extends StatelessWidget {
         const SizedBox(width: 18),
         IconButton(
           onPressed: enabled
-              ? () => onSeek(math.min(player.position + 10, player.duration))
+              ? () => onSeek(math.min(position.value + 10, snapshot.duration))
               : null,
           tooltip: 'Avanzar 10 s',
           iconSize: 30,
@@ -571,19 +509,18 @@ class _Controls extends StatelessWidget {
 
 class _FooterRow extends StatelessWidget {
   const _FooterRow({
-    required this.player,
-    required this.volume,
+    required this.snapshot,
     required this.onVolume,
     required this.onEq,
   });
 
-  final NativePlayer player;
-  final double volume;
+  final PlayerSnapshot snapshot;
   final ValueChanged<double> onVolume;
   final VoidCallback onEq;
 
   @override
   Widget build(BuildContext context) {
+    final volume = snapshot.volume;
     return Column(
       children: [
         Row(
@@ -610,36 +547,6 @@ class _FooterRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _ErrorScreen extends StatelessWidget {
-  const _ErrorScreen({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline_rounded, color: chError, size: 40),
-              const SizedBox(height: 16),
-              const Text('No se pudo iniciar el motor de audio',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 8),
-              Text(message, textAlign: TextAlign.center,
-                  style: const TextStyle(color: chMuted)),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
