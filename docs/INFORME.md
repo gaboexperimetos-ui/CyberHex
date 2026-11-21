@@ -36,13 +36,14 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **11 890 líneas Dart** + **3 543 de tests** (140 casos). Estado
+- App: **14 885 líneas Dart** + **4 090 de tests** (162 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
   núcleo, **toda** la API del motor expuesta a Dart con el DSP persistido en la
-  sesión, el **laboratorio de audio** («toda la fase 2 en pantalla») y la fase 4
-  de letras, etiquetas y tarjetas compartibles.
+  sesión, el **laboratorio de audio** («toda la fase 2 en pantalla»), la fase 4
+  de letras, etiquetas y tarjetas, y la fase 5 de listas, multi-cola, automix,
+  estadísticas y descargas.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -70,24 +71,31 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                 11 890 líneas
+lib/                        app Flutter                                 14 885 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
   core/eq_presets.dart      curvas de EQ por anclajes (interpolación log) + «Mi oído»
   core/lyrics_parser.dart   .lrc (marcas múltiples, bilingüe, offset) + USLT/LYRICS
   core/tag_editor.dart      ID3v2 y Vorbis comment: leer y escribir etiquetas y carátula
+  core/playlist_store.dart  playlists .m3u/.m3u8/.pls, inteligentes, 5 colas y posición
+  core/stats_store.dart     historial, totales, top de pistas/artistas y hora favorita
+  core/automix_engine.dart  plan de mezcla por BPM (±8 %) y máquina de estados
+  core/audio_downloader.dart  Internet Archive y URLs directas con dart:io
   platform/media_session_channel.dart  puente Dart del canal cyberhex/media
   ui/audio_lab_sheet.dart   laboratorio: todo el DSP, BPM, WAV, .cue, loop y sueño
   ui/lyrics_page.dart       visor a pantalla completa con fondo difuminado
   ui/lyrics_creator_page.dart  estudio: marcar versos al ritmo y guardar .lrc
   ui/tag_editor_sheet.dart  etiquetas y carátula, individual o por álbum
   ui/share_card_sheet.dart  tarjeta compartible exportable desde RepaintBoundary
+  ui/playlists_page.dart    listas, inteligentes, importar/exportar y detalle
+  ui/stats_page.dart        totales, gráfico por hora, top e historial
+  ui/downloader_page.dart   buscar en Archive o pegar URL, con barra de progreso
   ui/visualizer_widget.dart vúmetro + espectro (barras o hexágonos) a 30 Hz
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       140 tests Dart                             3 543 líneas
+test/                       162 tests Dart                             4 090 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -385,6 +393,45 @@ tarjeta).
 
 ---
 
+### 5.6 Fase 5: listas `.m3u`, cinco colas, automix, estadísticas y descargas
+
+Todo lo que rodea a «escuchar música» sin tocar el núcleo: archivos de texto
+(`.m3u`), JSON propio y `dart:io`. Cuatro piezas nuevas de core Dart y tres
+pantallas.
+
+| Pieza | Qué hace |
+|---|---|
+| `PlaylistStore` | Crear, renombrar, duplicar y borrar listas; añadir/quitar/reordenar sin duplicados; **importar y exportar** `.m3u`, `.m3u8` y `.pls` (rutas relativas resueltas contra el archivo); **listas inteligentes** Top 25, Nunca escuchadas y Añadidas este mes (esta última con `remember()` de lo que ve la biblioteca) |
+| `MultiQueueStore` | **Cinco colas** simultáneas con su índice; la activa suena y las demás se guardan. Cambiar de cola guarda la actual y carga la otra en el motor (`clearQueue` + `enqueue` + `playAt`) |
+| `LongTrackMemory` | Retoma audiolibros y directos: guarda la posición solo si la pista pasa de **15 min** y ya se oyeron 30 s; olvida la pista si se dejó a menos de 20 s del final. Escritura con antirrebote de 2 s |
+| `StatsStore` | Reproducciones, minutos, top de pistas y artistas, reparto por hora (franja favorita) e historial de 1 000 entradas. JSON con antirrebote de 800 ms |
+| `AutomixEngine` | Cuando quedan ≤ 8 s, calcula BPM de la actual y la siguiente (caché, `detectBpm` en isolate), estira el tempo **como mucho ±8 %** (acepta doble/mitad de pulso) y pone el crossfade; al entrar la siguiente, devuelve el tempo a `1.0`. `AutomixPlanner` es puro y se prueba sin motor |
+| `AudioDownloader` | Busca en **Internet Archive** (`advancedsearch.php`), lista los archivos de audio del ítem y descarga con `HttpClient` y progreso por bytes; también acepta una **URL directa**. Nombre saneado y `.part` + `rename` |
+| `PlaylistsPage` / `StatsPage` / `DownloaderPage` | Listas (con detalle, borrar, subir, exportar), estadísticas (tarjetas, 24 barras por hora, top e historial) y descargas (buscar → archivos → descargar → añadir a la cola) |
+
+Decisiones y límites:
+
+* **Lo descargado entra en la cola, no en la biblioteca**: el núcleo indexa
+  carpetas con `ch_library_*`; no hay símbolo para inyectar una ruta suelta. La
+  pantalla lo dice y deja añadir a la cola.
+* **El automix no mezcla audio propio**: usa el crossfade del motor y `speed`
+  como mucho ±8 %. Por encima de ese desvío suena a accidente y el plan lo evita.
+* **Las estadísticas cuentan arranques**, no tiempo real con pausas: el
+  controlador no expone un contador de reproducción y añadirlo sería un pedido
+  de núcleo.
+* **`seen` para «Añadidas este mes»**: la biblioteca apunta lo que escanea
+  (`PlaylistStore.remember`), así que la lista sale de datos reales y no de la
+  fecha del archivo.
+
+Tests nuevos (22, `test/playlists_and_downloader_test.dart`): listas (CRUD,
+sin duplicados, `.m3u`/`.pls`, importar/exportar, inteligentes, JSON), cinco
+colas (captura, cambio, renombrado, disco), memoria de pistas largas, estadísticas
+(acumulación y persistencia), automix (plan puro y motor con probe inyectado),
+descargador (parser del buscador, filtrado de archivos, saneado de nombres y
+**descarga real contra un `HttpServer` local** con progreso) y cuatro de widget.
+
+---
+
 ## 6. Plataformas
 
 ### Escritorio (PC, Arch)
@@ -478,7 +525,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 33/33 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 42/42 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -604,6 +651,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R20 | ReplayGain on/off sin getter | el núcleo solo exporta `ch_engine_set_replaygain`; el valor se recuerda en `NativePlayer` (arranca activado, como el motor) y se reenvía al restaurar | `native_player.dart` |
 | R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run` y la hoja solo muestra «Exportando…»: no hay barra de progreso | `native_player.dart`, `audio_lab_sheet.dart` |
 | R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
+| R26 | Descargas sin verificar en red real | el descargador se prueba contra un `HttpServer` local y contra los parsers del JSON de Archive; falta comprobar la API real (límites, ítems enormes, redirecciones) y que el archivo descargado suene | `audio_downloader.dart` |
+| R27 | Automix sin audio real | el plan y la máquina de estados están probados con un `BpmProbe` inyectado; falta oír una mezcla de verdad y decidir si ±8 % es el límite bueno | `automix_engine.dart` |
 | R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
 | R25 | Forma de onda decorativa | la tarjeta compartible dibuja una silueta determinista, no los picos reales, porque el núcleo no los expone | `share_card_sheet.dart` |
 | R23 | Presets a 36 llamadas | aplicar un preset dispara 36 `ch_engine_set_band_gain` seguidos (cada uno recalcula los coeficientes de su banda): es instantáneo, pero si algún día la cadena se vuelve pesada hará falta un volcado en bloque en el núcleo | `eq_presets.dart` |
@@ -664,9 +713,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (40 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (41 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 5 → app(ui): listas .m3u, cinco colas, automix, estadísticas y descargas
 FASE 4 → app(ui): letras sincronizadas, estudio .lrc, etiquetas y tarjetas compartibles
 FASE 3-3 → app(ui): laboratorio de audio, visualizador, presets y prueba de audición
 FASE 3-2 → app(core): toda la API del motor en Dart y DSP persistido en la sesión

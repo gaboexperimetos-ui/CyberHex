@@ -7,7 +7,12 @@ import 'package:material_ui/material_ui.dart';
 import '../core/favorites_store.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
+import '../core/playlist_store.dart';
+import '../core/stats_store.dart';
 import '../theme.dart';
+import 'downloader_page.dart';
+import 'playlists_page.dart';
+import 'stats_page.dart';
 
 /// Cómo se ordena la lista.
 enum LibrarySort { title, artist, album, duration }
@@ -31,9 +36,18 @@ class LibraryPage extends StatefulWidget {
     required this.controller,
     this.favorites,
     this.initialRoot,
+    this.playlists,
+    this.stats,
+    this.longTracks,
   });
 
   final PlayerController controller;
+
+  /// Almacenes compartidos con el resto de la app (listas, estadísticas y la
+  /// memoria de posición en pistas largas). Si faltan, la página crea los suyos.
+  final PlaylistStore? playlists;
+  final StatsStore? stats;
+  final LongTrackMemory? longTracks;
 
   /// Se inyecta en las pruebas; en producción la página crea la suya.
   final FavoritesStore? favorites;
@@ -52,6 +66,8 @@ class _LibraryPageState extends State<LibraryPage>
         ..addListener(_onTabChanged);
 
   late final FavoritesStore _favorites = widget.favorites ?? FavoritesStore();
+
+  late final LongTrackMemory _longTracks = widget.longTracks ?? LongTrackMemory();
 
   final Map<String, double> _durations = <String, double>{};
   final TextEditingController _search = TextEditingController();
@@ -72,6 +88,7 @@ class _LibraryPageState extends State<LibraryPage>
   @override
   void initState() {
     super.initState();
+    if (widget.longTracks == null) _longTracks.load();
     _favorites.addListener(_onFavoritesChanged);
     if (widget.favorites == null) {
       // Sin await: la lista se pinta sin favoritos y se repinta al llegar.
@@ -110,8 +127,38 @@ class _LibraryPageState extends State<LibraryPage>
     if (index < 0 || index >= snapshot.queue.length) return;
     final track = snapshot.queue[index];
     if (!track.isPlayable || snapshot.duration <= 0) return;
+    _longTracks.remember(track.path, _controller.position.value, snapshot.duration);
     if (_durations[track.path] == snapshot.duration) return;
     setState(() => _durations[track.path] = snapshot.duration);
+  }
+
+  Future<void> _openPlaylists() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PlaylistsPage(
+          controller: _controller,
+          store: widget.playlists,
+          stats: widget.stats,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openStats() async {
+    final stats = widget.stats ?? StatsStore.memory();
+    await stats.load();
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => StatsPage(stats: stats)),
+    );
+  }
+
+  Future<void> _openDownloads() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DownloaderPage(controller: _controller),
+      ),
+    );
   }
 
   Future<void> _scan(String root) async {
@@ -139,6 +186,8 @@ class _LibraryPageState extends State<LibraryPage>
       _entries = [for (final track in tracks) _Entry.of(track, root)];
       _scanning = false;
     });
+    // «Añadidas este mes» sale de aquí: la biblioteca apunta lo que ha visto.
+    widget.playlists?.remember(<String>[for (final track in tracks) track.path]);
   }
 
   Future<void> _pickFolder() async {
@@ -163,7 +212,21 @@ class _LibraryPageState extends State<LibraryPage>
   Future<void> _openAndReport(_Entry entry) async {
     final error = await _controller.openFile(entry.track.path);
     if (!mounted) return;
-    if (error != null) _say('No se pudo reproducir: $error');
+    if (error != null) {
+      _say('No se pudo reproducir: $error');
+      return;
+    }
+    // Audiolibros y directos se retoman donde iban (solo pistas > 15 min).
+    final remembered = _longTracks.positionFor(entry.track.path);
+    if (remembered != null && remembered > 30) {
+      _controller.seek(remembered);
+      _say('Retomando «${entry.track.title}» en ${_clock(remembered)}');
+    }
+  }
+
+  static String _clock(double seconds) {
+    final total = seconds.floor();
+    return '${total ~/ 60}:${(total % 60).toString().padLeft(2, '0')}';
   }
 
   void _playNext(_Entry entry) {
@@ -371,6 +434,25 @@ class _LibraryPageState extends State<LibraryPage>
             onPressed: _pickFolder,
             tooltip: 'Elegir carpeta',
             icon: const Icon(Icons.folder_open_rounded),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Más',
+            icon: const Icon(Icons.more_vert_rounded),
+            onSelected: (value) {
+              switch (value) {
+                case 'playlists':
+                  _openPlaylists();
+                case 'stats':
+                  _openStats();
+                case 'downloads':
+                  _openDownloads();
+              }
+            },
+            itemBuilder: (context) => const <PopupMenuEntry<String>>[
+              PopupMenuItem(value: 'playlists', child: Text('Listas y colas')),
+              PopupMenuItem(value: 'stats', child: Text('Estadísticas')),
+              PopupMenuItem(value: 'downloads', child: Text('Descargas')),
+            ],
           ),
         ],
         bottom: _root == null

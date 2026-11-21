@@ -1,7 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../core/automix_engine.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
+import '../core/playlist_store.dart';
 import '../theme.dart';
 
 /// Cola de reproducción: reordenar arrastrando, quitar deslizando, saltar
@@ -11,12 +13,29 @@ import '../theme.dart';
 /// dejar abierta mientras suena la música: cada cambio del motor repinta la
 /// lista sin que la hoja tenga que reconstruirse desde fuera.
 class QueueSheet extends StatefulWidget {
-  const QueueSheet({super.key, required this.controller});
+  const QueueSheet({
+    super.key,
+    required this.controller,
+    this.queues,
+    this.automix,
+  });
 
   final PlayerController controller;
 
+  /// Cinco colas guardadas. Si falta, la hoja crea la suya (en producción la
+  /// comparte con el resto de la app; en pruebas se inyecta).
+  final MultiQueueStore? queues;
+
+  /// Motor de mezcla automática. Igual: inyectable.
+  final AutomixEngine? automix;
+
   /// Abre la hoja desde abajo, ocupando como mucho el 78 % de la pantalla.
-  static Future<void> show(BuildContext context, PlayerController controller) {
+  static Future<void> show(
+    BuildContext context,
+    PlayerController controller, {
+    MultiQueueStore? queues,
+    AutomixEngine? automix,
+  }) {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -27,7 +46,7 @@ class QueueSheet extends StatefulWidget {
       ),
       builder: (_) => FractionallySizedBox(
         heightFactor: 0.78,
-        child: QueueSheet(controller: controller),
+        child: QueueSheet(controller: controller, queues: queues, automix: automix),
       ),
     );
   }
@@ -37,7 +56,70 @@ class QueueSheet extends StatefulWidget {
 }
 
 class _QueueSheetState extends State<QueueSheet> {
+  late final MultiQueueStore _queues = widget.queues ?? MultiQueueStore.memory();
+
+  late final AutomixEngine _automix = widget.automix ??
+      AutomixEngine(controller: widget.controller, enabled: false);
+
+  bool _ownsAutomix = false;
+
   PlayerController get _controller => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsAutomix = widget.automix == null;
+    _controller.addListener(_captureCurrent);
+    if (widget.queues == null) _queues.load();
+    _automix.start();
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_captureCurrent);
+    if (_ownsAutomix) _automix.dispose();
+    if (widget.queues == null) _queues.dispose();
+    super.dispose();
+  }
+
+  /// Guarda lo que hay en el motor en la cola activa (sin avisar a la UI: los
+  /// cambios de cola no deben repintar la hoja en mitad de un gesto).
+  void _captureCurrent() {
+    final snapshot = _controller.snapshot;
+    _queues.capture(
+      _queues.active,
+      <String>[for (final item in snapshot.queue) item.path],
+      snapshot.queueIndex,
+    );
+  }
+
+  /// Cambia de cola: guarda la actual y carga la elegida en el motor.
+  Future<void> _switchTo(int slot) async {
+    if (slot == _queues.active) return;
+    _captureCurrent();
+    _queues.setActive(slot);
+    final target = _queues.activeSlot;
+    _controller.queueProtected = true;
+    _controller.clearQueue();
+    for (final path in target.paths) {
+      _controller.enqueue(path);
+    }
+    if (target.paths.isNotEmpty) {
+      final index = target.index.clamp(0, target.paths.length - 1);
+      if (!_controller.playAt(index)) {
+        await _controller.openFile(target.paths[index]);
+      }
+    }
+    if (mounted) {
+      setState(() {
+        _message = target.isEmpty
+            ? 'Cola ${slot + 1} vacía y lista para llenar.'
+            : 'Cola «${target.label}» cargada (${target.length} pistas).';
+      });
+    }
+  }
+
+  String? _message;
 
   Future<void> _confirmClear() async {
     final count = _controller.snapshot.queue.length;
@@ -80,10 +162,21 @@ class _QueueSheetState extends State<QueueSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _header(snapshot),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
+              _slotBar(),
+              if (_message != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    _message!,
+                    style: const TextStyle(fontSize: 11, color: chAccent),
+                  ),
+                ),
+              const SizedBox(height: 6),
               Expanded(
                 child: queue.isEmpty ? _empty() : _list(queue, snapshot),
               ),
+              ..._automixRows(snapshot),
             ],
           ),
         );
@@ -177,6 +270,60 @@ class _QueueSheetState extends State<QueueSheet> {
         _protectedSwitch(),
       ],
     );
+  }
+
+  /// Cinco colas: la activa se marca; tocar otra la trae al motor.
+  Widget _slotBar() {
+    return SizedBox(
+      height: 36,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: MultiQueueStore.slotCount,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, index) {
+          final slot = _queues.slots[index];
+          final active = index == _queues.active;
+          return ChoiceChip(
+            label: Text(
+              '${index + 1} · ${slot.length}',
+              style: TextStyle(
+                fontSize: 11,
+                color: active ? chOnAccent : chMuted,
+              ),
+            ),
+            tooltip: slot.label,
+            selected: active,
+            selectedColor: chAccent,
+            backgroundColor: chSurfaceHigh,
+            side: BorderSide(color: active ? chAccent : chBorder),
+            onSelected: (_) => _switchTo(index),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Automix y aviso de cómo se comporta.
+  List<Widget> _automixRows(PlayerSnapshot snapshot) {
+    return <Widget>[
+      const Divider(height: 16),
+      SwitchListTile.adaptive(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        value: _automix.enabled,
+        onChanged: (value) {
+          _automix.setEnabled(value);
+          setState(() {});
+        },
+        title: const Text('Automix DJ', style: TextStyle(fontSize: 14)),
+        subtitle: Text(
+          _automix.enabled
+              ? '${_automix.status} · ${automixLabel(_automix.phase)}'
+              : automixHint(snapshot),
+          style: const TextStyle(fontSize: 11, color: chMuted),
+        ),
+      ),
+    ];
   }
 
   Widget _protectedSwitch() {

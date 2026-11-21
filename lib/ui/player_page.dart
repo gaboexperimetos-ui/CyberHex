@@ -4,9 +4,12 @@ import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../core/automix_engine.dart';
 import '../core/lyrics_parser.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
+import '../core/playlist_store.dart';
+import '../core/stats_store.dart';
 import '../theme.dart';
 import 'audio_lab_sheet.dart';
 import 'library_page.dart';
@@ -38,17 +41,74 @@ class _PlayerPageState extends State<PlayerPage>
 
   PlayerController get _controller => widget.controller;
 
+  /// Las cinco colas y el automix viven en la página: así sobreviven a abrir y
+  /// cerrar la hoja de la cola.
+  late final MultiQueueStore _queues = MultiQueueStore();
+  late final AutomixEngine _automix = AutomixEngine(controller: _controller);
+
+  /// Almacenes compartidos: listas, estadísticas y posición de pistas largas.
+  /// Viven en la página para que biblioteca, listas y estadísticas usen los
+  /// mismos objetos (y el mismo archivo) en toda la app.
+  late final PlaylistStore _playlists = PlaylistStore();
+  late final StatsStore _stats = StatsStore();
+  late final LongTrackMemory _longTracks = LongTrackMemory();
+
+  /// Última pista apuntada en las estadísticas (evita contar dos veces).
+  String _recordedPath = '';
+
   @override
   void initState() {
     super.initState();
-    _controller.addListener(_syncSpin);
+    _controller.addListener(_onSnapshot);
+    _controller.position.addListener(_rememberPosition);
+    _queues.load();
+    _playlists.load();
+    _stats.load();
+    _longTracks.load();
   }
 
   @override
   void dispose() {
-    _controller.removeListener(_syncSpin);
+    _controller.removeListener(_onSnapshot);
+    _controller.position.removeListener(_rememberPosition);
+    _automix.dispose();
+    _queues.dispose();
+    _playlists.dispose();
+    _stats.dispose();
+    _longTracks.dispose();
     _spin.dispose();
     super.dispose();
+  }
+
+  /// Gira el disco y apunta la reproducción en las estadísticas al empezar una
+  /// pista nueva.
+  void _onSnapshot() {
+    _syncSpin();
+    if (!mounted) return;
+    final snapshot = _controller.snapshot;
+    if (!snapshot.playing) return;
+    final path = _currentPath();
+    if (path.isEmpty || path == _recordedPath) return;
+    _recordedPath = path;
+    _stats.record(
+      path: path,
+      title: snapshot.title,
+      artist: snapshot.artist,
+      seconds: snapshot.duration,
+    );
+  }
+
+  /// Solo las pistas largas guardan posición, y como mucho cada 10 s.
+  double _lastRemembered = 0;
+
+  void _rememberPosition() {
+    final snapshot = _controller.snapshot;
+    final path = _currentPath();
+    if (path.isEmpty || !snapshot.hasTrack) return;
+    final position = _controller.position.value;
+    if ((position - _lastRemembered).abs() < 10) return;
+    _lastRemembered = position;
+    _longTracks.remember(path, position, snapshot.duration);
   }
 
   /// El disco solo gira con audio sonando y sin carátula (arte estático).
@@ -62,7 +122,12 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  void _openQueue() => QueueSheet.show(context, _controller);
+  void _openQueue() => QueueSheet.show(
+        context,
+        _controller,
+        queues: _queues,
+        automix: _automix,
+      );
 
   void _openLab() => AudioLabSheet.show(context, _controller);
 
@@ -89,7 +154,12 @@ class _PlayerPageState extends State<PlayerPage>
   void _openLibrary() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => LibraryPage(controller: _controller),
+        builder: (_) => LibraryPage(
+          controller: _controller,
+          playlists: _playlists,
+          stats: _stats,
+          longTracks: _longTracks,
+        ),
       ),
     );
   }

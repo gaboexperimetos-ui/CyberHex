@@ -18,6 +18,46 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 18 · FASE 5, pedido 5 de 10: listas, cinco colas, automix, estadísticas y descargas
+
+- **PEDIDO:** playlists `.m3u`/`.m3u8`/`.pls` e inteligentes, hasta cinco colas
+  simultáneas con memoria de posición en pistas largas, automix por BPM,
+  historial/estadísticas y gestor de descargas desde catálogos abiertos o URL
+  directa. PROHIBIDO `core/`, `android/` y `pubspec.yaml`. RIESGO NO ACEPTABLE.
+- **HECHO:**
+  - `lib/core/playlist_store.dart` (790): `Playlist`, `PlaylistStore` (CRUD,
+    `.m3u`/`.m3u8`/`.pls` de ida y vuelta, `remember` de lo escaneado, listas
+    inteligentes Top 25 / Nunca / Del mes), `MultiQueueStore` (cinco colas con
+    índice y cola activa) y `LongTrackMemory` (>15 min, antirrebote de 2 s).
+  - `lib/core/stats_store.dart` (354): `TrackStat`, `HistoryEntry` y `StatsStore`
+    con totales, top de pistas y artistas, reparto por hora, historial de 1 000 y
+    persistencia con antirrebote.
+  - `lib/core/automix_engine.dart` (289): `AutomixPlan`/`AutomixPlanner` (puro,
+    ±8 %, doble pulso) y `AutomixEngine` (pre-roll de 8 s, caché de BPM, probe
+    inyectable, restauración del tempo).
+  - `lib/core/audio_downloader.dart` (334): parsers puros del buscador y de la
+    metadata de Archive, saneado de nombres, descarga por `HttpClient` con
+    progreso y `.part` + `rename`; también URLs directas.
+  - `lib/ui/playlists_page.dart` (518), `stats_page.dart` (367) y
+    `downloader_page.dart` (338); `queue_sheet.dart` gana la barra de cinco colas
+    y el interruptor de automix; `library_page.dart` gana el menú (Listas,
+    Estadísticas, Descargas), el `remember` de lo escaneado y la retomada de
+    pistas largas; `player_page.dart` es dueño de los almacenes y apunta las
+    reproducciones.
+  - `test/playlists_and_downloader_test.dart` (547): **22 casos** nuevos.
+- **VERIFICADO:** tree-sitter **42/42 sin errores**; paridad `PlayerApi` 112/112;
+  cifras: `lib` 14 885, `test` 4 090, **162 casos**; la descarga se ejecuta de
+  verdad contra un `HttpServer` local (150 000 B con progreso) porque es un
+  `test()` normal, no un `testWidgets` con reloj falso.
+- **NO VERIFICABLE AQUÍ:** sin SDK no se ejecutan los 22 casos; sin red real no
+  se comprueba la API de Internet Archive (R26); el automix no se oye (R27); el
+  autoguardado de posición solo se prueba en memoria.
+- **COMMITS:** este turno, un commit en `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** **R26** descargas sin red real; **R27** automix sin
+  audio real. Pendientes los pedidos 6–10.
+
+---
+
 ## 2026-11-21 · turno 17 · FASE 4, pedido 4 de 10: letras, estudio .lrc, etiquetas y tarjetas
 
 - **PEDIDO:** visor de letras sincronizadas (salto al verso, pantalla completa
