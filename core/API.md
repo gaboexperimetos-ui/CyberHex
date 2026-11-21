@@ -121,8 +121,40 @@ double  ch_engine_sample_rate(ch_engine* engine);
 int32_t ch_engine_channels(ch_engine* engine);
 int32_t ch_engine_is_playing(ch_engine* engine);
 
+/*
+ * Eventos de reproduccion por sondeo (sin callbacks): devuelve 1 si lleno
+ * `out`, 0 si no hay eventos, -1 si el motor o `out` es NULL.
+ * kinds: CH_EVENT_STATE (a=1/0), CH_EVENT_TRACK (a=indice, b=nº pistas),
+ *        CH_EVENT_QUEUE (a=nº pistas), CH_EVENT_END (fin natural de la cola).
+ */
+typedef struct ch_event { int32_t kind; int32_t a; int32_t b; double value; } ch_event;
+int32_t ch_engine_poll_event(ch_engine* engine, ch_event* out);
+
 const char* ch_engine_last_error(ch_engine* engine);
 ```
+
+### Eventos de reproducción
+
+El hilo de audio nunca llama a código de la UI. La UI consulta
+`ch_engine_poll_event` desde su propio hilo (por ejemplo, un temporizador de
+100 ms) y vacía la cola en bucle:
+
+```c
+ch_event ev;
+while (ch_engine_poll_event(e, &ev) == 1) {
+    switch (ev.kind) {
+    case CH_EVENT_TRACK: /* nueva pista: ev.a = índice, ev.b = total */ break;
+    case CH_EVENT_STATE: /* ev.a = 1 suena / 0 pausa o fin */ break;
+    case CH_EVENT_QUEUE: /* ev.a = pistas en la cola */ break;
+    case CH_EVENT_END:   /* terminó la cola en modo sin repetición */ break;
+    }
+}
+```
+
+Se emiten `TRACK` al cargar, saltar o cambiar de pista automáticamente;
+`STATE` al reproducir, pausar y al agotarse la cola; `QUEUE` al añadir,
+importar o vaciar; y `END` solo cuando la cola termina de forma natural. La
+cola retiene 63 eventos y descarta el más antiguo si nadie la vacía.
 
 ### Ejemplo mínimo
 

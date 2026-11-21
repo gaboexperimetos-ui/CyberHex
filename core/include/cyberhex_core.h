@@ -89,6 +89,31 @@ double ch_engine_sample_rate(ch_engine* engine);
 int32_t ch_engine_channels(ch_engine* engine);
 int32_t ch_engine_is_playing(ch_engine* engine);
 
+/*
+ * Eventos de reproduccion (sondeo sin callbacks, seguro desde el hilo de UI).
+ * `ch_engine_poll_event` devuelve 1 y llena `out` si hay evento, 0 si la cola
+ * esta vacia, o -1 si el motor es NULL. La cola guarda 63 eventos; si se llena,
+ * se descarta el mas antiguo.
+ *
+ * kind = CH_EVENT_STATE: a = 1 reproduciendo / 0 en pausa o fin.
+ * kind = CH_EVENT_TRACK: a = indice de pista, b = numero de pistas en la cola.
+ * kind = CH_EVENT_QUEUE: a = numero de pistas en la cola.
+ * kind = CH_EVENT_END:   fin natural de la cola (no se emite al pausar).
+ */
+typedef struct ch_event {
+    int32_t kind;
+    int32_t a;
+    int32_t b;
+    double  value;
+} ch_event;
+
+#define CH_EVENT_STATE 1
+#define CH_EVENT_TRACK 2
+#define CH_EVENT_QUEUE 3
+#define CH_EVENT_END   4
+
+int32_t ch_engine_poll_event(ch_engine* engine, ch_event* out);
+
 const char* ch_engine_last_error(ch_engine* engine);
 
 #ifdef __cplusplus

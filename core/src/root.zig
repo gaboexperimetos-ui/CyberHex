@@ -39,6 +39,11 @@ extern fn ch_decode_tag(decoder: *ch_decoder, key: [*c]const u8) [*c]const u8;
 extern fn ch_decode_cover(decoder: *ch_decoder, size: *u64) [*c]const u8;
 
 const ChPlaylist = extern struct { items: [*c][*c]u8, count: c_int };
+pub const ChEvent = extern struct { kind: c_int, a: c_int, b: c_int, value: f64 };
+pub const EV_STATE: c_int = 1;
+pub const EV_TRACK: c_int = 2;
+pub const EV_QUEUE: c_int = 3;
+pub const EV_END: c_int = 4;
 extern fn ch_playlist_read(path: [*c]const u8) ChPlaylist;
 extern fn ch_playlist_free(playlist: *ChPlaylist) void;
 extern fn ch_playlist_write(path: [*c]const u8, items: [*c]const [*c]const u8, count: c_int) i32;
@@ -178,6 +183,11 @@ pub const Engine = struct {
     fade_gain: f32 = 0,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
+    ev_lock: SpinLock = .{},
+    ev_buf: [64]ChEvent = undefined,
+    ev_head: usize = 0,
+    ev_tail: usize = 0,
+
     err: [256]u8 = @splat(0),
 
     fn setError(self: *Engine, msg: []const u8) void {
@@ -188,6 +198,17 @@ pub const Engine = struct {
 
     fn clearError(self: *Engine) void {
         self.err[0] = 0;
+    }
+
+    fn pushEvent(self: *Engine, kind: c_int, a: c_int, b: c_int, value: f64) void {
+        self.ev_lock.lock();
+        const next = (self.ev_head + 1) % self.ev_buf.len;
+        if (next == self.ev_tail) {
+            self.ev_tail = (self.ev_tail + 1) % self.ev_buf.len;
+        }
+        self.ev_buf[self.ev_head] = .{ .kind = kind, .a = a, .b = b, .value = value };
+        self.ev_head = next;
+        self.ev_lock.unlock();
     }
 
     fn fail(self: *Engine, msg: []const u8, code: i32) i32 {
@@ -636,9 +657,11 @@ pub const Engine = struct {
         const old = self.decoder;
         self.decoder = d;
         self.queue_index = index;
+        const count: c_int = @intCast(self.playlist.items.len);
         self.list_mutex.unlock();
 
         if (old) |o| ch_decode_close(o);
+        self.pushEvent(EV_TRACK, @intCast(index), count, 0);
         return true;
     }
 
@@ -683,6 +706,7 @@ pub const Engine = struct {
         _ = self.addSegment(next, d, 0);
         @atomicStore(bool, &self.eof, false, .release);
         @atomicStore(bool, &self.playing, true, .release);
+        self.pushEvent(EV_TRACK, @intCast(next), 0, 0);
         return true;
     }
 
@@ -801,6 +825,7 @@ pub const Engine = struct {
         if (old) |o| ch_decode_close(o);
         @atomicStore(bool, &self.eof, false, .release);
         @atomicStore(bool, &self.playing, true, .release);
+        self.pushEvent(EV_TRACK, @intCast(next), 0, 0);
         return true;
     }
 
@@ -932,6 +957,8 @@ pub const Engine = struct {
                 const tol = SAMPLE_RATE / 5;
                 if (p + tol >= last_end) {
                     @atomicStore(bool, &self.playing, false, .release);
+                    self.pushEvent(EV_END, 0, 0, 0);
+                    self.pushEvent(EV_STATE, 0, 0, 0);
                 }
             }
         }
@@ -1102,7 +1129,7 @@ fn destroyEngine(e: *Engine) void {
 }
 
 export fn ch_core_version() [*c]const u8 {
-    return @ptrCast("0.6.0");
+    return @ptrCast("0.7.0");
 }
 
 export fn ch_core_last_error() [*c]const u8 {
@@ -1269,12 +1296,14 @@ export fn ch_engine_play(self: ?*Engine) i32 {
         @atomicStore(bool, &e.eof, false, .release);
     }
     @atomicStore(bool, &e.playing, true, .release);
+    e.pushEvent(EV_STATE, 1, 0, 0);
     return 0;
 }
 
 export fn ch_engine_pause(self: ?*Engine) i32 {
     const e = self orelse return -1;
     @atomicStore(bool, &e.playing, false, .release);
+    e.pushEvent(EV_STATE, 0, 0, 0);
     return 0;
 }
 
@@ -1302,8 +1331,12 @@ export fn ch_engine_queue_add(self: ?*Engine, path: [*c]const u8) i32 {
     const p = path orelse return -2;
     e.list_mutex.lock();
     const index = addPath(e, std.mem.span(p));
+    const count: c_int = @intCast(e.playlist.items.len);
     e.list_mutex.unlock();
-    if (index) |i| return @intCast(i);
+    if (index) |i| {
+        e.pushEvent(EV_QUEUE, count, 0, 0);
+        return @intCast(i);
+    }
     return e.fail("sin memoria para la lista de reproducción", -2);
 }
 
@@ -1323,7 +1356,6 @@ export fn ch_engine_queue_import(self: ?*Engine, path: [*c]const u8) i32 {
 
     var added: i32 = 0;
     e.list_mutex.lock();
-    defer e.list_mutex.unlock();
     var i: usize = 0;
     const n: usize = @intCast(pl.count);
     while (i < n) : (i += 1) {
@@ -1331,6 +1363,9 @@ export fn ch_engine_queue_import(self: ?*Engine, path: [*c]const u8) i32 {
         if (item == null) continue;
         if (addPath(e, std.mem.span(item)) != null) added += 1;
     }
+    const count: c_int = @intCast(e.playlist.items.len);
+    e.list_mutex.unlock();
+    if (added > 0) e.pushEvent(EV_QUEUE, count, 0, 0);
     return added;
 }
 
@@ -1380,6 +1415,7 @@ export fn ch_engine_queue_clear(self: ?*Engine) i32 {
     e.resetSegments();
     @atomicStore(usize, &e.played, 0, .release);
     @atomicStore(bool, &e.eof, true, .release);
+    e.pushEvent(EV_QUEUE, 0, 0, 0);
     return 0;
 }
 
@@ -1706,4 +1742,15 @@ export fn ch_engine_cover(self: ?*Engine, size: ?*u64) [*c]const u8 {
 export fn ch_engine_last_error(self: ?*Engine) [*c]const u8 {
     const e = self orelse return @ptrCast(&global_error);
     return @ptrCast(&e.err);
+}
+
+export fn ch_engine_poll_event(self: ?*Engine, out: ?*ChEvent) i32 {
+    const e = self orelse return -1;
+    const ev = out orelse return -1;
+    e.ev_lock.lock();
+    defer e.ev_lock.unlock();
+    if (e.ev_tail == e.ev_head) return 0;
+    ev.* = e.ev_buf[e.ev_tail];
+    e.ev_tail = (e.ev_tail + 1) % e.ev_buf.len;
+    return 1;
 }
