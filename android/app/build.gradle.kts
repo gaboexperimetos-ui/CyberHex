@@ -50,9 +50,28 @@ kotlin {
     }
 }
 
+// Compila el núcleo nativo (Zig + C23) antes del APK.
+//
+// - Se cachea: solo se recompila si cambian los fuentes del núcleo.
+// - Se puede saltar con `flutter build apk --android-project-arg=skipCoreBuild=true`
+//   (útil si ya copiaste el .so a mano o si no tienes Zig/NDK instalados).
+val skipCoreBuild = providers.gradleProperty("skipCoreBuild").orNull == "true"
+val coreDir = rootProject.file("../core")
+val coreLibsDir = file("src/main/jniLibs/arm64-v8a")
+
 val buildCyberHexCore by tasks.registering(Exec::class) {
-    workingDir = rootProject.file("../core")
+    group = "build"
+    description = "Compila libcyberhex_core.so (Zig + C23) para arm64-v8a"
+    workingDir = coreDir
     commandLine("./build_android.sh")
+    inputs.dir(coreDir.resolve("src"))
+    inputs.files(
+        coreDir.resolve("build.zig"),
+        coreDir.resolve("build.zig.zon"),
+        coreDir.resolve("build_android.sh"),
+    )
+    outputs.dir(coreLibsDir)
+    onlyIf { !skipCoreBuild }
 }
 
 tasks.matching { it.name == "preBuild" }.configureEach {
