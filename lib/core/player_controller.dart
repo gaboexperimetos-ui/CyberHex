@@ -226,6 +226,20 @@ class PlayerController extends ChangeNotifier {
     _refresh();
   }
 
+  /// Fija el modo de repetición (0 apagado, 1 todo, 2 una).
+  void setRepeatMode(int mode) {
+    if (_disposed) return;
+    _player.setRepeatMode(mode);
+    _refresh();
+  }
+
+  /// Fija el aleatorio sin alternarlo (lo usa la restauración de sesión).
+  void setShuffle(bool enabled) {
+    if (_disposed) return;
+    _player.setShuffle(enabled);
+    _refresh();
+  }
+
   /// Cicla el modo de repetición: apagado → todo → una → apagado.
   void cycleRepeat() {
     if (_disposed) return;

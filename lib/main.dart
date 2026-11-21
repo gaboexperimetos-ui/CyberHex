@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import 'core/native_player.dart';
 import 'core/player_controller.dart';
+import 'core/session_store.dart';
 import 'platform/external_file_channel.dart';
 import 'platform/media_session_channel.dart';
 import 'theme.dart';
@@ -30,6 +31,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
   PlayerController? _controller;
   MediaSessionChannel? _mediaSession;
   ExternalFileChannel? _externalFiles;
+  SessionKeeper? _session;
   bool _ownsController = false;
   String? _error;
 
@@ -51,6 +53,18 @@ class _CyberHexAppState extends State<CyberHexApp> {
     final controller = PlayerController(player)..start();
     _controller = controller;
     _attachPlatformChannels(controller);
+    _attachSession(controller);
+  }
+
+  /// Restaura la sesión anterior en segundo plano. Solo en producción: en las
+  /// pruebas de widget el controlador llega inyectado y no se toca el disco.
+  void _attachSession(PlayerController controller) {
+    if (!_ownsController) return;
+    final keeper = SessionKeeper(controller: controller);
+    _session = keeper;
+    // Sin await: la app arranca con la pantalla ya montada y la cola aparece
+    // cuando termina de leer el archivo.
+    unawaited(keeper.restore());
   }
 
   void _attachPlatformChannels(PlayerController controller) {
@@ -78,6 +92,9 @@ class _CyberHexAppState extends State<CyberHexApp> {
   @override
   void dispose() {
     // Los puentes primero: sueltan listeners antes de que el controlador muera.
+    final session = _session;
+    _session = null;
+    if (session != null) unawaited(session.dispose());
     _externalFiles?.dispose();
     _externalFiles = null;
     _mediaSession?.dispose();

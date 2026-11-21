@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'queue_sheet.dart';
 import 'eq_sheet.dart';
 
 class PlayerPage extends StatefulWidget {
@@ -53,6 +54,8 @@ class _PlayerPageState extends State<PlayerPage>
       _spin.stop();
     }
   }
+
+  void _openQueue() => QueueSheet.show(context, _controller);
 
   Future<void> _openFile() async {
     if (_controller.snapshot.busy) {
@@ -121,7 +124,10 @@ class _PlayerPageState extends State<PlayerPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _Header(onOpen: _openFile),
+                            _Header(
+                              onOpen: _openFile,
+                              onQueue: _openQueue,
+                            ),
                             const SizedBox(height: 28),
                             RepaintBoundary(
                               child: _Disc(spin: _spin, snapshot: snapshot),
@@ -189,9 +195,10 @@ class _ToggleIntent extends Intent {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.onOpen});
+  const _Header({required this.onOpen, required this.onQueue});
 
   final VoidCallback onOpen;
+  final VoidCallback onQueue;
 
   @override
   Widget build(BuildContext context) {
@@ -204,6 +211,11 @@ class _Header extends StatelessWidget {
           color: chForeground,
         )),
         const Spacer(),
+        IconButton(
+          onPressed: onQueue,
+          tooltip: 'Cola de reproducción',
+          icon: const Icon(Icons.queue_music_rounded),
+        ),
         IconButton(
           onPressed: onOpen,
           tooltip: 'Abrir audio',

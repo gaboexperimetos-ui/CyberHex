@@ -1,0 +1,212 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:cyberhex/core/player_controller.dart';
+import 'package:cyberhex/core/session_store.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'fake_player.dart';
+
+void main() {
+  late Directory temp;
+  late File file;
+  late SessionStore store;
+
+  setUp(() {
+    temp = Directory.systemTemp.createTempSync('cyberhex-session');
+    file = File('${temp.path}/session.json');
+    store = SessionStore(file: file);
+  });
+
+  tearDown(() {
+    if (temp.existsSync()) temp.deleteSync(recursive: true);
+  });
+
+  group('SessionSnapshot', () {
+    test('va y vuelve por JSON sin perder nada', () {
+      const session = SessionSnapshot(
+        queue: ['/m/a.flac', '/m/b.mp3'],
+        queueIndex: 1,
+        position: 42.5,
+        volume: 0.7,
+        repeatMode: 2,
+        shuffle: true,
+      );
+
+      final copy = SessionSnapshot.fromJson(
+        jsonDecode(jsonEncode(session.toJson())) as Map<String, Object?>,
+      );
+
+      expect(copy, session);
+      expect(copy.hashCode, session.hashCode);
+      expect(copy.queue, ['/m/a.flac', '/m/b.mp3']);
+      expect(copy.position, 42.5);
+    });
+
+    test('un JSON raro se degrada a valores seguros', () {
+      final copy = SessionSnapshot.fromJson(const <String, Object?>{
+        'queue': ['/m/a.flac', 42, '', '/m/b.mp3'],
+        'queueIndex': 99,
+        'position': 'no',
+        'volume': 4,
+        'repeatMode': 9,
+        'shuffle': 'sí',
+      });
+
+      // Solo las cadenas no vacías; el índice fuera de rango se descarta.
+      expect(copy.queue, ['/m/a.flac', '/m/b.mp3']);
+      expect(copy.queueIndex, -1);
+      expect(copy.position, 0);
+      expect(copy.volume, 1);
+      expect(copy.repeatMode, 2);
+      expect(copy.shuffle, isFalse);
+    });
+
+    test('isEmpty distingue una sesión vacía', () {
+      expect(const SessionSnapshot().isEmpty, isTrue);
+      expect(const SessionSnapshot(queue: ['/m/a.flac'], queueIndex: 0).isEmpty,
+          isFalse);
+    });
+  });
+
+  group('SessionStore', () {
+    test('sin archivo devuelve null', () async {
+      expect(await store.load(), isNull);
+    });
+
+    test('guarda y recupera, y no deja el .tmp detrás', () async {
+      const session = SessionSnapshot(
+        queue: ['/m/a.flac'],
+        queueIndex: 0,
+        position: 3,
+      );
+
+      expect(await store.save(session), isTrue);
+      expect(file.existsSync(), isTrue);
+      expect(File('${file.path}.tmp').existsSync(), isFalse);
+
+      final loaded = await store.load();
+      expect(loaded, session);
+    });
+
+    test('crea el directorio que falte', () async {
+      final deep = SessionStore(
+        file: File('${temp.path}/a/b/c/session.json'),
+      );
+      expect(await deep.save(const SessionSnapshot(queue: ['/m/a.flac'],
+          queueIndex: 0)), isTrue);
+      expect(await deep.load(), isNotNull);
+    });
+
+    test('un archivo corrupto no rompe el arranque', () async {
+      file.writeAsStringSync('{"queue": [ esto no es json');
+      expect(await store.load(), isNull);
+    });
+
+    test('un archivo vacío o con una lista se ignora', () async {
+      file.writeAsStringSync('');
+      expect(await store.load(), isNull);
+      file.writeAsStringSync('[1, 2, 3]');
+      expect(await store.load(), isNull);
+    });
+
+    test('una sesión sin cola no se considera sesión', () async {
+      await store.save(const SessionSnapshot(volume: 0.5));
+      expect(await store.load(), isNull);
+    });
+
+    test('clear borra el archivo', () async {
+      await store.save(const SessionSnapshot(queue: ['/m/a.flac'],
+          queueIndex: 0));
+      expect(await store.clear(), isTrue);
+      expect(file.existsSync(), isFalse);
+    });
+  });
+
+  group('SessionKeeper', () {
+    test('restaura cola, índice, posición y ajustes sin sonar', () async {
+      await store.save(const SessionSnapshot(
+        queue: ['/m/a.flac', '/m/b.mp3', '/m/c.ogg'],
+        queueIndex: 1,
+        position: 30,
+        volume: 0.4,
+        repeatMode: 1,
+        shuffle: true,
+      ));
+
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      final keeper = SessionKeeper(controller: controller, store: store);
+      addTearDown(controller.dispose);
+      addTearDown(keeper.dispose);
+
+      await keeper.restore();
+
+      expect(fake.queuePaths, ['/m/a.flac', '/m/b.mp3', '/m/c.ogg']);
+      expect(controller.snapshot.queueIndex, 1);
+      expect(controller.snapshot.title, 'b');
+      expect(controller.position.value, 30);
+      expect(controller.snapshot.playing, isFalse);
+      expect(controller.snapshot.volume, 0.4);
+      expect(controller.snapshot.repeatMode, 1);
+      expect(controller.snapshot.shuffle, isTrue);
+    });
+
+    test('saveNow escribe lo que hay ahora', () async {
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      final keeper = SessionKeeper(controller: controller, store: store);
+      addTearDown(controller.dispose);
+      addTearDown(keeper.dispose);
+
+      controller.enqueue('/m/a.flac');
+      controller.enqueue('/m/b.mp3');
+      controller.playAt(1);
+      controller.setVolume(0.25);
+      controller.position.value = 12;
+
+      expect(await keeper.saveNow(), isTrue);
+
+      final saved = await store.load();
+      expect(saved, isNotNull);
+      expect(saved!.queue, ['/m/a.flac', '/m/b.mp3']);
+      expect(saved.queueIndex, 1);
+      expect(saved.position, 12);
+      expect(saved.volume, 0.25);
+    });
+
+    test('al pausar programa un guardado y dispose lo escribe', () async {
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      final keeper = SessionKeeper(controller: controller, store: store);
+      addTearDown(controller.dispose);
+
+      controller.enqueue('/m/a.flac');
+      controller.playAt(0);
+      await keeper.restore(); // no hay sesión: solo engancha el listener
+
+      controller.pause();
+      await keeper.dispose();
+
+      final saved = await store.load();
+      expect(saved, isNotNull);
+      expect(saved!.queue, ['/m/a.flac']);
+      expect(saved.queueIndex, 0);
+    });
+
+    test('sin sesión previa no toca nada y deja el controlador vivo',
+        () async {
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      final keeper = SessionKeeper(controller: controller, store: store);
+      addTearDown(controller.dispose);
+      addTearDown(keeper.dispose);
+
+      await keeper.restore();
+
+      expect(fake.queuePaths, isEmpty);
+      expect(controller.snapshot.volume, 1);
+      expect(controller.snapshot.shuffle, isFalse);
+    });
+  });
+}
