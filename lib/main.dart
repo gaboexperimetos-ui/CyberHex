@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import 'core/native_player.dart';
 import 'core/player_controller.dart';
 import 'core/session_store.dart';
+import 'core/theme_controller.dart';
 import 'platform/external_file_channel.dart';
 import 'platform/media_session_channel.dart';
 import 'theme.dart';
@@ -37,12 +38,16 @@ class _CyberHexAppState extends State<CyberHexApp> {
   MediaSessionChannel? _mediaSession;
   ExternalFileChannel? _externalFiles;
   SessionKeeper? _session;
+  late final ThemeController _theme = ThemeController();
   bool _ownsController = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    // Los ajustes visuales mandan sobre el `MaterialApp` entero: se cargan sin
+    // bloquear (arranca con el tema neón y se repinta al leer el JSON).
+    unawaited(_theme.load());
     final injected = widget.controller;
     if (injected != null) {
       _controller = injected..start();
@@ -111,19 +116,23 @@ class _CyberHexAppState extends State<CyberHexApp> {
     if (_ownsController) {
       _controller?.dispose();
     }
+    _theme.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final controller = _controller;
-    return MaterialApp(
-      title: 'CyberHex',
-      debugShowCheckedModeBanner: false,
-      theme: buildCyberHexTheme(),
-      home: controller == null
-          ? CoreErrorScreen(message: _error ?? 'no se pudo iniciar el motor')
-          : PlayerPage(controller: controller),
+    return AnimatedBuilder(
+      animation: _theme,
+      builder: (context, _) => MaterialApp(
+        title: 'CyberHex',
+        debugShowCheckedModeBanner: false,
+        theme: _theme.themeData,
+        home: controller == null
+            ? CoreErrorScreen(message: _error ?? 'no se pudo iniciar el motor')
+            : PlayerPage(controller: controller, theme: _theme),
+      ),
     );
   }
 }

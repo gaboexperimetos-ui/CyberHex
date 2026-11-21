@@ -36,14 +36,14 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **14 885 líneas Dart** + **4 090 de tests** (162 casos). Estado
+- App: **16 176 líneas Dart** + **4 468 de tests** (181 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
   núcleo, **toda** la API del motor expuesta a Dart con el DSP persistido en la
   sesión, el **laboratorio de audio** («toda la fase 2 en pantalla»), la fase 4
-  de letras, etiquetas y tarjetas, y la fase 5 de listas, multi-cola, automix,
-  estadísticas y descargas.
+  de letras, etiquetas y tarjetas, la fase 5 de listas, multi-cola, automix,
+  estadísticas y descargas, y la fase 6A de temas, gestos y mini-reproductor.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -71,7 +71,7 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                 14 885 líneas
+lib/                        app Flutter                                 16 176 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
@@ -82,6 +82,8 @@ lib/                        app Flutter                                 14 885 l
   core/stats_store.dart     historial, totales, top de pistas/artistas y hora favorita
   core/automix_engine.dart  plan de mezcla por BPM (±8 %) y máquina de estados
   core/audio_downloader.dart  Internet Archive y URLs directas con dart:io
+  core/theme_controller.dart 4 temas, color de carátula, gestos y barra configurable
+  theme.dart                4 paletas (neón, AMOLED, claro, Material You) y estilos
   platform/media_session_channel.dart  puente Dart del canal cyberhex/media
   ui/audio_lab_sheet.dart   laboratorio: todo el DSP, BPM, WAV, .cue, loop y sueño
   ui/lyrics_page.dart       visor a pantalla completa con fondo difuminado
@@ -91,11 +93,13 @@ lib/                        app Flutter                                 14 885 l
   ui/playlists_page.dart    listas, inteligentes, importar/exportar y detalle
   ui/stats_page.dart        totales, gráfico por hora, top e historial
   ui/downloader_page.dart   buscar en Archive o pegar URL, con barra de progreso
+  ui/mini_player.dart       barra flotante en biblioteca y listas
+  ui/settings_page.dart     tema, color dinámico, carátula, bolsillo y acciones
   ui/visualizer_widget.dart vúmetro + espectro (barras o hexágonos) a 30 Hz
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       162 tests Dart                             4 090 líneas
+test/                       181 tests Dart                             4 468 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -432,6 +436,41 @@ descargador (parser del buscador, filtrado de archivos, saneado de nombres y
 
 ---
 
+### 5.7 Fase 6A: temas, carátula, gestos, mini-reproductor y modo bolsillo
+
+La app deja de tener un solo aspecto. `theme.dart` gana **cuatro paletas**
+(Neón, AMOLED Negro Puro, Claro y Material You) y `ThemeController` las aplica
+sobre el `MaterialApp` entero; el reproductor pasa a ser táctil de verdad.
+
+| Pieza | Qué hace |
+|---|---|
+| `CyberHexPalette` | 12 colores por tema + brillo. `buildCyberHexThemed(palette)` monta el `ThemeData` y expone la paleta como extensión (`paletteOf(context)`), con la neón como red de seguridad. `buildCyberHexTheme()` sigue existiendo y devuelve neón |
+| `ThemeController` | Tema, **color dinámico de la carátula** (`instantiateImageCodec` a 32 px + media ponderada por saturación, con acento de reserva determinista si el byte no es imagen), estilo de carátula, modo bolsillo y qué botones van en la barra rápida. Persiste en `theme.json` |
+| `PlayerPage` | Cuatro estilos de carátula (cuadrada, redondeada, disco giratorio y **a sangre** con la carátula de fondo), deslizamiento horizontal (siguiente/anterior) y vertical (volumen) sobre la carátula, **doble toque** por zonas (−10 s / play-pausa / +10 s), **búsqueda fina** arrastrando en vertical sobre la barra (1 px = 50 ms, se muestra en `mm:ss.mmm`), barra de acciones configurable, **modo bolsillo** (bloqueo total, se sale con pulsación larga) y **dos paneles** en pantallas anchas (≥ 760 px y horizontal) |
+| `MiniPlayer` | Barra flotante con carátula, título, transporte y progreso; en biblioteca y listas, tocar abre el reproductor |
+| `SettingsPage` | Tema, color dinámico, estilo de carátula, modo bolsillo y los cuatro botones de la barra rápida |
+
+Límites y decisiones:
+
+* **No hay `dynamic_color` ni `palette_generator`**: el acento se saca con
+  `dart:ui` (decodificar a 32 px y promediar por saturación). Es menos «bonito»
+  que un cuantizador, pero no añade un paquete y es determinista.
+* **La migración a la paleta es incremental**: reproductor, mini-reproductor y
+  ajustes ya leen `paletteOf(context)`; biblioteca, listas, estadísticas y
+  descargas siguen con las constantes neón. Con el tema claro se ven como antes
+  (R28).
+* **El «a sangre» pone la carátula de fondo** con un velo del tema para que el
+  texto siga legible; no recorta ni difumina la imagen.
+
+Tests nuevos (19, `test/theme_and_gestures_test.dart`): paletas y extensión,
+controlador (tema, ciclo, estilo, bolsillo, acciones, persistencia), acento de
+píxeles (grises y transparentes fuera, rojo y azul dominantes), acento de
+reserva, y en el reproductor: doble toque en las tres zonas, búsqueda fina por
+arrastre vertical, modo bolsillo con bloqueo y salida por pulsación larga, los
+cuatro estilos y el diseño de dos paneles; más mini-reproductor y ajustes.
+
+---
+
 ## 6. Plataformas
 
 ### Escritorio (PC, Arch)
@@ -525,7 +564,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 42/42 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 46/46 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -651,6 +690,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R20 | ReplayGain on/off sin getter | el núcleo solo exporta `ch_engine_set_replaygain`; el valor se recuerda en `NativePlayer` (arranca activado, como el motor) y se reenvía al restaurar | `native_player.dart` |
 | R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run` y la hoja solo muestra «Exportando…»: no hay barra de progreso | `native_player.dart`, `audio_lab_sheet.dart` |
 | R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
+| R28 | Paleta solo en parte de la app | el reproductor, el mini-reproductor y los ajustes leen `paletteOf(context)`; el resto de pantallas siguen con las constantes neón, así que el tema Claro se ve a medias fuera del reproductor | `lib/ui/` |
+| R29 | Gestos sin probar en pantalla táctil | doble toque, arrastres y modo bolsillo están probados simulados en `flutter test`; falta verlos con el dedo (zonas, umbrales de velocidad y pulsación larga) | `player_page.dart` |
 | R26 | Descargas sin verificar en red real | el descargador se prueba contra un `HttpServer` local y contra los parsers del JSON de Archive; falta comprobar la API real (límites, ítems enormes, redirecciones) y que el archivo descargado suene | `audio_downloader.dart` |
 | R27 | Automix sin audio real | el plan y la máquina de estados están probados con un `BpmProbe` inyectado; falta oír una mezcla de verdad y decidir si ±8 % es el límite bueno | `automix_engine.dart` |
 | R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
@@ -713,9 +754,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (41 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (42 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 6A → app(ui): cuatro temas, color de carátula, gestos, mini-reproductor y bolsillo
 FASE 5 → app(ui): listas .m3u, cinco colas, automix, estadísticas y descargas
 FASE 4 → app(ui): letras sincronizadas, estudio .lrc, etiquetas y tarjetas compartibles
 FASE 3-3 → app(ui): laboratorio de audio, visualizador, presets y prueba de audición

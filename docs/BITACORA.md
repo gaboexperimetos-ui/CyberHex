@@ -18,6 +18,39 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 19 · FASE 6A, pedido 6 de 10: temas, carátula, gestos, mini-reproductor y bolsillo
+
+- **PEDIDO:** cuatro temas + color dinámico de carátula, cuatro estilos de
+  carátula, gestos (deslizar, doble toque, búsqueda fina), barra de acciones
+  configurable, modo bolsillo, diseño de dos paneles y mini-reproductor.
+  PROHIBIDO `core/`, `android/` y `pubspec.yaml`. RIESGO NO ACEPTABLE.
+- **HECHO:**
+  - `theme.dart` (315): `CyberHexThemeId`, `CyberHexPalette` (4 paletas completas),
+    `CoverStyle`, `paletteOf(context)` y `buildCyberHexThemed`; el
+    `buildCyberHexTheme()` de siempre sigue devolviendo neón.
+  - `lib/core/theme_controller.dart` (309): tema, color dinámico desde la
+    carátula (`instantiateImageCodec` a 32 px y media ponderada por saturación,
+    con reserva determinista), estilo, bolsillo, acciones y `theme.json`.
+  - `lib/ui/player_page.dart` (+581): cuatro estilos de carátula, gestos de la
+    carátula, doble toque por zonas, búsqueda fina en `mm:ss.mmm`, barra de
+    acciones configurable, modo bolsillo y dos paneles con clave
+    `player-panes`/`player-cover` para las pruebas.
+  - `lib/ui/mini_player.dart` (157) en biblioteca y listas; `settings_page.dart`
+    (147) con tema, dinámico, carátula, bolsillo y acciones; `main.dart` monta el
+    `MaterialApp` desde el controlador de tema.
+  - `test/theme_and_gestures_test.dart` (378): **19 casos** nuevos.
+- **VERIFICADO:** tree-sitter **46/46 sin errores**; paridad `PlayerApi` 112/112;
+  cifras: `lib` 16 176, `test` 4 468, **181 casos**.
+- **NO VERIFICABLE AQUÍ:** sin SDK no se ejecutan los 19 casos; los gestos no se
+  prueban con el dedo (R29) y el tema Claro solo llega al reproductor, al mini y a
+  los ajustes (R28); el color de la carátula depende de que el decodificador
+  acepte el JPEG/PNG real.
+- **COMMITS:** este turno, un commit en `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** **R28** migración de paleta a medias; **R29** gestos sin
+  probar en hardware. Pendientes los pedidos 7–10.
+
+---
+
 ## 2026-11-21 · turno 18 · FASE 5, pedido 5 de 10: listas, cinco colas, automix, estadísticas y descargas
 
 - **PEDIDO:** playlists `.m3u`/`.m3u8`/`.pls` e inteligentes, hasta cinco colas

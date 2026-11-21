@@ -11,6 +11,7 @@ import '../core/playlist_store.dart';
 import '../core/stats_store.dart';
 import '../theme.dart';
 import 'downloader_page.dart';
+import 'mini_player.dart';
 import 'playlists_page.dart';
 import 'stats_page.dart';
 
@@ -473,7 +474,15 @@ class _LibraryPageState extends State<LibraryPage>
                 ),
               ),
       ),
-      body: _body(),
+      body: Column(
+        children: [
+          Expanded(child: _body()),
+          MiniPlayer(
+            controller: _controller,
+            onOpen: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+        ],
+      ),
     );
   }
 

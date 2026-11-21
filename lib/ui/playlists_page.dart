@@ -7,6 +7,7 @@ import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../core/stats_store.dart';
 import '../theme.dart';
+import 'mini_player.dart';
 
 /// Playlists: las del usuario y las tres inteligentes.
 ///
@@ -171,8 +172,6 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final smart = _smart;
-    final mine = _store.playlists;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Listas'),
@@ -189,7 +188,22 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
           ),
         ],
       ),
-      body: ListView(
+      body: Column(
+        children: [
+          Expanded(child: _list()),
+          MiniPlayer(
+            controller: _controller,
+            onOpen: () => Navigator.of(context).popUntil((route) => route.isFirst),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _list() {
+    final smart = _smart;
+    final mine = _store.playlists;
+    return ListView(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
         children: [
           if (_message != null)
@@ -272,8 +286,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
               },
             ),
         ],
-      ),
-    );
+      );
   }
 
   static String _slug(String name) => name
