@@ -50,13 +50,16 @@ class PlayerController extends ChangeNotifier {
   /// dependen de relojes reales.
   void pump() {
     if (_disposed) return;
-    _drainEvents();
-    position.value = _player.position;
+    final restarted = _drainEvents();
+    // Si el motor acaba de cambiar de pista, la posición es la de la pista
+    // nueva (0) y no la vieja que todavía devuelve el getter.
+    if (!restarted) position.value = _player.position;
     _refresh();
   }
 
-  void _drainEvents() {
+  bool _drainEvents() {
     var processed = 0;
+    var restarted = false;
     while (processed < _maxEventsPerTick) {
       final event = _player.pollEvent();
       if (event == null) break;
@@ -67,8 +70,10 @@ class PlayerController extends ChangeNotifier {
       if (event.kind == PlayerEventKind.track) {
         _player.syncTrackInfo();
         position.value = 0;
+        restarted = true;
       }
     }
+    return restarted;
   }
 
   void _refresh() {
@@ -148,10 +153,19 @@ class PlayerController extends ChangeNotifier {
     _refresh();
   }
 
+  /// Mueve la posición, siempre dentro de `[0, duración]`.
+  ///
+  /// El acotado vive aquí y no en quien llama porque este es el único punto por
+  /// el que pasan la UI, el canal de medios y cualquier control externo, y la
+  /// duración se consulta al motor en vivo (el snapshot puede estar viejo).
   void seek(double seconds) {
     if (_disposed) return;
-    _player.seek(seconds);
-    position.value = seconds;
+    final duration = _player.duration;
+    var target = seconds.isFinite ? seconds : 0.0;
+    if (target < 0) target = 0;
+    if (duration > 0 && target > duration) target = duration;
+    _player.seek(target);
+    position.value = target;
     _refresh();
   }
 

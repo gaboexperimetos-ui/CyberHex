@@ -247,7 +247,7 @@ class _Disc extends StatelessWidget {
                   fit: BoxFit.cover,
                   gaplessPlayback: true,
                   cacheWidth: 472,
-                  errorBuilder: (_, __, ___) => _vinyl(reduceMotion),
+                  errorBuilder: (_, _, _) => _vinyl(reduceMotion),
                 ),
               )
             else

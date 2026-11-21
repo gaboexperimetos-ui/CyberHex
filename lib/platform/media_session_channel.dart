@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-import '../core/player_api.dart';
 import '../core/player_controller.dart';
 
 /// Puente entre [PlayerController] y el servicio de medios de Android
@@ -176,8 +174,9 @@ class MediaSessionChannel {
         _controller.previous();
         return true;
       case 'seek':
+        // El controlador acota con la duración real del motor.
         final seconds = (call.arguments as num?)?.toDouble();
-        if (seconds != null) _controller.seek(_clampSeek(seconds));
+        if (seconds != null) _controller.seek(seconds);
         return true;
       case 'setVolume':
         final value = (call.arguments as num?)?.toDouble();
@@ -190,13 +189,6 @@ class MediaSessionChannel {
         // El servicio puede preguntar por métodos de versiones futuras.
         return false;
     }
-  }
-
-  /// No deja pedir un seek fuera de la pista actual.
-  double _clampSeek(double seconds) {
-    final duration = _controller.snapshot.duration;
-    final max = duration > 0 ? duration : seconds;
-    return seconds.clamp(0.0, max).toDouble();
   }
 
   void _setUserVolume(double value) {
