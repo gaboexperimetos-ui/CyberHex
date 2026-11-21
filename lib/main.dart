@@ -1,7 +1,10 @@
+import 'dart:io' show Platform;
+
 import 'package:material_ui/material_ui.dart';
 
 import 'core/native_player.dart';
 import 'core/player_controller.dart';
+import 'platform/media_session_channel.dart';
 import 'theme.dart';
 import 'ui/core_error_screen.dart';
 import 'ui/player_page.dart';
@@ -23,6 +26,7 @@ class CyberHexApp extends StatefulWidget {
 
 class _CyberHexAppState extends State<CyberHexApp> {
   PlayerController? _controller;
+  MediaSessionChannel? _mediaSession;
   bool _ownsController = false;
   String? _error;
 
@@ -32,6 +36,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
     final injected = widget.controller;
     if (injected != null) {
       _controller = injected..start();
+      _attachMediaSession(injected);
       return;
     }
     final player = NativePlayer.open();
@@ -40,11 +45,23 @@ class _CyberHexAppState extends State<CyberHexApp> {
       return;
     }
     _ownsController = true;
-    _controller = PlayerController(player)..start();
+    final controller = PlayerController(player)..start();
+    _controller = controller;
+    _attachMediaSession(controller);
+  }
+
+  /// Solo en Android: el servicio de medios pinta la notificación y reenvía
+  /// los botones de la pantalla de bloqueo al controlador.
+  void _attachMediaSession(PlayerController controller) {
+    if (!Platform.isAndroid) return;
+    _mediaSession = MediaSessionChannel(controller);
   }
 
   @override
   void dispose() {
+    // El puente primero: suelta listeners antes de que el controlador muera.
+    _mediaSession?.dispose();
+    _mediaSession = null;
     if (_ownsController) {
       _controller?.dispose();
     }
