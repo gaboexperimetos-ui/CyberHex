@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'player_api.dart';
 import 'player_controller.dart';
 
 /// Foto de la sesión: qué había en la cola, por dónde iba y con qué ajustes.
@@ -19,10 +20,13 @@ class SessionSnapshot {
     this.volume = 1,
     this.repeatMode = 0,
     this.shuffle = false,
+    this.audio = AudioSettings.neutral,
   });
 
   /// Versión del formato; sube si cambia el significado de algún campo.
-  static const int formatVersion = 1;
+  ///
+  /// 2: la sesión guarda además los ajustes de audio (DSP, balance, paisaje...).
+  static const int formatVersion = 2;
 
   final List<String> queue;
   final int queueIndex;
@@ -30,6 +34,10 @@ class SessionSnapshot {
   final double volume;
   final int repeatMode;
   final bool shuffle;
+
+  /// Ajustes de audio que se restauran al arrancar (decisión del arquitecto:
+  /// el DSP se persiste aquí, no en el estado del motor).
+  final AudioSettings audio;
 
   bool get isEmpty => queue.isEmpty && queueIndex < 0;
 
@@ -41,6 +49,7 @@ class SessionSnapshot {
         'volume': volume,
         'repeatMode': repeatMode,
         'shuffle': shuffle,
+        'audio': audio.toJson(),
       };
 
   /// Nunca lanza y nunca devuelve algo incoherente: un JSON de otra versión, con
@@ -66,6 +75,8 @@ class SessionSnapshot {
       volume: _double(json['volume'], 1).clamp(0.0, 1.0).toDouble(),
       repeatMode: repeat < 0 ? 0 : (repeat > 2 ? 2 : repeat),
       shuffle: json['shuffle'] == true,
+      // Una sesión de la versión 1 no trae audio: quedan los valores neutros.
+      audio: AudioSettings.fromJson(json['audio']),
     );
   }
 
@@ -82,11 +93,12 @@ class SessionSnapshot {
       other.volume == volume &&
       other.repeatMode == repeatMode &&
       other.shuffle == shuffle &&
+      other.audio == audio &&
       listEquals(other.queue, queue);
 
   @override
   int get hashCode => Object.hash(queueIndex, position, volume, repeatMode,
-      shuffle, Object.hashAll(queue));
+      shuffle, audio, Object.hashAll(queue));
 
   @override
   String toString() =>
@@ -293,6 +305,7 @@ class SessionKeeper {
       controller.setVolume(session.volume);
       controller.setRepeatMode(session.repeatMode);
       controller.setShuffle(session.shuffle);
+      controller.applyAudioSettings(session.audio);
 
       if (session.queue.isEmpty) return;
       for (final path in session.queue) {
@@ -320,6 +333,8 @@ class SessionKeeper {
     if (_disposed) return;
     controller.removeListener(_onControllerChanged);
     controller.addListener(_onControllerChanged);
+    controller.removeAudioListener(_onAudioChanged);
+    controller.addAudioListener(_onAudioChanged);
     _rememberCurrent();
   }
 
@@ -342,6 +357,13 @@ class SessionKeeper {
     _lastTitle = snapshot.title;
 
     if (trackChanged || paused) _scheduleSave();
+  }
+
+  /// Un cambio de DSP o de mezcla se guarda con el mismo antirrebote que un
+  /// cambio de pista: la UI avisa muchas veces mientras se arrastra un mando.
+  void _onAudioChanged() {
+    if (_disposed) return;
+    _scheduleSave();
   }
 
   void _scheduleSave() {
@@ -372,6 +394,7 @@ class SessionKeeper {
       volume: snapshot.volume,
       repeatMode: snapshot.repeatMode,
       shuffle: snapshot.shuffle,
+      audio: controller.audioSettings(),
     );
     return store.save(session);
   }
@@ -383,6 +406,7 @@ class SessionKeeper {
     _saveTimer?.cancel();
     _saveTimer = null;
     controller.removeListener(_onControllerChanged);
+    controller.removeAudioListener(_onAudioChanged);
     // Si había algo programado, se escribe ahora: cerrar la app no debe perder
     // la pista en la que ibas.
     if (pending) {

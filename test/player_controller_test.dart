@@ -498,6 +498,292 @@ void main() {
     expect(fake.s16Calls, 0);
   });
 
+
+  // -------------------------------------------------------------------
+  // Fase 3: medición, mezcla fina y ajustes persistentes
+  // -------------------------------------------------------------------
+
+  test('levels y spectrum llegan del motor a la UI', () {
+    final fake = FakePlayer()
+      ..levelsValue = const PlayerLevels(
+        rmsLeft: 0.2,
+        rmsRight: 0.25,
+        peakLeft: 0.9,
+        peakRight: 0.8,
+      );
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    final levels = controller.levels();
+    expect(levels.rmsLeft, 0.2);
+    expect(levels.peakRight, 0.8);
+    expect(levels.isSilent, isFalse);
+
+    final spectrum = controller.spectrum(8);
+    expect(spectrum.length, 8);
+    expect(fake.spectrumBands, 8);
+    expect(spectrum.first, closeTo(0.125, 1e-9));
+  });
+
+  test('balance y modo de canales se recortan y se aplican', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.setBalance(-3);
+    expect(fake.balance, -1);
+    controller.setBalance(0.5);
+    expect(controller.balance, 0.5);
+
+    controller.setChannelMode(1);
+    expect(fake.channelMode, 1);
+    expect(controller.channelMode, 1);
+    // El motor rechaza los modos fuera de 0..2 y FakePlayer lo imita.
+    controller.setChannelMode(9);
+    expect(controller.channelMode, 1);
+  });
+
+  test('velocidad, tono, crossfade y gapless se delegan con sus rangos', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.setSpeed(9);
+    expect(fake.speed, 4.0);
+    controller.setPitch(-20);
+    expect(fake.pitch, -12.0);
+    controller.setCrossfade(3);
+    expect(controller.crossfade, 3);
+    controller.setGapless(false);
+    expect(controller.gapless, isFalse);
+
+    controller.setReplayGainAlbum(true);
+    expect(controller.replayGainAlbum, isTrue);
+    controller.setReplayGain(false);
+    expect(fake.replayGainCalls, 1);
+    expect(controller.replayGainEnabled, isFalse);
+  });
+
+  test('loop A-B: activo solo con un tramo válido', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.loopActive, isFalse);
+    controller.setLoop(10, 20);
+    expect(controller.loopActive, isTrue);
+    expect(controller.loopStart, 10);
+    expect(controller.loopEnd, 20);
+
+    controller.setLoop(20, 10);
+    expect(controller.loopActive, isFalse);
+
+    controller.setLoop(5, 9);
+    controller.clearLoop();
+    expect(controller.loopActive, isFalse);
+    expect(fake.loopCalls, 4);
+  });
+
+  test('paisajes: se ciclan y el nivel se recorta', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.soundscape, SoundscapePreset.off);
+    controller.cycleSoundscape();
+    expect(controller.soundscape, SoundscapePreset.rain);
+    controller.setSoundscape(SoundscapePreset.rain, level: 3);
+    expect(controller.soundscapeLevel, 1);
+    controller.cycleSoundscape();
+    expect(controller.soundscape, SoundscapePreset.brown);
+    controller.cycleSoundscape();
+    expect(controller.soundscape, SoundscapePreset.vinyl);
+    controller.cycleSoundscape();
+    expect(controller.soundscape, SoundscapePreset.off);
+    expect(fake.soundscapeCalls, 5);
+  });
+
+  test('marcadores: alta, consulta, borrado y marca en la posición actual', () async {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    await controller.openFile('/m/tema.flac');
+    controller.seek(12.5);
+
+    expect(controller.addMarkerHere('estribillo'), isTrue);
+    expect(controller.addMarker('/m/tema.flac', 3, 'intro'), isTrue);
+    expect(controller.addMarker('/m/tema.flac', -1, 'mala'), isFalse);
+
+    final marks = controller.markersOf('/m/tema.flac');
+    expect(marks.length, 2);
+    expect(marks.first.name, 'intro');
+    expect(marks.last.position, 12.5);
+
+    expect(controller.removeMarker('/m/tema.flac', 0), isTrue);
+    expect(controller.markersOf('/m/tema.flac').length, 1);
+    controller.clearMarkers('/m/tema.flac');
+    expect(controller.markersOf('/m/tema.flac'), isEmpty);
+
+    expect(controller.saveMarkers('/tmp/markers.json'), isTrue);
+    expect(fake.markerFiles, contains('save:/tmp/markers.json'));
+  });
+
+  test('temporizador de apagado, silencio y dispositivo de salida', () async {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.setSleepTimer(1800, fadeSeconds: 12);
+    expect(fake.sleepSeconds, 1800);
+    expect(fake.sleepFade, 12);
+    expect(controller.sleepRemaining, 1800);
+
+    final trim = await controller.detectSilence('/m/a.flac', thresholdDb: -50);
+    expect(trim, const SilenceTrim(lead: 0.5, tail: 1.25));
+    expect(fake.silenceThreshold, -50);
+
+    expect(controller.outputDevices.length, 2);
+    expect(controller.outputDevice, -1);
+    expect(controller.setOutputDevice(0), isTrue);
+    expect(controller.outputDevice, 0);
+    expect(controller.setOutputDevice(7), isFalse);
+  });
+
+  test('letra de la pista audible', () {
+    final fake = FakePlayer()
+      ..lyricLineCount = 42
+      ..currentLyricLine = 'y el cielo se abrió';
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.lyricLineCount, 42);
+    expect(controller.currentLyricLine, 'y el cielo se abrió');
+  });
+
+  test('BPM y exportación: delegan y publican el error', () async {
+    final fake = FakePlayer()..bpmValue = 128.4;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(await controller.detectBpm('/m/a.flac'), 128.4);
+    expect(fake.bpmPath, '/m/a.flac');
+
+    expect(
+      await controller.renderWav('/m/a.flac', '/m/a.wav', start: 1, end: 30),
+      isTrue,
+    );
+    expect(fake.rendered.single.start, 1);
+    expect(fake.rendered.single.end, 30);
+    expect(fake.rendered.single.dsp, isTrue);
+
+    fake.renderResult = false;
+    fake.lastError = 'exportación: no se pudo crear el destino';
+    expect(await controller.renderWav('/m/a.flac', '/no/wav'), isFalse);
+    expect(controller.snapshot.error, 'exportación: no se pudo crear el destino');
+  });
+
+  test('hojas CUE: lectura y análisis de texto', () {
+    final fake = FakePlayer()
+      ..cueTracks = const <CueTrack>[
+        CueTrack(file: '/m/disco.flac', start: 0, end: 201.5, title: 'Uno', number: 1),
+        CueTrack(file: '/m/disco.flac', start: 201.5, title: 'Dos', number: 2),
+      ];
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    final tracks = controller.readCue('/m/disco.cue');
+    expect(tracks.length, 2);
+    expect(tracks.first.label, 'Uno');
+    expect(tracks.first.duration, 201.5);
+    expect(tracks.last.end, -1);
+    expect(tracks.last.label, 'Dos');
+
+    expect(controller.parseCue('FILE "x"\n'), isNotEmpty);
+    expect(fake.cueCalls, 1);
+    expect(fake.cueParseCalls, 1);
+  });
+
+  test('audioSettings refleja el motor y applyAudioSettings lo vuelca', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.set9D(enabled: true, speed: 0.4, depth: 0.7);
+    controller.setStereoEnhance(width: 1.5, bassPunch: 0.4);
+    controller.setVocalCut(0.6);
+    controller.setCrossfeed(enabled: true, level: 0.3);
+    controller.setNightMode(enabled: true, amount: 0.8);
+    controller.setBalance(-0.4);
+    controller.setChannelMode(2);
+    controller.setReplayGainAlbum(true);
+    controller.setCrossfade(4);
+    controller.setGapless(false);
+    controller.setSpeed(1.25);
+    controller.setPitch(-3);
+    controller.setSoundscape(SoundscapePreset.brown, level: 0.35);
+
+    final settings = controller.audioSettings();
+    expect(settings.nineDEnabled, isTrue);
+    expect(settings.nineDSpeed, 0.4);
+    expect(settings.stereoWidth, 1.5);
+    expect(settings.vocalCut, 0.6);
+    expect(settings.crossfeedLevel, 0.3);
+    expect(settings.nightModeAmount, 0.8);
+    expect(settings.balance, -0.4);
+    expect(settings.channelMode, 2);
+    expect(settings.replayGainAlbum, isTrue);
+    expect(settings.crossfade, 4);
+    expect(settings.gapless, isFalse);
+    expect(settings.speed, 1.25);
+    expect(settings.pitch, -3);
+    expect(settings.soundscape, SoundscapePreset.brown);
+    expect(settings.soundscapeLevel, 0.35);
+
+    // Un motor en blanco y los ajustes volcados deben dar lo mismo.
+    final other = FakePlayer();
+    final second = PlayerController(other);
+    addTearDown(second.dispose);
+    second.applyAudioSettings(settings);
+    expect(second.audioSettings(), settings);
+  });
+
+  test('los ajustes de audio avisan para que la sesión los guarde', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    var notices = 0;
+    void listener() => notices++;
+    controller.addAudioListener(listener);
+
+    controller.setBalance(0.2);
+    controller.setSoundscape(SoundscapePreset.rain, level: 0.4);
+    controller.setVolume(0.5);
+    expect(notices, 3);
+
+    controller.removeAudioListener(listener);
+    controller.setBalance(0);
+    expect(notices, 3, reason: 'tras quitarlo no avisa');
+  });
+
+  test('la fase 3 tampoco hace nada tras dispose', () async {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    controller.dispose();
+
+    controller.setBalance(0.5);
+    controller.setChannelMode(1);
+    controller.setSpeed(2);
+    controller.setSoundscape(SoundscapePreset.rain);
+    controller.setSleepTimer(10);
+    expect(fake.balanceCalls, 0);
+    expect(fake.channelModeCalls, 0);
+    expect(fake.speedCalls, 0);
+    expect(fake.soundscapeCalls, 0);
+    expect(fake.sleepTimerCalls, 0);
+  });
+
   test('dispose libera el motor', () {
     final fake = FakePlayer();
     final controller = PlayerController(fake);

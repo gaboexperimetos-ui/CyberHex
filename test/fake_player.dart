@@ -436,6 +436,308 @@ class FakePlayer implements PlayerApi {
     return library;
   }
 
+
+  // ---------------------------------------------------------------------
+  // Fase 3: medición, mezcla fina y transporte extendido
+  // ---------------------------------------------------------------------
+
+  /// Niveles que devolverá [levels]; por defecto silencio.
+  PlayerLevels levelsValue = PlayerLevels.silent;
+
+  @override
+  PlayerLevels levels() => levelsValue;
+
+  /// Espectro de mentira: `bands` valores que suben en rampa.
+  int spectrumBands = 0;
+
+  @override
+  List<double> spectrum([int bands = 32]) {
+    spectrumBands = bands;
+    if (bands <= 0) return const <double>[];
+    return List<double>.generate(bands, (i) => (i + 1) / bands);
+  }
+
+  @override
+  double balance = 0;
+
+  @override
+  void setBalance(double value) {
+    balanceCalls++;
+    balance = value.clamp(-1.0, 1.0).toDouble();
+  }
+
+  int balanceCalls = 0;
+
+  @override
+  int channelMode = 0;
+
+  @override
+  void setChannelMode(int mode) {
+    channelModeCalls++;
+    if (mode < 0 || mode > 2) return;
+    channelMode = mode;
+  }
+
+  int channelModeCalls = 0;
+
+  @override
+  bool replayGainEnabled = true;
+
+  @override
+  void setReplayGain(bool enabled) {
+    replayGainEnabled = enabled;
+    replayGainCalls++;
+  }
+
+  int replayGainCalls = 0;
+
+  @override
+  double replayGainGainDb = 0;
+
+  @override
+  double replayGainPeak = 1;
+
+  @override
+  bool replayGainAlbum = false;
+
+  @override
+  void setReplayGainAlbum(bool album) {
+    replayGainAlbum = album;
+    replayGainAlbumCalls++;
+  }
+
+  int replayGainAlbumCalls = 0;
+
+  @override
+  double speed = 1;
+
+  @override
+  void setSpeed(double value) {
+    speedCalls++;
+    speed = value.clamp(0.25, 4.0).toDouble();
+  }
+
+  int speedCalls = 0;
+
+  @override
+  double pitch = 0;
+
+  @override
+  void setPitch(double semitones) {
+    pitchCalls++;
+    pitch = semitones.clamp(-12.0, 12.0).toDouble();
+  }
+
+  int pitchCalls = 0;
+
+  @override
+  double crossfade = 0;
+
+  @override
+  void setCrossfade(double seconds) {
+    crossfadeCalls++;
+    crossfade = seconds < 0 ? 0 : seconds;
+  }
+
+  int crossfadeCalls = 0;
+
+  @override
+  bool gapless = true;
+
+  @override
+  void setGapless(bool enabled) {
+    gaplessCalls++;
+    gapless = enabled;
+  }
+
+  int gaplessCalls = 0;
+
+  @override
+  double loopStart = -1;
+
+  @override
+  double loopEnd = -1;
+
+  @override
+  void setLoop(double start, double end) {
+    loopCalls++;
+    if (end <= start) {
+      loopStart = -1;
+      loopEnd = -1;
+      return;
+    }
+    loopStart = start;
+    loopEnd = end;
+  }
+
+  int loopCalls = 0;
+
+  @override
+  void clearLoop() => setLoop(0, 0);
+
+  @override
+  bool get loopActive => loopStart >= 0 && loopEnd > loopStart;
+
+  /// Marcadores por ruta de pista, como el motor.
+  final Map<String, List<AudioMarker>> markers = <String, List<AudioMarker>>{};
+
+  /// Rutas cuyos marcadores se han cargado/guardado (para comprobar llamadas).
+  final List<String> markerFiles = <String>[];
+
+  @override
+  bool loadMarkers(String path) {
+    markerFiles.add('load:$path');
+    return true;
+  }
+
+  @override
+  bool saveMarkers(String path) {
+    markerFiles.add('save:$path');
+    return true;
+  }
+
+  @override
+  List<AudioMarker> markersOf(String trackPath) =>
+      List<AudioMarker>.unmodifiable(markers[trackPath] ?? const <AudioMarker>[]);
+
+  @override
+  bool addMarker(String trackPath, double position, String name) {
+    if (!position.isFinite || position < 0) return false;
+    final list = markers.putIfAbsent(trackPath, () => <AudioMarker>[]);
+    list.add(AudioMarker(position: position, name: name));
+    list.sort((a, b) => a.position.compareTo(b.position));
+    return true;
+  }
+
+  @override
+  bool removeMarker(String trackPath, int index) {
+    final list = markers[trackPath];
+    if (list == null || index < 0 || index >= list.length) return false;
+    list.removeAt(index);
+    return true;
+  }
+
+  @override
+  void clearMarkers(String trackPath) => markers.remove(trackPath);
+
+  @override
+  void setSleepTimer(double seconds, {double fadeSeconds = 8}) {
+    sleepTimerCalls++;
+    sleepSeconds = seconds;
+    sleepFade = fadeSeconds;
+  }
+
+  int sleepTimerCalls = 0;
+  double sleepSeconds = -1;
+  double sleepFade = 8;
+
+  @override
+  double get sleepRemaining => sleepSeconds > 0 ? sleepSeconds : -1;
+
+  @override
+  Future<SilenceTrim?> detectSilence(String path,
+      {double thresholdDb = -60}) async {
+    silenceCalls++;
+    silenceThreshold = thresholdDb;
+    return silenceValue;
+  }
+
+  int silenceCalls = 0;
+  double silenceThreshold = -60;
+  SilenceTrim? silenceValue = const SilenceTrim(lead: 0.5, tail: 1.25);
+
+  @override
+  List<AudioDevice> outputDevices = const <AudioDevice>[
+    AudioDevice(index: -1, name: 'Predeterminado'),
+    AudioDevice(index: 0, name: 'Altavoces'),
+  ];
+
+  @override
+  int outputDevice = -1;
+
+  @override
+  bool setOutputDevice(int index) {
+    outputDeviceCalls++;
+    if (index < -1 || index >= outputDevices.length) return false;
+    outputDevice = index;
+    return true;
+  }
+
+  int outputDeviceCalls = 0;
+
+  @override
+  int lyricLineCount = 0;
+
+  @override
+  String currentLyricLine = '';
+
+  @override
+  SoundscapePreset soundscape = SoundscapePreset.off;
+
+  @override
+  double soundscapeLevel = 0;
+
+  @override
+  void setSoundscape(SoundscapePreset preset, {double? level}) {
+    soundscapeCalls++;
+    soundscape = preset;
+    soundscapeLevel = (level ?? soundscapeLevel).clamp(0.0, 1.0).toDouble();
+  }
+
+  int soundscapeCalls = 0;
+
+  /// BPM que devolverá [detectBpm].
+  double bpmValue = 0;
+
+  @override
+  Future<double> detectBpm(String path) async {
+    bpmCalls++;
+    bpmPath = path;
+    return bpmValue;
+  }
+
+  int bpmCalls = 0;
+  String? bpmPath;
+
+  /// Resultado de [renderWav] y lo último que se le pidió.
+  bool renderResult = true;
+
+  @override
+  Future<bool> renderWav(
+    String sourcePath,
+    String destinationPath, {
+    double start = 0,
+    double end = 0,
+    bool withDsp = true,
+  }) async {
+    renderCalls++;
+    rendered.add((source: sourcePath, destination: destinationPath, start: start, end: end, dsp: withDsp));
+    return renderResult;
+  }
+
+  int renderCalls = 0;
+  final List<({String source, String destination, double start, double end, bool dsp})>
+      rendered = [];
+
+  /// Cortes que devolverán [readCue] / [parseCue].
+  List<CueTrack> cueTracks = const <CueTrack>[];
+
+  @override
+  List<CueTrack> readCue(String path) {
+    cueCalls++;
+    return cueTracks;
+  }
+
+  int cueCalls = 0;
+
+  @override
+  List<CueTrack> parseCue(String text) {
+    cueParseCalls++;
+    return cueTracks;
+  }
+
+  int cueParseCalls = 0;
+
   @override
   void dispose() {
     disposed = true;

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cyberhex/core/favorites_store.dart';
+import 'package:cyberhex/core/player_api.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/core/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -282,4 +283,138 @@ void main() {
       expect(controller.snapshot.shuffle, isFalse);
     });
   });
+
+  group('ajustes de audio en la sesión', () {
+    const tuned = AudioSettings(
+      nineDEnabled: true,
+      nineDSpeed: 0.4,
+      nineDDepth: 0.7,
+      stereoWidth: 1.5,
+      bassPunch: 0.4,
+      vocalCut: 0.6,
+      crossfeedEnabled: true,
+      crossfeedLevel: 0.3,
+      nightModeEnabled: true,
+      nightModeAmount: 0.8,
+      balance: -0.4,
+      channelMode: 2,
+      replayGainEnabled: false,
+      replayGainAlbum: true,
+      crossfade: 4,
+      gapless: false,
+      speed: 1.25,
+      pitch: -3,
+      soundscape: SoundscapePreset.brown,
+      soundscapeLevel: 0.35,
+    );
+
+    test('el snapshot guarda y recupera el DSP entero', () {
+      final snapshot = SessionSnapshot(
+        queue: const ['/m/a.flac'],
+        queueIndex: 0,
+        volume: 0.7,
+        audio: tuned,
+      );
+      final restored = SessionSnapshot.fromJson(
+        Map<String, Object?>.from(
+          jsonDecode(jsonEncode(snapshot.toJson())) as Map,
+        ),
+      );
+      expect(restored.audio, tuned);
+      expect(restored.volume, 0.7);
+      expect(SessionSnapshot.formatVersion, 2);
+    });
+
+    test('una sesión vieja (sin audio) queda en valores neutros', () {
+      final restored = SessionSnapshot.fromJson(<String, Object?>{
+        'version': 1,
+        'queue': <String>['/m/a.flac'],
+        'queueIndex': 0,
+        'volume': 1,
+      });
+      expect(restored.audio, AudioSettings.neutral);
+      expect(restored.audio.soundscape, SoundscapePreset.off);
+      expect(restored.audio.gapless, isTrue);
+    });
+
+    test('un audio corrupto se degrada campo a campo', () {
+      final restored = AudioSettings.fromJson(<String, Object?>{
+        'nineD': <String, Object?>{'on': true, 'speed': 'rápido', 'depth': 9},
+        'stereo': 'no es un mapa',
+        'balance': 42,
+        'channelMode': 99,
+        'gapless': 'sí',
+        'soundscape': <String, Object?>{'preset': 'volcano', 'level': -5},
+        'speed': 0,
+      });
+      expect(restored.nineDEnabled, isTrue);
+      expect(restored.nineDSpeed, 0.15, reason: 'texto -> valor por defecto');
+      expect(restored.nineDDepth, 1.0);
+      expect(restored.stereoWidth, 1);
+      expect(restored.balance, 1.0);
+      expect(restored.channelMode, 2);
+      expect(restored.gapless, isTrue);
+      expect(restored.soundscape, SoundscapePreset.off);
+      expect(restored.soundscapeLevel, 0);
+      expect(restored.speed, 0.25);
+    });
+
+    test('SessionKeeper restaura el DSP y guarda los cambios', () async {
+      await store.save(SessionSnapshot(
+        queue: const ['/m/a.flac'],
+        queueIndex: 0,
+        volume: 0.6,
+        audio: tuned,
+      ));
+
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      final keeper = SessionKeeper(controller: controller, store: store);
+      addTearDown(controller.dispose);
+      addTearDown(keeper.dispose);
+
+      await keeper.restore();
+
+      expect(fake.nineDFlag, isTrue);
+      expect(fake.nineDSpeedValue, 0.4);
+      expect(fake.stereoWidthValue, 1.5);
+      expect(fake.vocalCutValue, 0.6);
+      expect(fake.crossfeedFlag, isTrue);
+      expect(fake.nightModeFlag, isTrue);
+      expect(fake.balance, closeTo(-0.4, 1e-9));
+      expect(fake.channelMode, 2);
+      expect(fake.soundscape, SoundscapePreset.brown);
+      expect(fake.soundscapeLevel, 0.35);
+      expect(fake.speed, 1.25);
+      expect(fake.pitch, -3);
+      expect(fake.crossfade, 4);
+      expect(fake.gapless, isFalse);
+
+      // Un cambio de DSP basta para que se escriba la sesión.
+      controller.setSoundscape(SoundscapePreset.rain, level: 0.9);
+      expect(await keeper.saveNow(), isTrue);
+      final saved = await store.load();
+      expect(saved!.audio.soundscape, SoundscapePreset.rain);
+      expect(saved.audio.soundscapeLevel, 0.9);
+      expect(saved.audio.nineDEnabled, isTrue);
+    });
+
+    test('el aviso de ajustes usa antirrebote y dispose lo escribe', () async {
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      final keeper = SessionKeeper(controller: controller, store: store);
+      addTearDown(controller.dispose);
+
+      await keeper.restore();
+      controller.setCrossfeed(enabled: true, level: 0.7);
+      controller.set9D(enabled: true, speed: 0.2, depth: 0.5);
+      await keeper.dispose();
+
+      final saved = await store.load();
+      expect(saved, isNotNull);
+      expect(saved!.audio.crossfeedEnabled, isTrue);
+      expect(saved.audio.nineDEnabled, isTrue);
+    });
+  });
+
 }

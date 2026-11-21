@@ -18,6 +18,53 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 15 · FASE 3, pedido 2 de 10: toda la API en Dart y DSP en la sesión
+
+- **PEDIDO:** enlazar en Dart **todo** lo que el núcleo expone y aún no llegaba a
+  la app (medidores, espectro, balance, modo de canales, ReplayGain, velocidad,
+  tono, crossfade, gapless, loop A-B, marcadores, temporizador, silencio,
+  dispositivos de salida, letras) **y** lo nuevo del pedido 1 (paisajes, BPM,
+  exportador WAV, `.cue`), con paridad 100 % `PlayerApi`/`NativePlayer`/
+  `FakePlayer` y el DSP persistido en `SessionStore`. PROHIBIDO `core/`,
+  `android/`, `pubspec.yaml`. RIESGO NO ACEPTABLE.
+- **HECHO:**
+  - `lib/core/player_api.dart`: `PlayerApi` pasa de 63 a **112 miembros**; seis
+    modelos nuevos (`PlayerLevels`, `AudioMarker`, `AudioDevice`, `CueTrack`,
+    `SilenceTrim`, `SoundscapePreset`) y `AudioSettings` (20 campos, `toJson`
+    tolerante, `copyWith`, `==`/`hashCode`), que vive aquí para no importar en
+    círculo controlador ↔ sesión.
+  - `lib/core/native_player.dart`: 41 `lookup` nuevos, **todos** con
+    `providesSymbol` y `null` si la `.so` es vieja (122 símbolos `ch_*` usados,
+    verificado contra `nm -D`). Marcadores con handle perezoso liberado en
+    `dispose()`; `.cue` leído y liberado en el mismo método; BPM, silencio y
+    exportación en `Isolate.run`; `renderWav` traduce los códigos −1..−6 a
+    mensajes en castellano. Guardas `_disposed` en todos los setters (también
+    en los que eran de una línea).
+  - `test/fake_player.dart`: 112/112 miembros implementados con contadores de
+    llamada y recorte de rangos igual que el motor.
+  - `lib/core/player_controller.dart`: 40 miembros nuevos de delegación, aviso
+    `addAudioListener`/`_audioChanged` (para que la sesión guarde al mover un
+    mando), `audioSettings()`/`applyAudioSettings()` y ayudas `cycleSoundscape`,
+    `addMarkerHere`, `renderWav`.
+  - `lib/core/session_store.dart`: `AudioSettings` dentro de `SessionSnapshot`
+    (formato **2**, compatible con el 1), `SessionKeeper` lo restaura al
+    arrancar y lo guarda con el antirrebote de 600 ms.
+- **VERIFICADO:** tree-sitter-dart **22/22** archivos sin errores; comprobador
+  propio de paridad: **112/112** en `NativePlayer` **y** `FakePlayer`; los 122
+  símbolos `ch_*` que usa el `.dart` existen en el `.so` (`nm -D`, 199 totales);
+  cifras: `lib` 6 699 líneas, `test` 2 693, **98 casos**; sin paquetes nuevos
+  (`pubspec.yaml` intacto).
+- **NO VERIFICABLE AQUÍ:** sin SDK de Flutter/Dart no se ejecuta
+  `flutter analyze` ni `flutter test`: los 98 casos están escritos, no
+  ejecutados. Sin teléfono, nada de FFI real (`providesSymbol` y los tipos se
+  revisan a mano y con el comprobador de símbolos).
+- **COMMITS:** este turno, un commit en `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** **R20** el núcleo no tiene getter de ReplayGain on/off
+  (se recuerda en Dart; si molesta, entra en un pedido de núcleo); **R21**
+  exportar y detectar BPM decodifican en el isolate sin barra de progreso.
+  Pendientes los pedidos 3–10 (UI de audio, letras y etiquetas, listas y
+  descargas, temas y gestos, Android nativo, Linux, radio/nube y CI).
+
 ## 2026-11-21 · turno 14 · FASE 3, pedido 1 de 10: paisajes, BPM y exportador WAV
 
 - **PEDIDO:** Fase 3 completa en diez pedidos atómicos y reversibles, en orden

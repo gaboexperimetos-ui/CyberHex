@@ -34,13 +34,14 @@
 
 - Reproductor **Flutter + motor nativo propio** (Zig 0.17.1 + C23). Un solo
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
-- Núcleo (tras fusionar `main`): **6 807 líneas**, **173 funciones FFI**, ABI **3**.
+- Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **5 100 líneas Dart** + **1 970 de tests** (80 casos). Estado
+- App: **6 699 líneas Dart** + **2 693 de tests** (98 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
-  cerradas: cola, biblioteca, sesión persistente y el núcleo DSP audiófilo
-  (9D espacial, potenciador estéreo, karaoke, crossfeed Bauer, modo noche y
-  dither TPDF) ya expuesto a Dart.
+  cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
+  marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
+  núcleo, y **toda** la API del motor expuesta a Dart con el DSP persistido en
+  la sesión.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -54,8 +55,10 @@
 ## 2. Inventario
 
 ```
-core/                       motor nativo (Zig 0.17.1 + C23)          6 807 líneas
-  src/root.zig              173 exports FFI, hilo de audio, render, cola, EQ, eventos
+core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líneas
+  src/root.zig              199 símbolos ch_*, hilo de audio, render, cola, EQ, eventos
+  src/dsp_ambient.zig       paisajes sonoros (lluvia, marrón, vinilo) sin malloc
+  src/bpm.zig               detector de pulso 60..200 BPM por autocorrelación
   src/{cue,fileio,analysis}.c  hojas CUE, guardado de carátula, R128 y picos
   src/{eq,stft,fft,stretch}.zig   DSP puro (con tests)
   src/audio.c               miniaudio: dispositivo, callback
@@ -66,14 +69,14 @@ core/                       motor nativo (Zig 0.17.1 + C23)          6 807 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                  2 074 líneas
-  core/player_api.dart      contrato PlayerApi + PlayerSnapshot + PlayerEvent
+lib/                        app Flutter                                  6 699 líneas
+  core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
   platform/media_session_channel.dart  puente Dart del canal cyberhex/media
   ui/{player_page,eq_sheet,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       20 tests Dart                                578 líneas
+test/                       98 tests Dart                              2 693 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -187,9 +190,9 @@ Lo nuevo del núcleo (símbolos **añadidos**, ninguno cambiado: la ABI sigue en
 `providesSymbol` y quedan en `null` (no-op) si la `.so` es anterior a la ABI que
 los exporta.
 
-Tests: 22 del controlador + 14 de sesión + 11 de biblioteca + 7 del canal de
-medios + 3 de la pantalla + 8 de archivos externos + 1 de tema, todos con
-`FakePlayer`/canal simulado (sin FFI, sin teléfono).
+Tests: 42 del controlador + 26 de sesión + 11 de biblioteca + 7 del canal de
+medios + 3 de la pantalla + 8 de archivos externos + 1 de tema (98 en total),
+todos con `FakePlayer`/canal simulado (sin FFI, sin teléfono).
 
 ### 5.1 Cola, biblioteca y sesión (fase 1B)
 
@@ -248,6 +251,45 @@ los exporta deja el control en `null` y cada operación devuelve un valor seguro
 Tests: 8 nuevos en `player_controller_test.dart` (setters, recorte de rangos,
 alternancias, `==`/`hashCode` con los campos DSP, `copyWith` parcial y que los
 setters no hacen nada tras `dispose`).
+
+### 5.3 Fase 3, pedido 2: toda la API del motor, en Dart
+
+`PlayerApi` pasa de 63 a **112 miembros** y `NativePlayer`/`FakePlayer` los
+implementan **todos** (comprobador propio: 112/112 en ambos). Lo que faltaba:
+
+| Grupo | Miembros nuevos |
+|---|---|
+| Medición | `levels()` → `PlayerLevels` (RMS y pico por canal), `spectrum([bands])` |
+| Mezcla | `balance`/`setBalance`, `channelMode`/`setChannelMode` |
+| ReplayGain | `replayGainEnabled`/`setReplayGain`, `replayGainGainDb`, `replayGainPeak`, `replayGainAlbum`/`setReplayGainAlbum` |
+| Transporte | `speed`, `pitch`, `crossfade`, `gapless`, `setLoop`/`clearLoop`/`loopStart`/`loopEnd`/`loopActive` |
+| Marcadores | `loadMarkers`, `saveMarkers`, `markersOf`, `addMarker`, `removeMarker`, `clearMarkers` (+ `addMarkerHere` en el controlador) |
+| Sistema | `setSleepTimer`/`sleepRemaining`, `detectSilence` (isolate), `outputDevices`/`outputDevice`/`setOutputDevice`, `lyricLineCount`/`currentLyricLine` |
+| Fase 3 | `soundscape`/`soundscapeLevel`/`setSoundscape` (enum `SoundscapePreset`), `detectBpm`, `renderWav`, `readCue`/`parseCue` |
+
+* **Modelos nuevos** en `player_api.dart`: `PlayerLevels`, `AudioMarker`,
+  `AudioDevice`, `CueTrack`, `SilenceTrim`, `SoundscapePreset` y `AudioSettings`
+  (este último vive aquí, no en `session_store.dart`, para que controlador y
+  sesión compartan el modelo sin importarse en círculo).
+* **Frontera FFI**: 122 símbolos `ch_*` desde Dart, **todos** con
+  `providesSymbol` y `null` si la `.so` es vieja (no-op con valores por
+  defecto). Las tres operaciones caras —BPM, silencio y exportación— corren en
+  `Isolate.run`, así que no congelan la UI; el resto son llamadas directas.
+* **Marcadores**: un handle `ch_markers*` perezoso en `NativePlayer`, liberado
+  en `dispose()`. Las rutas se reservan y se liberan en el mismo método (`try`/
+  `finally`), sin punteros que sobrevivan a la llamada.
+* **`.cue`**: se lee en el isolate y se devuelven `CueTrack` planos; el handle
+  del núcleo se libera siempre con `ch_cue_free`.
+* **Persistencia**: `AudioSettings` entra en `SessionSnapshot` (formato **2**),
+  `SessionKeeper` lo aplica al arrancar (`applyAudioSettings`) y lo guarda con
+  el mismo antirrebote de 600 ms, ahora también al mover un mando
+  (`addAudioListener`). Un JSON viejo (versión 1) o corrupto se degrada campo a
+  campo: nunca impide arrancar.
+
+Tests: 12 nuevos del controlador (medición, rangos, loop, paisajes, marcadores,
+temporizador, dispositivos, BPM/exportación, CUE, ida y vuelta de ajustes, aviso
+de cambios y «nada tras dispose») y 5 de sesión (JSON completo, sesión v1 sin
+audio, audio corrupto, restauración + guardado y antirrebote).
 
 ---
 
@@ -345,10 +387,10 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
 | Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 22/22 sin errores |
-| Firmas de `PlayerApi` | comprobador propio: 63 miembros en `NativePlayer` y `FakePlayer` | 63/63 en ambos |
+| Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
-| Símbolos del `.so` | `nm -D` | 193 `ch_*`; los 12 de la fase 2 presentes |
+| Símbolos del `.so` | `nm -D` | 199 `ch_*`; los 122 que usa el `.dart` presentes |
 | Coherencia del canal | grep cruzado Dart↔Kotlin de nombres de método | 2/2 y 7/7 sin huérfanos |
 | XML de Android | `ElementTree` sobre `AndroidManifest.xml` | válido; 6 permisos, 1 servicio `mediaPlayback` |
 | Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 3/3 balanceados |
@@ -437,6 +479,14 @@ lleva su propio *action* y *requestCode* para no colisionar.
 22. `ch_engine_detect_bpm` devuelve 0 (no un valor aproximado) cuando no hay
     pulso, y en cualquier caso un número entre 60 y 200. No toca el motor ni el
     audio en curso: decodifica aparte, como mucho 30 s.
+23. Los ajustes de audio (9D, estéreo, karaoke, crossfeed, noche, balance, modo
+    de canales, ReplayGain, crossfade, gapless, velocidad, tono y paisaje) se
+    persisten en la **sesión de Dart** (`AudioSettings` dentro de
+    `SessionSnapshot`, formato 2), nunca en `ch_engine_save_state`. Al arrancar,
+    `SessionKeeper` los vuelca con una sola pasada (`applyAudioSettings`).
+24. `PlayerApi` es el contrato único: si algo existe en el núcleo y la UI lo
+    necesita, se añade a `PlayerApi` **y** a `NativePlayer` **y** a `FakePlayer`
+    en el mismo commit. Ningún símbolo FFI nuevo sin `providesSymbol`.
 
 ---
 
@@ -459,6 +509,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R14 | ~~Sesión en Android~~ | **resuelto**: canal `cyberhex/storage` → `filesDir`; en Linux `$XDG_DATA_HOME/cyberhex` o `~/.local/share/cyberhex`; el temporal queda solo como último recurso | `CyberHexApplication.kt`, `session_store.dart` |
 | R16 | DSP sin interfaz todavía | los seis procesadores nuevos se manejan solo por API; la pantalla de ajustes audiófilos es la fase siguiente | `lib/ui/` |
 | R17 | Coste del DSP | la cadena entera (9D + ancho + punch + crossfeed + noche) son ~40 operaciones por muestra a 48 kHz; en el Redmi es despreciable y `isIdle()` la salta por completo cuando todo está apagado | `dsp_spatial.zig` |
+| R20 | ReplayGain on/off sin getter | el núcleo solo exporta `ch_engine_set_replaygain`; el valor se recuerda en `NativePlayer` (arranca activado, como el motor) y se reenvía al restaurar | `native_player.dart` |
+| R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run`, pero no hay barra de progreso | `native_player.dart` |
 | R18 | Paisaje sin mando en la UI | el núcleo ya lo mezcla, pero hasta la fase 3 de UI no hay control; el nivel interno máximo (0.28) evita sustos | `dsp_ambient.zig` |
 | R19 | Coste del exportador | decodifica y procesa a velocidad de CPU; un tema de 5 min tarda unos segundos y ocupa 57 MB en disco. Si el decodificador no sabe la duración, hace dos pasadas | `root.zig` |
 | R15 | Duración en la biblioteca | el núcleo solo da rutas: no hay consulta de duración por ruta (`ch_loudness_scan` decodifica el archivo entero). La ordenación por duración y el filtro «< 30 s» solo ven las pistas ya reproducidas; el resto sale con «—» y nunca se oculta | `library_page.dart` |
@@ -516,9 +568,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (37 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (38 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 3-2 → app(core): toda la API del motor en Dart y DSP persistido en la sesión
 FASE 3-1 → core: paisajes sonoros, detector de BPM y exportador WAV
 FASE 2-4 → app(core): bindings y estado Dart de todo el DSP
 FASE 2-3 → core(dsp): crossfeed Bauer, modo noche y dither TPDF en S16

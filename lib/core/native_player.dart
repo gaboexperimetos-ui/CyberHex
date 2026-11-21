@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:isolate';
@@ -86,6 +87,55 @@ typedef _SetIntTwoFloatsNative = Int32 Function(Pointer<Void>, Int32, Float, Flo
 typedef _SetIntTwoFloatsDart = int Function(Pointer<Void>, int, double, double);
 typedef _OutFloatNative = Int32 Function(Pointer<Void>, Pointer<Float>);
 typedef _OutFloatDart = int Function(Pointer<Void>, Pointer<Float>);
+
+// Fase 3: medición, mezcla fina, marcadores, CUE, exportación y paisajes.
+typedef _SpectrumNative = Int32 Function(Pointer<Void>, Pointer<Float>, Int32);
+typedef _SpectrumDart = int Function(Pointer<Void>, Pointer<Float>, int);
+typedef _TwoDoublesNative = Int32 Function(Pointer<Void>, Double, Double);
+typedef _TwoDoublesDart = int Function(Pointer<Void>, double, double);
+typedef _FloatOutNative = Int32 Function(Pointer<Void>, Pointer<Float>);
+typedef _FloatOutDart = int Function(Pointer<Void>, Pointer<Float>);
+typedef _SilenceNative = Int32 Function(
+    Pointer<Utf8>, Float, Pointer<Double>, Pointer<Double>);
+typedef _SilenceDart = int Function(
+    Pointer<Utf8>, double, Pointer<Double>, Pointer<Double>);
+typedef _DeviceNameNative = Pointer<Utf8> Function(Int32);
+typedef _DeviceNameDart = Pointer<Utf8> Function(int);
+typedef _LyricLineNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32);
+typedef _LyricLineDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _BpmNative = Double Function(Pointer<Utf8>);
+typedef _BpmDart = double Function(Pointer<Utf8>);
+typedef _RenderNative = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Double, Double);
+typedef _RenderDart = int Function(Pointer<Utf8>, Pointer<Utf8>, double, double);
+typedef _RenderDspNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double, Double);
+typedef _RenderDspDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double, double);
+typedef _MarkersAddNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Double, Pointer<Utf8>);
+typedef _MarkersAddDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, double, Pointer<Utf8>);
+typedef _MarkersIndexNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkersIndexDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _MarkersDoubleNative = Double Function(Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkersDoubleDart = double Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _MarkersNameNative = Pointer<Utf8> Function(
+    Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkersNameDart = Pointer<Utf8> Function(
+    Pointer<Void>, Pointer<Utf8>, int);
+typedef _MarkersTrackNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _MarkersTrackDart = int Function(Pointer<Void>, Pointer<Utf8>);
+typedef _HandlePathNative = Pointer<Void> Function(Pointer<Utf8>);
+typedef _HandlePathDart = Pointer<Void> Function(Pointer<Utf8>);
+typedef _HandleIntNative = Int32 Function(Pointer<Void>);
+typedef _HandleIntDart = int Function(Pointer<Void>);
+typedef _HandleTextNative = Pointer<Utf8> Function(Pointer<Void>, Int32);
+typedef _HandleTextDart = Pointer<Utf8> Function(Pointer<Void>, int);
+typedef _HandleDoubleNative = Double Function(Pointer<Void>, Int32);
+typedef _HandleDoubleDart = double Function(Pointer<Void>, int);
+typedef _HandleVoidNative = Void Function(Pointer<Void>);
+typedef _HandleVoidDart = void Function(Pointer<Void>);
+
 typedef _SetLoopNative = Int32 Function(Pointer<Void>, Double, Double);
 typedef _SetLoopDart = int Function(Pointer<Void>, double, double);
 
@@ -175,6 +225,114 @@ int _loadAddInIsolate(int address, String path) {
   final utf8 = path.toNativeUtf8();
   try {
     return loadAdd(engine, utf8);
+  } finally {
+    malloc.free(utf8);
+  }
+}
+
+
+/// BPM fuera del hilo de UI: decodifica hasta 30 s del archivo.
+double _bpmInIsolate(String path) {
+  final lib = DynamicLibrary.open(_libraryName);
+  if (!lib.providesSymbol('ch_engine_detect_bpm')) return 0;
+  final fn = lib.lookupFunction<_BpmNative, _BpmDart>('ch_engine_detect_bpm');
+  final utf8 = path.toNativeUtf8();
+  try {
+    return fn(utf8);
+  } finally {
+    malloc.free(utf8);
+  }
+}
+
+/// Silencio inicial/final. Devuelve `(lead: -1, tail: -1)` si no se pudo.
+({double lead, double tail}) _silenceInIsolate(String path, double threshold) {
+  final lib = DynamicLibrary.open(_libraryName);
+  if (!lib.providesSymbol('ch_engine_detect_silence')) {
+    return (lead: -1.0, tail: -1.0);
+  }
+  final fn = lib.lookupFunction<_SilenceNative, _SilenceDart>('ch_engine_detect_silence');
+  final utf8 = path.toNativeUtf8();
+  final lead = calloc<Double>();
+  final tail = calloc<Double>();
+  try {
+    if (fn(utf8, threshold, lead, tail) != 0) return (lead: -1.0, tail: -1.0);
+    return (lead: lead.value, tail: tail.value);
+  } finally {
+    malloc.free(utf8);
+    calloc.free(lead);
+    calloc.free(tail);
+  }
+}
+
+/// Exportación a WAV. `address` = 0 exporta plano; si no, con el DSP del motor.
+int _renderWavInIsolate(
+  int address,
+  String source,
+  String destination,
+  double start,
+  double end,
+) {
+  final lib = DynamicLibrary.open(_libraryName);
+  final src = source.toNativeUtf8();
+  final dst = destination.toNativeUtf8();
+  try {
+    if (address == 0) {
+      if (!lib.providesSymbol('ch_engine_render_wav')) return -1;
+      final fn = lib.lookupFunction<_RenderNative, _RenderDart>('ch_engine_render_wav');
+      return fn(src, dst, start, end);
+    }
+    if (!lib.providesSymbol('ch_engine_render_wav_ex')) return -1;
+    final fn = lib.lookupFunction<_RenderDspNative, _RenderDspDart>(
+        'ch_engine_render_wav_ex');
+    return fn(Pointer<Void>.fromAddress(address), src, dst, start, end);
+  } finally {
+    malloc.free(src);
+    malloc.free(dst);
+  }
+}
+
+/// Lee una hoja `.cue` y devuelve los cortes como mapas (cruzan isolates).
+///
+/// `isText` decide si se llama a `ch_cue_parse` (texto ya cargado) o a
+/// `ch_cue_read` (ruta de archivo). El handle se libera siempre.
+List<Map<String, Object?>> _cueInIsolate(String source, bool isText) {
+  final lib = DynamicLibrary.open(_libraryName);
+  final symbol = isText ? 'ch_cue_parse' : 'ch_cue_read';
+  if (!lib.providesSymbol(symbol)) return const <Map<String, Object?>>[];
+  final open = lib.lookupFunction<_HandlePathNative, _HandlePathDart>(symbol);
+  final freeFn = lib.providesSymbol('ch_cue_free')
+      ? lib.lookupFunction<_HandleVoidNative, _HandleVoidDart>('ch_cue_free')
+      : null;
+  final utf8 = source.toNativeUtf8();
+  try {
+    final handle = open(utf8);
+    if (handle == nullptr) return const <Map<String, Object?>>[];
+    try {
+      final countFn = lib.lookupFunction<_HandleIntNative, _HandleIntDart>('ch_cue_count');
+      final fileFn = lib.lookupFunction<_HandleTextNative, _HandleTextDart>('ch_cue_file');
+      final titleFn = lib.lookupFunction<_HandleTextNative, _HandleTextDart>('ch_cue_title');
+      final performerFn =
+          lib.lookupFunction<_HandleTextNative, _HandleTextDart>('ch_cue_performer');
+      final startFn =
+          lib.lookupFunction<_HandleDoubleNative, _HandleDoubleDart>('ch_cue_start');
+      final endFn = lib.lookupFunction<_HandleDoubleNative, _HandleDoubleDart>('ch_cue_end');
+      final numberFn = lib.lookupFunction<_HandleIntNative, _HandleIntDart>('ch_cue_number');
+      final total = countFn(handle);
+      final out = <Map<String, Object?>>[];
+      for (var i = 0; i < total; i++) {
+        out.add(<String, Object?>{
+          'file': fileFn(handle, i).toDartString(),
+          'title': titleFn(handle, i).toDartString(),
+          'performer': performerFn(handle, i).toDartString(),
+          'start': startFn(handle, i),
+          'end': endFn(handle, i),
+          'number': numberFn(handle, i),
+        });
+      }
+      return out;
+    } finally {
+      freeFn?.call(handle);
+    }
   } finally {
     malloc.free(utf8);
   }
@@ -814,17 +972,6 @@ class NativePlayer implements PlayerApi {
     setBand(0, 0);
   }
 
-  /// Niveles de salida `[rms_l, rms_r, peak_l, peak_r]` (0..1). Lista vacía si
-  /// la librería cargada es antigua y no expone `ch_engine_levels`.
-  List<double> levels() {
-    if (_disposed) return const [];
-    final fn = _bindings.levels;
-    if (fn == null) return const [];
-    final count = fn(_engine, _levelBuf, 4);
-    if (count <= 0) return const [];
-    return List<double>.generate(count, (i) => _levelBuf[i]);
-  }
-
   /// Fundido de pausa en segundos (0 = corte inmediato).
   void setPauseFade(double seconds) =>
       _bindings.setPauseFade?.call(_engine, seconds);
@@ -836,35 +983,8 @@ class NativePlayer implements PlayerApi {
 
   double get eqPreamp => _bindings.eqPreamp?.call(_engine) ?? 0;
 
-  /// ReplayGain por álbum (una ganancia para todo el disco) o por pista.
-  /// Solo afecta a las pistas que se abran después.
-  void setReplayGainAlbum(bool album) =>
-      _bindings.setReplayGainMode?.call(_engine, album ? 1 : 0);
-
-  bool get replayGainAlbum =>
-      (_bindings.replayGainMode?.call(_engine) ?? 0) == 1;
-
-  /// Loop A-B en segundos; `end <= start` lo desactiva.
-  void setLoop(double start, double end) =>
-      _bindings.setLoop?.call(_engine, start, end);
-
-  double get loopStart => _bindings.loopStart?.call(_engine) ?? -1;
-
-  double get loopEnd => _bindings.loopEnd?.call(_engine) ?? -1;
-
   /// Pistas que el motor se saltó por no poder abrirlas.
   int get skippedTracks => _bindings.skippedTracks?.call(_engine) ?? 0;
-
-  /// Balance estéreo: -1 izquierda, 0 centro, +1 derecha.
-  void setBalance(double balance) => _bindings.setBalance?.call(_engine, balance);
-
-  double get balance => _bindings.balance?.call(_engine) ?? 0;
-
-  /// 0 = estéreo, 1 = mono, 2 = canales intercambiados.
-  void setChannelMode(int mode) =>
-      _bindings.setChannelMode?.call(_engine, mode);
-
-  int get channelMode => _bindings.channelMode?.call(_engine) ?? 0;
 
   /// ABI del núcleo cargado (0 si la librería es tan antigua que no lo expone).
   static int get coreAbiVersion => _Bindings.instance.abiVersion?.call() ?? 0;
@@ -899,6 +1019,447 @@ class NativePlayer implements PlayerApi {
     }
   }
 
+
+  // ---------------------------------------------------------------------
+  // Fase 3: medición, mezcla fina y transporte extendido
+  // ---------------------------------------------------------------------
+
+  @override
+  PlayerLevels levels() {
+    if (_disposed) return PlayerLevels.silent;
+    final fn = _bindings.levels;
+    if (fn == null) return PlayerLevels.silent;
+    if (fn(_engine, _levelBuf, 4) < 4) return PlayerLevels.silent;
+    return PlayerLevels(
+      rmsLeft: _levelBuf[0],
+      rmsRight: _levelBuf[1],
+      peakLeft: _levelBuf[2],
+      peakRight: _levelBuf[3],
+    );
+  }
+
+  @override
+  List<double> spectrum([int bands = 32]) {
+    if (_disposed) return const <double>[];
+    final fn = _bindings.spectrum;
+    if (fn == null || bands <= 0) return const <double>[];
+    final buffer = calloc<Float>(bands);
+    try {
+      final count = fn(_engine, buffer, bands);
+      if (count <= 0) return const <double>[];
+      return List<double>.generate(count, (i) => buffer[i]);
+    } finally {
+      calloc.free(buffer);
+    }
+  }
+
+  @override
+  double get balance => _bindings.balance?.call(_engine) ?? 0;
+
+  @override
+  void setBalance(double value) {
+    if (_disposed) return;
+    _bindings.setBalance?.call(_engine, value.clamp(-1.0, 1.0).toDouble());
+  }
+
+  @override
+  int get channelMode {
+    final value = _bindings.channelMode?.call(_engine) ?? 0;
+    return value < 0 || value > 2 ? 0 : value;
+  }
+
+  @override
+  void setChannelMode(int mode) {
+    if (_disposed) return;
+    _bindings.setChannelMode?.call(_engine, mode.clamp(0, 2));
+  }
+
+  /// El núcleo solo expone el *setter* de ReplayGain (`ch_engine_set_replaygain`),
+  /// no un getter, así que aquí se recuerda el último valor enviado. Arranca
+  /// activado porque es el valor por defecto del motor; al restaurar la sesión,
+  /// `applyAudioSettings` vuelve a mandarlo.
+  bool _replayGainEnabled = true;
+
+  @override
+  bool get replayGainEnabled => !_disposed && _replayGainEnabled;
+
+  @override
+  void setReplayGain(bool enabled) {
+    if (_disposed) return;
+    _replayGainEnabled = enabled;
+    _bindings.setReplayGain?.call(_engine, enabled ? 1 : 0);
+  }
+
+  @override
+  double get replayGainGainDb => _bindings.rgGainDb?.call(_engine) ?? 0;
+
+  @override
+  double get replayGainPeak => _bindings.rgPeak?.call(_engine) ?? 0;
+
+  @override
+  bool get replayGainAlbum =>
+      (_bindings.replayGainMode?.call(_engine) ?? 0) == 1;
+
+  @override
+  void setReplayGainAlbum(bool album) {
+    if (_disposed) return;
+    _bindings.setReplayGainMode?.call(_engine, album ? 1 : 0);
+  }
+
+  @override
+  double get speed => _bindings.speed?.call(_engine) ?? 1;
+
+  @override
+  void setSpeed(double value) {
+    if (_disposed) return;
+    _bindings.setSpeed?.call(_engine, value.clamp(0.25, 4.0).toDouble());
+  }
+
+  @override
+  double get pitch => _bindings.pitch?.call(_engine) ?? 0;
+
+  @override
+  void setPitch(double semitones) {
+    if (_disposed) return;
+    _bindings.setPitch?.call(_engine, semitones.clamp(-12.0, 12.0).toDouble());
+  }
+
+  @override
+  double get crossfade => _bindings.crossfade?.call(_engine) ?? 0;
+
+  @override
+  void setCrossfade(double seconds) {
+    if (_disposed) return;
+    _bindings.setCrossfade?.call(_engine, seconds.clamp(0.0, 12.0).toDouble());
+  }
+
+  @override
+  bool get gapless => !_disposed && (_bindings.gapless?.call(_engine) ?? 1) != 0;
+
+  @override
+  void setGapless(bool enabled) {
+    if (_disposed) return;
+    _bindings.setGapless?.call(_engine, enabled ? 1 : 0);
+  }
+
+  @override
+  void setLoop(double start, double end) {
+    if (_disposed) return;
+    _bindings.setLoop?.call(_engine, start, end);
+  }
+
+  @override
+  void clearLoop() {
+    if (_disposed) return;
+    _bindings.setLoop?.call(_engine, 0, 0);
+  }
+
+  @override
+  double get loopStart => _bindings.loopStart?.call(_engine) ?? -1;
+
+  @override
+  double get loopEnd => _bindings.loopEnd?.call(_engine) ?? -1;
+
+  @override
+  bool get loopActive {
+    final a = loopStart;
+    final b = loopEnd;
+    return a >= 0 && b > a;
+  }
+
+  /// Handle de marcadores; se crea la primera vez y se destruye en [dispose].
+  Pointer<Void>? _markers;
+
+  Pointer<Void>? _markerHandle() {
+    if (_disposed) return null;
+    final existing = _markers;
+    if (existing != null) return existing;
+    final create = _bindings.markersCreate;
+    if (create == null) return null;
+    final handle = create();
+    if (handle == nullptr) return null;
+    _markers = handle;
+    return handle;
+  }
+
+  @override
+  bool loadMarkers(String path) {
+    final handle = _markerHandle();
+    if (handle == null) return false;
+    final fn = _bindings.markersLoad;
+    if (fn == null) return false;
+    final utf8 = path.toNativeUtf8();
+    try {
+      return fn(handle, utf8) == 0;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  @override
+  bool saveMarkers(String path) {
+    final handle = _markerHandle();
+    if (handle == null) return false;
+    final fn = _bindings.markersSave;
+    if (fn == null) return false;
+    final utf8 = path.toNativeUtf8();
+    try {
+      return fn(handle, utf8) == 0;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  @override
+  List<AudioMarker> markersOf(String trackPath) {
+    final handle = _markerHandle();
+    if (handle == null) return const <AudioMarker>[];
+    final track = trackPath.toNativeUtf8();
+    try {
+      return _readMarkersAll(handle, track);
+    } finally {
+      malloc.free(track);
+    }
+  }
+
+  List<AudioMarker> _readMarkersAll(Pointer<Void> handle, Pointer<Utf8> track) {
+    final count = _bindings.markersCount?.call(handle, track) ?? 0;
+    if (count <= 0) return const <AudioMarker>[];
+    final out = <AudioMarker>[];
+    for (var i = 0; i < count; i++) {
+      final position = _bindings.markersPosition?.call(handle, track, i) ?? 0;
+      final namePtr = _bindings.markersName?.call(handle, track, i);
+      out.add(AudioMarker(
+        position: position,
+        name: namePtr == null ? '' : namePtr.toDartString(),
+      ));
+    }
+    return List<AudioMarker>.unmodifiable(out);
+  }
+
+  @override
+  bool addMarker(String trackPath, double position, String name) {
+    if (!position.isFinite || position < 0) return false;
+    final handle = _markerHandle();
+    if (handle == null) return false;
+    final fn = _bindings.markersAdd;
+    if (fn == null) return false;
+    final track = trackPath.toNativeUtf8();
+    final label = name.toNativeUtf8();
+    try {
+      return fn(handle, track, position, label) == 0;
+    } finally {
+      malloc.free(track);
+      malloc.free(label);
+    }
+  }
+
+  @override
+  bool removeMarker(String trackPath, int index) {
+    final handle = _markerHandle();
+    if (handle == null) return false;
+    final fn = _bindings.markersRemove;
+    if (fn == null) return false;
+    final track = trackPath.toNativeUtf8();
+    try {
+      return fn(handle, track, index) == 0;
+    } finally {
+      malloc.free(track);
+    }
+  }
+
+  @override
+  void clearMarkers(String trackPath) {
+    final handle = _markerHandle();
+    if (handle == null) return;
+    final track = trackPath.toNativeUtf8();
+    try {
+      _bindings.markersClear?.call(handle, track);
+    } finally {
+      malloc.free(track);
+    }
+  }
+
+  @override
+  void setSleepTimer(double seconds, {double fadeSeconds = 8}) {
+    if (_disposed) return;
+    _bindings.setSleepTimer?.call(_engine, seconds, fadeSeconds);
+  }
+
+  @override
+  double get sleepRemaining => _bindings.sleepRemaining?.call(_engine) ?? -1;
+
+  @override
+  Future<SilenceTrim?> detectSilence(String path,
+      {double thresholdDb = -60}) async {
+    if (_disposed) return null;
+    if (_bindings.detectSilence == null) return null;
+    try {
+      final result = await Isolate.run(() => _silenceInIsolate(path, thresholdDb));
+      if (_disposed || result.lead < 0) return null;
+      return SilenceTrim(lead: result.lead, tail: result.tail);
+    } catch (error) {
+      _failure = error.toString();
+      return null;
+    }
+  }
+
+  @override
+  List<AudioDevice> get outputDevices {
+    final count = _bindings.deviceCount?.call() ?? 0;
+    if (count <= 0) return const <AudioDevice>[];
+    final out = <AudioDevice>[const AudioDevice(index: -1, name: 'Predeterminado')];
+    for (var i = 0; i < count; i++) {
+      final name = _bindings.deviceName?.call(i)?.toDartString() ?? '';
+      out.add(AudioDevice(index: i, name: name));
+    }
+    return List<AudioDevice>.unmodifiable(out);
+  }
+
+  @override
+  int get outputDevice => _bindings.currentDevice?.call(_engine) ?? -1;
+
+  @override
+  bool setOutputDevice(int index) {
+    if (_disposed) return false;
+    final fn = _bindings.setOutputDevice;
+    if (fn == null) return false;
+    return fn(_engine, index) == 0;
+  }
+
+  @override
+  int get lyricLineCount {
+    final value = _bindings.lyricsCount?.call(_engine) ?? 0;
+    return value < 0 ? 0 : value;
+  }
+
+  @override
+  String get currentLyricLine {
+    if (_disposed) return '';
+    final fn = _bindings.lyricLine;
+    if (fn == null) return '';
+    final buffer = calloc<Uint8>(512);
+    try {
+      final written = fn(_engine, buffer.cast<Utf8>(), 512);
+      if (written <= 0) return '';
+      return utf8.decode(buffer.asTypedList(written), allowMalformed: true);
+    } finally {
+      calloc.free(buffer);
+    }
+  }
+
+  @override
+  SoundscapePreset get soundscape {
+    if (_disposed) return SoundscapePreset.off;
+    final fn = _bindings.soundscapeGet;
+    if (fn == null) return SoundscapePreset.off;
+    return SoundscapePreset.fromCode(fn(_engine, _outBuf));
+  }
+
+  @override
+  double get soundscapeLevel {
+    if (_disposed) return 0;
+    final fn = _bindings.soundscapeGet;
+    if (fn == null) return 0;
+    fn(_engine, _outBuf);
+    return _outBuf.value;
+  }
+
+  @override
+  void setSoundscape(SoundscapePreset preset, {double? level}) {
+    if (_disposed) return;
+    final fn = _bindings.soundscapeSet;
+    if (fn == null) return;
+    final desired = (level ?? soundscapeLevel).clamp(0.0, 1.0).toDouble();
+    fn(_engine, preset.code, desired);
+  }
+
+  @override
+  Future<double> detectBpm(String path) async {
+    if (_disposed || _bindings.detectBpm == null) return 0;
+    try {
+      final value = await Isolate.run(() => _bpmInIsolate(path));
+      if (_disposed || !value.isFinite) return 0;
+      return value;
+    } catch (error) {
+      _failure = error.toString();
+      return 0;
+    }
+  }
+
+  @override
+  Future<bool> renderWav(
+    String sourcePath,
+    String destinationPath, {
+    double start = 0,
+    double end = 0,
+    bool withDsp = true,
+  }) async {
+    if (_disposed) return false;
+    if (withDsp && _bindings.renderDsp == null) return false;
+    if (!withDsp && _bindings.renderFlat == null) return false;
+    try {
+      final address = withDsp ? _engine.address : 0;
+      final code = await Isolate.run(
+        () => _renderWavInIsolate(address, sourcePath, destinationPath, start, end),
+      );
+      if (code != 0) {
+        _failure = _renderError(code);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      _failure = error.toString();
+      return false;
+    }
+  }
+
+  static String _renderError(int code) {
+    switch (code) {
+      case -1:
+        return 'exportación: argumentos inválidos';
+      case -2:
+        return 'exportación: no se pudo abrir el origen';
+      case -3:
+        return 'exportación: no se pudo crear el destino';
+      case -4:
+        return 'exportación: error de escritura';
+      case -5:
+        return 'exportación: demasiado largo para un WAV';
+      case -6:
+        return 'exportación: el origen se cortó antes de tiempo';
+      default:
+        return 'exportación: error $code';
+    }
+  }
+
+  @override
+  List<CueTrack> readCue(String path) {
+    if (_disposed || _bindings.cueRead == null) return const <CueTrack>[];
+    return _cueFrom(_cueInIsolate(path, false));
+  }
+
+  @override
+  List<CueTrack> parseCue(String text) {
+    if (_disposed || _bindings.cueParse == null) return const <CueTrack>[];
+    return _cueFrom(_cueInIsolate(text, true));
+  }
+
+  static List<CueTrack> _cueFrom(List<Map<String, Object?>> rows) {
+    if (rows.isEmpty) return const <CueTrack>[];
+    return List<CueTrack>.unmodifiable(<CueTrack>[
+      for (final row in rows)
+        CueTrack(
+          file: row['file'] as String? ?? '',
+          title: row['title'] as String? ?? '',
+          performer: row['performer'] as String? ?? '',
+          start: (row['start'] as num?)?.toDouble() ?? 0,
+          end: (row['end'] as num?)?.toDouble() ?? -1,
+          number: (row['number'] as int?) ?? 0,
+        ),
+    ]);
+  }
+
   @override
   void dispose() {
     if (_disposed) {
@@ -908,6 +1469,11 @@ class NativePlayer implements PlayerApi {
     calloc.free(_eventBuf);
     calloc.free(_levelBuf);
     calloc.free(_outBuf);
+    final markers = _markers;
+    if (markers != null) {
+      _bindings.markersDestroy?.call(markers);
+      _markers = null;
+    }
     _bindings.destroy(_engine);
   }
 
@@ -1113,6 +1679,129 @@ class _Bindings {
             : null,
         s16Fn = lib.providesSymbol('ch_engine_s16_output')
             ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_s16_output')
+            : null,
+        spectrum = lib.providesSymbol('ch_engine_spectrum')
+            ? lib.lookupFunction<_SpectrumNative, _SpectrumDart>('ch_engine_spectrum')
+            : null,
+        setReplayGain = lib.providesSymbol('ch_engine_set_replaygain')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_replaygain')
+            : null,
+        rgGainDb = lib.providesSymbol('ch_engine_replaygain_gain_db')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+                'ch_engine_replaygain_gain_db')
+            : null,
+        rgPeak = lib.providesSymbol('ch_engine_replaygain_peak')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+                'ch_engine_replaygain_peak')
+            : null,
+        speed = lib.providesSymbol('ch_engine_speed')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_speed')
+            : null,
+        setSpeed = lib.providesSymbol('ch_engine_set_speed')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_speed')
+            : null,
+        pitch = lib.providesSymbol('ch_engine_pitch')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_pitch')
+            : null,
+        setPitch = lib.providesSymbol('ch_engine_set_pitch')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_pitch')
+            : null,
+        crossfade = lib.providesSymbol('ch_engine_crossfade')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_crossfade')
+            : null,
+        setCrossfade = lib.providesSymbol('ch_engine_set_crossfade')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_crossfade')
+            : null,
+        gapless = lib.providesSymbol('ch_engine_gapless')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_gapless')
+            : null,
+        setGapless = lib.providesSymbol('ch_engine_set_gapless')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_gapless')
+            : null,
+        setSleepTimer = lib.providesSymbol('ch_engine_set_sleep_timer')
+            ? lib.lookupFunction<_TwoDoublesNative, _TwoDoublesDart>(
+                'ch_engine_set_sleep_timer')
+            : null,
+        sleepRemaining = lib.providesSymbol('ch_engine_sleep_remaining')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_sleep_remaining')
+            : null,
+        detectSilence = lib.providesSymbol('ch_engine_detect_silence')
+            ? lib.lookupFunction<_SilenceNative, _SilenceDart>('ch_engine_detect_silence')
+            : null,
+        deviceCount = lib.providesSymbol('ch_engine_output_device_count')
+            ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>(
+                'ch_engine_output_device_count')
+            : null,
+        deviceName = lib.providesSymbol('ch_engine_output_device_name')
+            ? lib.lookupFunction<_DeviceNameNative, _DeviceNameDart>(
+                'ch_engine_output_device_name')
+            : null,
+        currentDevice = lib.providesSymbol('ch_engine_output_device')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_output_device')
+            : null,
+        setOutputDevice = lib.providesSymbol('ch_engine_set_output_device')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_output_device')
+            : null,
+        lyricsCount = lib.providesSymbol('ch_engine_lyrics_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_lyrics_count')
+            : null,
+        lyricLine = lib.providesSymbol('ch_engine_lyric_line')
+            ? lib.lookupFunction<_LyricLineNative, _LyricLineDart>('ch_engine_lyric_line')
+            : null,
+        soundscapeSet = lib.providesSymbol('ch_engine_set_soundscape')
+            ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
+                'ch_engine_set_soundscape')
+            : null,
+        soundscapeGet = lib.providesSymbol('ch_engine_soundscape')
+            ? lib.lookupFunction<_FloatOutNative, _FloatOutDart>('ch_engine_soundscape')
+            : null,
+        detectBpm = lib.providesSymbol('ch_engine_detect_bpm')
+            ? lib.lookupFunction<_BpmNative, _BpmDart>('ch_engine_detect_bpm')
+            : null,
+        renderFlat = lib.providesSymbol('ch_engine_render_wav')
+            ? lib.lookupFunction<_RenderNative, _RenderDart>('ch_engine_render_wav')
+            : null,
+        renderDsp = lib.providesSymbol('ch_engine_render_wav_ex')
+            ? lib.lookupFunction<_RenderDspNative, _RenderDspDart>(
+                'ch_engine_render_wav_ex')
+            : null,
+        cueRead = lib.providesSymbol('ch_cue_read')
+            ? lib.lookupFunction<_HandlePathNative, _HandlePathDart>('ch_cue_read')
+            : null,
+        cueParse = lib.providesSymbol('ch_cue_parse')
+            ? lib.lookupFunction<_HandlePathNative, _HandlePathDart>('ch_cue_parse')
+            : null,
+        markersCreate = lib.providesSymbol('ch_markers_create')
+            ? lib.lookupFunction<_LibCreateNative, _LibCreateDart>('ch_markers_create')
+            : null,
+        markersDestroy = lib.providesSymbol('ch_markers_destroy')
+            ? lib.lookupFunction<_HandleVoidNative, _HandleVoidDart>('ch_markers_destroy')
+            : null,
+        markersLoad = lib.providesSymbol('ch_markers_load')
+            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_load')
+            : null,
+        markersSave = lib.providesSymbol('ch_markers_save')
+            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_save')
+            : null,
+        markersAdd = lib.providesSymbol('ch_markers_add')
+            ? lib.lookupFunction<_MarkersAddNative, _MarkersAddDart>('ch_markers_add')
+            : null,
+        markersCount = lib.providesSymbol('ch_markers_count')
+            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_count')
+            : null,
+        markersPosition = lib.providesSymbol('ch_markers_position')
+            ? lib.lookupFunction<_MarkersDoubleNative, _MarkersDoubleDart>(
+                'ch_markers_position')
+            : null,
+        markersName = lib.providesSymbol('ch_markers_name')
+            ? lib.lookupFunction<_MarkersNameNative, _MarkersNameDart>('ch_markers_name')
+            : null,
+        markersRemove = lib.providesSymbol('ch_markers_remove')
+            ? lib.lookupFunction<_MarkersIndexNative, _MarkersIndexDart>(
+                'ch_markers_remove')
+            : null,
+        markersClear = lib.providesSymbol('ch_markers_clear')
+            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_clear')
             : null;
 
   static final _Bindings instance = _Bindings._(_open());
@@ -1188,6 +1877,45 @@ class _Bindings {
   final _OutFloatDart? nightModeFn;
   final _SetIntDart? setS16;
   final _IntDart? s16Fn;
+  final _IntDart? s16Fn;
+  final _SpectrumDart? spectrum;
+  final _SetIntDart? setReplayGain;
+  final _GetFloatDart? rgGainDb;
+  final _GetFloatDart? rgPeak;
+  final _GetFloatDart? speed;
+  final _SetFloatDart? setSpeed;
+  final _GetFloatDart? pitch;
+  final _SetFloatDart? setPitch;
+  final _GetFloatDart? crossfade;
+  final _SetFloatDart? setCrossfade;
+  final _IntDart? gapless;
+  final _SetIntDart? setGapless;
+  final _TwoDoublesDart? setSleepTimer;
+  final _DoubleDart? sleepRemaining;
+  final _SilenceDart? detectSilence;
+  final _NoArgIntDart? deviceCount;
+  final _DeviceNameDart? deviceName;
+  final _IntDart? currentDevice;
+  final _SetIntDart? setOutputDevice;
+  final _IntDart? lyricsCount;
+  final _LyricLineDart? lyricLine;
+  final _SetIntAndFloatDart? soundscapeSet;
+  final _FloatOutDart? soundscapeGet;
+  final _BpmDart? detectBpm;
+  final _RenderDart? renderFlat;
+  final _RenderDspDart? renderDsp;
+  final _HandlePathDart? cueRead;
+  final _HandlePathDart? cueParse;
+  final _LibCreateDart? markersCreate;
+  final _HandleVoidDart? markersDestroy;
+  final _MarkersTrackDart? markersLoad;
+  final _MarkersTrackDart? markersSave;
+  final _MarkersAddDart? markersAdd;
+  final _MarkersTrackDart? markersCount;
+  final _MarkersDoubleDart? markersPosition;
+  final _MarkersNameDart? markersName;
+  final _MarkersIndexDart? markersRemove;
+  final _MarkersTrackDart? markersClear;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;
