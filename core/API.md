@@ -143,6 +143,24 @@ typedef struct ch_event { int32_t kind; int32_t a; int32_t b; double value; } ch
 int32_t ch_engine_poll_event(ch_engine* engine, ch_event* out);
 
 const char* ch_engine_last_error(ch_engine* engine);
+
+/* Etiquetas: date, genre, composer, track/disc number, y acceso generico. */
+const char* ch_engine_tag(ch_engine* engine, const char* key);
+const char* ch_engine_date(ch_engine* engine);
+const char* ch_engine_genre(ch_engine* engine);
+const char* ch_engine_composer(ch_engine* engine);
+int32_t     ch_engine_track_number(ch_engine* engine);
+int32_t     ch_engine_disc_number(ch_engine* engine);
+
+/* Limitador de picos (dBFS) y estadisticas de búfer. */
+int32_t  ch_engine_set_limiter(ch_engine* engine, int32_t enabled, float ceiling_db);
+int32_t  ch_engine_limiter(ch_engine* engine);
+double   ch_engine_buffered_seconds(ch_engine* engine);
+uint64_t ch_engine_buffer_underflows(ch_engine* engine);
+
+/* Detecta silencio al principio/fin de un archivo (dBFS). */
+int32_t  ch_engine_detect_silence(const char* utf8_path, float threshold_db,
+                                   double* lead, double* tail);
 ```
 
 ### Eventos de reproducción

@@ -221,9 +221,13 @@ pub const Engine = struct {
     order: std.ArrayListUnmanaged(usize) = .empty,
     order_pos: usize = 0,
     fade_gain: f32 = 0,
+    limit_enabled: bool = false,
+    limit_ceiling: f32 = 0.891, // ~ -1 dBFS
+    limit_gain: f32 = 1.0,
     sleep_end_ms: u64 = 0,
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
+    buf_underflows: u64 = 0,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     ev_lock: SpinLock = .{},
@@ -768,6 +772,8 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         _ = self.addSegment(index, d, 0);
         @atomicStore(usize, &self.played, 0, .release);
         @atomicStore(bool, &self.eof, false, .release);
+        // Fundido de entrada suave (evita el clic al abrir una pista nueva).
+        self.fade_gain = 0;
         return 0;
     }
 
@@ -1025,6 +1031,9 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         var avail = w -% r;
         if (avail > self.ring.cap) avail = 0;
         const take = @min(frames_out, avail);
+        if (playing and take < frames_out) {
+            _ = @atomicRmw(u64, &self.buf_underflows, .Add, 1, .monotonic);
+        }
         if (take > 0) {
             self.readRingAt(r, out[0 .. take * CHANNELS]);
             @atomicStore(usize, &self.ring.read, r +% take, .release);
@@ -1053,10 +1062,34 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         }
         if (take > 0) {
             var g = self.fade_gain;
-            for (out[0..produced]) |*s| {
+            const limiting = self.limit_enabled;
+            const ceiling = self.limit_ceiling;
+            var lg = self.limit_gain;
+            // Ataque rapido, recuperacion lenta (~200 ms).
+            const attack: f32 = 0.999;
+            const release: f32 = 1.0 - @exp(-1.0 / (0.2 * @as(f32, @floatFromInt(SAMPLE_RATE))));
+            var i: usize = 0;
+            while (i < take) : (i += 1) {
                 g += (target - g) * FADE_COEFF;
-                s.* *= g;
+                var s = out[i * CHANNELS] * g;
+                var s2 = out[i * CHANNELS + 1] * g;
+                if (limiting) {
+                    const peak = @max(@abs(s), @abs(s2));
+                    var desired = lg;
+                    if (peak > ceiling and peak > 0) desired = ceiling / peak;
+                    if (desired < lg) {
+                        lg = desired; // ataque inmediato
+                    } else {
+                        lg += (desired - lg) * release;
+                    }
+                    _ = attack;
+                    s *= lg;
+                    s2 *= lg;
+                }
+                out[i * CHANNELS] = s;
+                out[i * CHANNELS + 1] = s2;
             }
+            self.limit_gain = lg;
             self.fade_gain = if (!playing and g < 0.001) 0 else g;
         }
 
@@ -1854,6 +1887,22 @@ export fn ch_engine_set_replaygain(self: ?*Engine, enabled: i32) i32 {
     return 0;
 }
 
+/// Limitador de picos en caliente: evita el recorte cuando la señal supera
+/// `ceiling` (dBFS). Ataque inmediato y recuperación suave (~200 ms).
+export fn ch_engine_set_limiter(self: ?*Engine, enabled: i32, ceiling_db: f32) i32 {
+    const e = self orelse return -1;
+    const ceiling: f32 = std.math.pow(f32, 10, ceiling_db / 20);
+    e.limit_ceiling = std.math.clamp(ceiling, 0.01, 1.0);
+    e.limit_enabled = enabled != 0;
+    if (!e.limit_enabled) e.limit_gain = 1.0;
+    return 0;
+}
+
+export fn ch_engine_limiter(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.limit_enabled) 1 else 0;
+}
+
 export fn ch_engine_replaygain_gain_db(self: ?*Engine) f32 {
     const e = self orelse return 0;
     e.seg_lock.lock();
@@ -2004,6 +2053,42 @@ export fn ch_engine_album(self: ?*Engine) [*c]const u8 {
     return @ptrCast(&tls_album);
 }
 
+/// Etiqueta arbitraria del decodificador actual ("" si no existe).
+export fn ch_engine_tag(self: ?*Engine, key: [*c]const u8) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (key == null) return @ptrCast("");
+    const d = e.decoder orelse return @ptrCast("");
+    return ch_decode_tag(d, key);
+}
+
+export fn ch_engine_date(self: ?*Engine) [*c]const u8 {
+    return ch_engine_tag(self, "date");
+}
+
+export fn ch_engine_genre(self: ?*Engine) [*c]const u8 {
+    return ch_engine_tag(self, "genre");
+}
+
+export fn ch_engine_composer(self: ?*Engine) [*c]const u8 {
+    return ch_engine_tag(self, "composer");
+}
+
+export fn ch_engine_track_number(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    const raw = std.mem.span(ch_engine_tag(e, "track"));
+    const slash = std.mem.indexOfScalar(u8, raw, '/');
+    const head = if (slash) |s| raw[0..s] else raw;
+    return std.fmt.parseInt(i32, std.mem.trim(u8, head, " \t"), 10) catch 0;
+}
+
+export fn ch_engine_disc_number(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    const raw = std.mem.span(ch_engine_tag(e, "disc"));
+    const slash = std.mem.indexOfScalar(u8, raw, '/');
+    const head = if (slash) |s| raw[0..s] else raw;
+    return std.fmt.parseInt(i32, std.mem.trim(u8, head, " \t"), 10) catch 0;
+}
+
 export fn ch_engine_lyrics_count(self: ?*Engine) i32 {
     const e = self orelse return 0;
     return @intCast(ch_lyrics_count(e.audibleLyrics()));
@@ -2054,6 +2139,71 @@ export fn ch_engine_cover(self: ?*Engine, size: ?*u64) [*c]const u8 {
 export fn ch_engine_last_error(self: ?*Engine) [*c]const u8 {
     const e = self orelse return @ptrCast(&global_error);
     return @ptrCast(&e.err);
+}
+
+/// Segundos de audio pendientes en el búfer (0..4).
+export fn ch_engine_buffered_seconds(self: ?*Engine) f64 {
+    const e = self orelse return 0;
+    const r = @atomicLoad(usize, &e.ring.read, .acquire);
+    const w = @atomicLoad(usize, &e.ring.write, .acquire);
+    var avail = w -% r;
+    if (avail > e.ring.cap) avail = 0;
+    return @as(f64, @floatFromInt(avail)) / @as(f64, @floatFromInt(SAMPLE_RATE));
+}
+
+/// Nº de veces que el hilo de audio se quedo sin datos (underrun).
+export fn ch_engine_buffer_underflows(self: ?*Engine) u64 {
+    const e = self orelse return 0;
+    return @atomicLoad(u64, &e.buf_underflows, .monotonic);
+}
+
+/// Analiza `path` y devuelve en `lead`/`tail` los segundos de silencio al
+/// principio y al final (por debajo de `threshold_db` dBFS). Devuelve 0 si ok.
+export fn ch_engine_detect_silence(path: [*c]const u8, threshold_db: f32, lead: *f64, tail: *f64) i32 {
+    if (path == null) return -1;
+    const d = ch_decode_open(path, SAMPLE_RATE, CHANNELS) orelse return -2;
+    defer ch_decode_close(d);
+
+    const total = ch_decode_duration(d);
+    const thr: f32 = std.math.pow(f32, 10, threshold_db / 20);
+
+    const chunk_frames: usize = 4096;
+    const buf = std.heap.c_allocator.alloc(f32, chunk_frames * CHANNELS) catch return -3;
+    defer std.heap.c_allocator.free(buf);
+
+    var pos_frames: u64 = 0;
+    var first_loud: ?u64 = null;
+    var last_loud: u64 = 0;
+
+    while (true) {
+        const got = ch_decode_read(d, buf.ptr, chunk_frames);
+        if (got == 0) break;
+        const n: usize = @intCast(got);
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const l = buf[i * CHANNELS];
+            const r = buf[i * CHANNELS + 1];
+            const peak = @max(@abs(l), @abs(r));
+            if (peak >= thr) {
+                if (first_loud == null) first_loud = pos_frames + i;
+                last_loud = pos_frames + i;
+            }
+        }
+        pos_frames += got;
+    }
+
+    const rate: f64 = @floatFromInt(SAMPLE_RATE);
+    if (first_loud) |fl| {
+        lead.* = @as(f64, @floatFromInt(fl)) / rate;
+        const total_frames = pos_frames;
+        const tail_start = @min(last_loud + 1, total_frames);
+        tail.* = @as(f64, @floatFromInt(total_frames - tail_start)) / rate;
+    } else {
+        // Silencio total: se reporta todo como silencio.
+        lead.* = if (total > 0) total else 0;
+        tail.* = 0;
+    }
+    return 0;
 }
 
 export fn ch_engine_poll_event(self: ?*Engine, out: ?*ChEvent) i32 {

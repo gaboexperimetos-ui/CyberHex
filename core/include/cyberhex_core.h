@@ -40,6 +40,10 @@ int32_t ch_engine_set_replaygain(ch_engine* engine, int32_t enabled);
 float   ch_engine_replaygain_gain_db(ch_engine* engine);
 float   ch_engine_replaygain_peak(ch_engine* engine);
 
+/* Limitador de picos en caliente (ceiling en dBFS, p.ej. -1.0). */
+int32_t ch_engine_set_limiter(ch_engine* engine, int32_t enabled, float ceiling_db);
+int32_t ch_engine_limiter(ch_engine* engine);
+
 /* Dispositivos de salida. index -1 = predeterminado del sistema. */
 int32_t     ch_engine_output_device_count(void);
 const char* ch_engine_output_device_name(int32_t index);
@@ -101,6 +105,14 @@ int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);
 const char* ch_engine_title(ch_engine* engine);
 const char* ch_engine_artist(ch_engine* engine);
 const char* ch_engine_album(ch_engine* engine);
+
+/* Etiquetas adicionales y acceso generico ("" si no existe). */
+const char* ch_engine_tag(ch_engine* engine, const char* key);
+const char* ch_engine_date(ch_engine* engine);
+const char* ch_engine_genre(ch_engine* engine);
+const char* ch_engine_composer(ch_engine* engine);
+int32_t     ch_engine_track_number(ch_engine* engine);
+int32_t     ch_engine_disc_number(ch_engine* engine);
 /* Devuelve la carátula embebida (JPEG/PNG) o NULL; escribe el tamaño en bytes. */
 const uint8_t* ch_engine_cover(ch_engine* engine, uint64_t* size);
 
@@ -142,6 +154,13 @@ typedef struct ch_event {
 int32_t ch_engine_poll_event(ch_engine* engine, ch_event* out);
 
 const char* ch_engine_last_error(ch_engine* engine);
+
+/* Estadisticas de b\u00fafer para diagnostico. */
+double ch_engine_buffered_seconds(ch_engine* engine);
+uint64_t ch_engine_buffer_underflows(ch_engine* engine);
+
+/* Detecta silencio al principio/fin de un archivo (dBFS). lead/tail en segundos. */
+int32_t ch_engine_detect_silence(const char* utf8_path, float threshold_db, double* lead, double* tail);
 
 #ifdef __cplusplus
 }
