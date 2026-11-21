@@ -77,7 +77,10 @@ object MediaBridge {
      * así que ya se puede hablar con Dart.
      */
     fun connect(engine: FlutterEngine, context: Context) {
-        disconnect()
+        // Puede llamarse dos veces con el mismo motor: desde la Application
+        // (para que el canal exista sin ventana) y desde MainActivity. El
+        // handler es el mismo, así que la segunda vez no se hace nada.
+        if (channel != null) return
         appContext = context
 
         val methodChannel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)

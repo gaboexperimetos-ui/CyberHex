@@ -367,7 +367,9 @@ class MediaSessionService : Service() {
         ).joinToString(" · ")
 
         builder
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            // Icono hexagonal propio (adaptive foreground monocromo): el del
+            // sistema (android.R.drawable.ic_media_play) no identificaba la app.
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "CyberHex")
             .setContentText(subtitle)
             .setContentIntent(contentPendingIntent())

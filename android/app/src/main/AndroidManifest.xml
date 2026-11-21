@@ -24,9 +24,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      CyberHexApplication cachea el FlutterEngine (y con él el isolate de Dart y
+      el motor de audio) para que cerrar la app desde "Recientes" no corte la
+      reproducción. MainActivity reutiliza ese motor y no lo destruye.
+    -->
     <application
         android:label="CyberHex"
-        android:name="${applicationName}"
+        android:name=".CyberHexApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"

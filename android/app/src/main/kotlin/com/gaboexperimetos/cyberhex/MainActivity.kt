@@ -1,6 +1,7 @@
 package com.gaboexperimetos.cyberhex
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
@@ -9,9 +10,14 @@ import io.flutter.embedding.engine.FlutterEngine
 /**
  * Actividad única de CyberHex.
  *
- * Además de hospedar el `FlutterEngine` (donde vive el motor de audio):
- *  * engancha el canal `cyberhex/media` en `configureFlutterEngine` y lo suelta
- *    en `cleanUpFlutterEngine`;
+ * No crea su propio `FlutterEngine`: usa el que cachea
+ * [CyberHexApplication] (ver [provideFlutterEngine]) y pide que no se destruya
+ * al desmontar la vista ([shouldDestroyEngineWithHost]), para que la música
+ * siga sonando al cerrar desde "Recientes".
+ *
+ * Además:
+ *  * engancha el canal `cyberhex/media` en `configureFlutterEngine` (idempotente,
+ *    porque el motor ya viene enganchado desde la Application);
  *  * pide `POST_NOTIFICATIONS` en Android 13+, necesario para que se vea la
  *    notificación de reproducción (sin permiso el servicio sigue sonando, pero
  *    la notificación no se muestra).
@@ -20,13 +26,26 @@ class MainActivity : FlutterActivity() {
 
     private var askedNotifications = false
 
+    /** El motor lo posee la Application: la actividad solo lo reutiliza. */
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        CyberHexApplication.ensureEngine(context)
+
+    /**
+     * `false` = al destruirse la actividad **no** se destruye el motor (ni el
+     * isolate de Dart, ni el hilo de audio). Es lo que mantiene la reproducción
+     * viva cuando el usuario desliza CyberHex fuera de "Aplicaciones recientes".
+     */
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MediaBridge.connect(flutterEngine, applicationContext)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        // El motor se destruye a continuación: el canal deja de ser válido.
+        // Solo se llama cuando el motor se destruye de verdad (aquí nunca, por
+        // shouldDestroyEngineWithHost = false); si algún día pasara, el canal
+        // deja de ser válido y hay que soltarlo.
         MediaBridge.disconnect()
         super.cleanUpFlutterEngine(flutterEngine)
     }
