@@ -26,6 +26,7 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
   double _dragPosition = 0;
   bool _dragging = false;
   bool _busy = false;
+  bool _lastPlaying = false;
   Future<bool>? _loading;
   double _volume = 1;
 
@@ -68,7 +69,12 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
     } else if (!shouldSpin && _spin.isAnimating) {
       _spin.stop();
     }
-    setState(() {});
+    // La posición la pinta _SeekBar con su ValueNotifier: aquí solo hay que
+    // reconstruir cuando cambia algo que se ve en el resto de la pantalla.
+    if (player.isPlaying != _lastPlaying) {
+      _lastPlaying = player.isPlaying;
+      setState(() {});
+    }
   }
 
   Future<void> _openFile() async {
@@ -162,12 +168,14 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
                       children: [
                         _Header(onOpen: _openFile),
                         const SizedBox(height: 28),
-                        _Disc(
-                          spin: _spin,
-                          playing: player.isPlaying,
-                          hasTrack: player.hasTrack,
-                          cover: player.cover,
-                          busy: _busy,
+                        RepaintBoundary(
+                          child: _Disc(
+                            spin: _spin,
+                            playing: player.isPlaying,
+                            hasTrack: player.hasTrack,
+                            cover: player.cover,
+                            busy: _busy,
+                          ),
                         ),
                         const SizedBox(height: 28),
                         _TrackInfo(player: player, onOpen: _openFile),
