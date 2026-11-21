@@ -79,7 +79,7 @@ EOF
   (
     cd "$CORE_DIR"
     "$ZIG" build-lib \
-      -cflags -std=c23 -O3 -ffast-math -fno-math-errno -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c ./src/lyrics.c ./src/library.c ./src/markers.c ./src/cue.c ./src/fileio.c \
+      -cflags -std=c23 -O3 -ffast-math -fno-math-errno -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c ./src/lyrics.c ./src/library.c ./src/markers.c ./src/cue.c ./src/fileio.c ./src/analysis.c \
       -Ofast -target "$ZT" --libc "$LIBC" "${CPUFLAG[@]}" \
       -L "$LIBDIR" -L "$FFDIR/lib" -I vendor -I src -I "$FFDIR/include" \
       -lavformat -lavcodec -lavutil -lswresample -lm -ldl \

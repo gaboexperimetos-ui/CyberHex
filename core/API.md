@@ -86,6 +86,9 @@ int32_t ch_engine_set_mono(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_mono(ch_engine* engine);
 int32_t ch_engine_set_balance(ch_engine* engine, float balance); /* -1 .. +1 */
 float   ch_engine_balance(ch_engine* engine);
+int32_t ch_engine_set_gain_db(ch_engine* engine, float gain_db); /* -24 .. +24 */
+float   ch_engine_gain_db(ch_engine* engine);
+int32_t ch_engine_save_cover(ch_engine* engine, int32_t index, const char* path);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
 
 /* Bucle A-B. */
@@ -96,6 +99,11 @@ int32_t ch_engine_ab_loop(ch_engine* engine, double* a_seconds, double* b_second
 /* Estado persistente (cola, pista, posicion y ajustes). */
 int32_t ch_engine_save_state(ch_engine* engine, const char* path);
 int32_t ch_engine_load_state(ch_engine* engine, const char* path, double* position_out);
+
+/* Sonoridad y picos (analisis offline). */
+typedef struct { double integrated_lufs; double sample_peak_dbfs; double duration_s; } ch_loudness_result;
+int32_t ch_loudness_scan(const char* utf8_path, ch_loudness_result* out);
+int32_t ch_waveform_peaks(const char* utf8_path, uint32_t buckets, float* out_max);
 
 /* Hojas CUE. */
 ch_cue*   ch_cue_read(const char* path);
@@ -281,6 +289,18 @@ mono, balance, crossfeed). `ch_engine_load_state` reconstruye la cola, carga la
 pista actual en pausa y devuelve en `position_out` la posición guardada; la UI
 decide si llama a `play` y a `seek`. Formato de texto versionado (`CHSTATE 1`),
 escritura atómica.
+
+### Ganancia, carátulas y análisis
+
+- `ch_engine_set_gain_db` aplica una ganancia fija (-24..+24 dB) después del
+  volumen y ReplayGain; se incluye en el estado persistente.
+- `ch_engine_save_cover(index, path)` escribe la carátula i-ésima de la pista
+  audible en un archivo (escritura atómica).
+- `ch_loudness_scan` calcula sonoridad integrada ITU-R BS.1770-4 (K-weighting,
+  bloques de 400 ms al 75%, puertas -70 LUFS absoluta y -10 LU relativa) y pico
+  de muestra, sin tocar el motor. Sirve para generar ReplayGain propio.
+- `ch_waveform_peaks(path, buckets, out)` devuelve el máximo por tramo en [0..1]
+  para dibujar la forma de onda en la UI.
 
 ### Hojas CUE
 

@@ -255,6 +255,7 @@ pub const Engine = struct {
     // Mezcla: mono y balance (-1 izquierda .. +1 derecha).
     mono: bool = false,
     balance_bits: u32 = @bitCast(@as(f32, 0)),
+    gain_db_bits: u32 = @bitCast(@as(f32, 0)),
 
     // Medidores (ventana desde la ultima lectura).
     meter_lock: SpinLock = .{},
@@ -1122,6 +1123,8 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         if (playing) {
             target = self.volume();
             if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) target *= self.audibleGain();
+            const gain_db = @as(f32, @bitCast(@atomicLoad(u32, &self.gain_db_bits, .monotonic)));
+            if (gain_db != 0) target *= std.math.pow(f32, 10, gain_db / 20);
             if (self.sleepGain()) |sg| {
                 target *= sg;
                 if (sg <= 0) self.fireSleep();
@@ -2036,6 +2039,38 @@ export fn ch_engine_balance(self: ?*Engine) f32 {
     return @as(f32, @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic)));
 }
 
+/// Ganancia manual (dB) aplicada despues del volumen y ReplayGain. -24 .. +24.
+export fn ch_engine_set_gain_db(self: ?*Engine, gain_db: f32) i32 {
+    const e = self orelse return -1;
+    const clamped = std.math.clamp(gain_db, -24, 24);
+    @atomicStore(u32, &e.gain_db_bits, @bitCast(clamped), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_gain_db(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return @as(f32, @bitCast(@atomicLoad(u32, &e.gain_db_bits, .monotonic)));
+}
+
+/// Guarda la caratula `index` de la pista audible en `path`. 0 si ok.
+export fn ch_engine_save_cover(self: ?*Engine, index: i32, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null or index < 0) return -1;
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    if (e.findSegment(p)) |pos| {
+        const seg = &e.segments[pos];
+        const i: usize = @intCast(index);
+        if (i < seg.cover_count) {
+            if (seg.covers[i]) |cover| {
+                return ch_file_write_atomic(path, cover.ptr, cover.len);
+            }
+        }
+    }
+    return -2;
+}
+
 /// Medidores desde la ultima llamada: picos por canal y RMS (dBFS).
 export fn ch_engine_meter(self: ?*Engine, peak_l_db: ?*f32, peak_r_db: ?*f32, rms_db: ?*f32) i32 {
     const e = self orelse return -1;
@@ -2511,6 +2546,7 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
         .{ .key = "pitch", .a = pitch, .b = 0 },
         .{ .key = "xfade", .a = xfade, .b = 0 },
         .{ .key = "balance", .a = balance, .b = 0 },
+        .{ .key = "gain", .a = @as(f32, @bitCast(@atomicLoad(u32, &e.gain_db_bits, .monotonic))), .b = 0 },
         .{ .key = "repeat", .a = @floatFromInt(e.repeat_mode), .b = 0 },
         .{ .key = "shuffle", .a = if (@atomicLoad(bool, &e.shuffle, .monotonic)) 1 else 0, .b = 0 },
         .{ .key = "rg", .a = if (@atomicLoad(bool, &e.rg_enabled, .monotonic)) 1 else 0, .b = 0 },
@@ -2560,6 +2596,7 @@ export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out:
     var pitch: f32 = -999;
     var xfade: f32 = -1;
     var balance: f32 = -999;
+    var gain_db: f32 = -999;
     var repeat_mode: i32 = -1;
     var shuffle: i32 = -1;
     var rg: i32 = -1;
@@ -2604,6 +2641,7 @@ export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out:
         else if (std.mem.eql(u8, key, "pitch")) pitch = @floatCast(value)
         else if (std.mem.eql(u8, key, "xfade")) xfade = @floatCast(value)
         else if (std.mem.eql(u8, key, "balance")) balance = @floatCast(value)
+        else if (std.mem.eql(u8, key, "gain")) gain_db = @floatCast(value)
         else if (std.mem.eql(u8, key, "repeat")) repeat_mode = @intFromFloat(value)
         else if (std.mem.eql(u8, key, "shuffle")) shuffle = @intFromFloat(value)
         else if (std.mem.eql(u8, key, "rg")) rg = @intFromFloat(value)
@@ -2647,6 +2685,7 @@ export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out:
     if (pitch > -900) _ = ch_engine_set_pitch(e, pitch);
     if (xfade >= 0) _ = ch_engine_set_crossfade(e, xfade);
     if (balance > -900) _ = ch_engine_set_balance(e, balance);
+    if (gain_db > -900) _ = ch_engine_set_gain_db(e, gain_db);
     if (repeat_mode >= 0) _ = ch_engine_set_repeat(e, repeat_mode);
     if (shuffle >= 0) _ = ch_engine_set_shuffle(e, shuffle);
     if (rg >= 0) _ = ch_engine_set_replaygain(e, rg);
