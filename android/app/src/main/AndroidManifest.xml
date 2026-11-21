@@ -54,6 +54,21 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!--
+              Abrir un audio desde fuera: explorador de archivos, WhatsApp,
+              "Compartir con..." o un enlace content://. MainActivity copia el
+              content:// a cacheDir/shared_audio (el núcleo necesita una ruta
+              POSIX) y se lo pasa a Dart por el canal cyberhex/intent.
+              launchMode="singleTop" ya está puesto: un segundo archivo llega
+              por onNewIntent en vez de crear otra actividad.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content" android:mimeType="audio/*"/>
+                <data android:scheme="file" android:mimeType="audio/*"/>
+            </intent-filter>
         </activity>
         <!--
           Motor de reproducción: mantiene el proceso en primer plano mientras

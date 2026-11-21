@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:material_ui/material_ui.dart';
 
 import 'core/native_player.dart';
 import 'core/player_controller.dart';
+import 'platform/external_file_channel.dart';
 import 'platform/media_session_channel.dart';
 import 'theme.dart';
 import 'ui/core_error_screen.dart';
@@ -27,6 +29,7 @@ class CyberHexApp extends StatefulWidget {
 class _CyberHexAppState extends State<CyberHexApp> {
   PlayerController? _controller;
   MediaSessionChannel? _mediaSession;
+  ExternalFileChannel? _externalFiles;
   bool _ownsController = false;
   String? _error;
 
@@ -36,7 +39,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
     final injected = widget.controller;
     if (injected != null) {
       _controller = injected..start();
-      _attachMediaSession(injected);
+      _attachPlatformChannels(injected);
       return;
     }
     final player = NativePlayer.open();
@@ -47,7 +50,12 @@ class _CyberHexAppState extends State<CyberHexApp> {
     _ownsController = true;
     final controller = PlayerController(player)..start();
     _controller = controller;
+    _attachPlatformChannels(controller);
+  }
+
+  void _attachPlatformChannels(PlayerController controller) {
     _attachMediaSession(controller);
+    _attachExternalFiles(controller);
   }
 
   /// Solo en Android: el servicio de medios pinta la notificación y reenvía
@@ -57,9 +65,21 @@ class _CyberHexAppState extends State<CyberHexApp> {
     _mediaSession = MediaSessionChannel(controller);
   }
 
+  /// Archivos abiertos desde el sistema (explorador, WhatsApp...). En Android
+  /// llegan por `ACTION_VIEW`; en escritorio el canal no existe y `start()`
+  /// solo recibe `MissingPluginException`, que se ignora.
+  void _attachExternalFiles(PlayerController controller) {
+    final channel = ExternalFileChannel(controller);
+    _externalFiles = channel;
+    // Sin await: la UI no espera a que llegue un archivo.
+    unawaited(channel.start());
+  }
+
   @override
   void dispose() {
-    // El puente primero: suelta listeners antes de que el controlador muera.
+    // Los puentes primero: sueltan listeners antes de que el controlador muera.
+    _externalFiles?.dispose();
+    _externalFiles = null;
     _mediaSession?.dispose();
     _mediaSession = null;
     if (_ownsController) {
