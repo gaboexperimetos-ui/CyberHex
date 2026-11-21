@@ -80,6 +80,26 @@ typedef _SetIntNative = Int32 Function(Pointer<Void>, Int32);
 typedef _SetIntDart = int Function(Pointer<Void>, int);
 typedef _SetLoopNative = Int32 Function(Pointer<Void>, Double, Double);
 typedef _SetLoopDart = int Function(Pointer<Void>, double, double);
+
+// Cola: mover/quitar/insertar llevan índices; añadir y cargar llevan ruta.
+typedef _TwoIntsNative = Int32 Function(Pointer<Void>, Int32, Int32);
+typedef _TwoIntsDart = int Function(Pointer<Void>, int, int);
+typedef _IntAndPathNative = Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>);
+typedef _IntAndPathDart = int Function(Pointer<Void>, int, Pointer<Utf8>);
+typedef _PathArgNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _PathArgDart = int Function(Pointer<Void>, Pointer<Utf8>);
+
+// Biblioteca: handle opaco `void*`.
+typedef _LibCreateNative = Pointer<Void> Function();
+typedef _LibCreateDart = Pointer<Void> Function();
+typedef _LibDestroyNative = Void Function(Pointer<Void>);
+typedef _LibDestroyDart = void Function(Pointer<Void>);
+typedef _LibScanNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _LibScanDart = int Function(Pointer<Void>, Pointer<Utf8>);
+typedef _LibCountNative = Int32 Function(Pointer<Void>);
+typedef _LibCountDart = int Function(Pointer<Void>);
+typedef _LibPathNative = Pointer<Utf8> Function(Pointer<Void>, Int32);
+typedef _LibPathDart = Pointer<Utf8> Function(Pointer<Void>, int);
 typedef _U64Native = Uint64 Function(Pointer<Void>);
 typedef _U64Dart = int Function(Pointer<Void>);
 typedef _NoArgIntNative = Int32 Function();
@@ -97,6 +117,56 @@ bool _loadTrackInIsolate(int address, String path) {
   final utf8 = path.toNativeUtf8();
   try {
     return load(engine, utf8) == 0;
+  } finally {
+    malloc.free(utf8);
+  }
+}
+
+/// Escaneo de biblioteca fuera del hilo de UI: en una carpeta grande, recorrer
+/// el árbol y ordenar miles de rutas congela la app si se hace aquí.
+///
+/// La biblioteca se crea y se destruye dentro del isolate; solo cruzan rutas.
+({List<String> paths, int removed}) _scanLibraryInIsolate(String root) {
+  final lib = DynamicLibrary.open(_libraryName);
+  final create = lib.lookupFunction<_LibCreateNative, _LibCreateDart>('ch_library_create');
+  final destroy = lib.lookupFunction<_LibDestroyNative, _LibDestroyDart>('ch_library_destroy');
+  final scan = lib.lookupFunction<_LibScanNative, _LibScanDart>('ch_library_scan');
+  final count = lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_count');
+  final path = lib.lookupFunction<_LibPathNative, _LibPathDart>('ch_library_path');
+  final removedFn =
+      lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_removed');
+
+  final handle = create();
+  if (handle == nullptr) return (paths: const <String>[], removed: 0);
+  final utf8 = root.toNativeUtf8();
+  try {
+    if (scan(handle, utf8) < 0) return (paths: const <String>[], removed: 0);
+    final removed = removedFn(handle);
+    final total = count(handle);
+    if (total <= 0) return (paths: const <String>[], removed: removed);
+    final out = <String>[];
+    for (var i = 0; i < total; i++) {
+      final entry = path(handle, i);
+      if (entry == nullptr) continue;
+      out.add(entry.toDartString());
+    }
+    return (paths: out, removed: removed);
+  } finally {
+    malloc.free(utf8);
+    destroy(handle);
+  }
+}
+
+/// `ch_engine_load_add` fuera del hilo de UI. Devuelve el código del motor
+/// (0 = bien); el índice real se lee después con `queue_index`, porque
+/// `load_add` delega en `play_index`, que devuelve 0 y no el índice.
+int _loadAddInIsolate(int address, String path) {
+  final lib = DynamicLibrary.open(_libraryName);
+  final loadAdd = lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_load_add');
+  final engine = Pointer<Void>.fromAddress(address);
+  final utf8 = path.toNativeUtf8();
+  try {
+    return loadAdd(engine, utf8);
   } finally {
     malloc.free(utf8);
   }
@@ -214,6 +284,10 @@ class NativePlayer implements PlayerApi {
       if (_bindings.load(_engine, utf8) != 0) {
         return false;
       }
+      // ch_engine_load deja la cola con una sola pista: esta.
+      _queuePaths
+        ..clear()
+        ..add(path);
       _applyMetadata(path);
       return true;
     } finally {
@@ -229,6 +303,9 @@ class NativePlayer implements PlayerApi {
       final address = _engine.address;
       final ok = await Isolate.run(() => _loadTrackInIsolate(address, path));
       if (!ok || _disposed) return false;
+      _queuePaths
+        ..clear()
+        ..add(path);
       _applyMetadata(path);
       return true;
     } catch (error) {
@@ -332,6 +409,256 @@ class NativePlayer implements PlayerApi {
 
   @override
   void toggleShuffle() => setShuffle(!shuffle);
+
+  // ---------------------------------------------------------------------
+  // Cola
+  // ---------------------------------------------------------------------
+
+  /// Espejo de las rutas de la cola.
+  ///
+  /// El núcleo no expone `queue_path`: solo `queue_count`/`queue_index`. Todas
+  /// las mutaciones de la cola pasan por esta clase, así que el espejo es fiel;
+  /// si el motor tuviera más pistas de las conocidas (cola importada por fuera
+  /// o restaurada por el propio núcleo) se rellenan con rutas vacías en vez de
+  /// inventarlas.
+  final List<String> _queuePaths = <String>[];
+
+  int _libraryRemoved = 0;
+
+  @override
+  int get queueLength {
+    if (_disposed) return 0;
+    final count = _bindings.queueCount?.call(_engine) ?? _queuePaths.length;
+    return count < 0 ? 0 : count;
+  }
+
+  @override
+  int get queueIndex {
+    if (_disposed) return -1;
+    return _bindings.queueIndex?.call(_engine) ?? -1;
+  }
+
+  void _syncMirror() {
+    final count = queueLength;
+    if (_queuePaths.length > count) {
+      _queuePaths.removeRange(count, _queuePaths.length);
+      return;
+    }
+    while (_queuePaths.length < count) {
+      _queuePaths.add('');
+    }
+  }
+
+  @override
+  List<QueueItem> get queueItems {
+    _syncMirror();
+    final index = queueIndex;
+    return List<QueueItem>.unmodifiable(<QueueItem>[
+      for (var i = 0; i < _queuePaths.length; i++)
+        QueueItem(
+          path: _queuePaths[i],
+          title: _queuePaths[i].isEmpty
+              ? 'Pista ${i + 1}'
+              : titleFromPath(_queuePaths[i]),
+          artist: i == index ? artist : '',
+        ),
+    ]);
+  }
+
+  @override
+  bool playAt(int index) {
+    if (_disposed) return false;
+    final fn = _bindings.playIndex;
+    if (fn == null) return false;
+    if (fn(_engine, index) != 0) return false;
+    _loaded = true;
+    syncTrackInfo();
+    return true;
+  }
+
+  @override
+  bool enqueue(String path) {
+    if (_disposed) return false;
+    final fn = _bindings.queueAdd;
+    if (fn == null) return false;
+    final utf8 = path.toNativeUtf8();
+    try {
+      // queue_add devuelve el índice donde la puso.
+      final index = fn(_engine, utf8);
+      if (index < 0) return false;
+      _syncMirror();
+      if (index < _queuePaths.length) {
+        _queuePaths[index] = path;
+      } else {
+        _queuePaths.add(path);
+      }
+      return true;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  @override
+  bool playNext(String path) {
+    if (_disposed) return false;
+    final fn = _bindings.queueInsert;
+    if (fn == null) return false;
+    final current = queueIndex;
+    final length = queueLength;
+    final at = current < 0 ? length : math.min(current + 1, length);
+    final utf8 = path.toNativeUtf8();
+    try {
+      if (fn(_engine, at, utf8) != 0) return false;
+      while (_queuePaths.length < length) {
+        _queuePaths.add('');
+      }
+      _queuePaths.insert(at, path);
+      return true;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  @override
+  Future<bool> loadAndPlayAsync(String path) async {
+    if (_disposed) return false;
+    if (_bindings.loadAdd == null) return loadAsync(path);
+    try {
+      final address = _engine.address;
+      final result = await Isolate.run(() => _loadAddInIsolate(address, path));
+      if (result != 0 || _disposed) return false;
+      // load_add delega en play_index: el índice audible es el de la pista.
+      final at = queueIndex;
+      _syncMirror();
+      if (at >= 0 && at < _queuePaths.length) {
+        _queuePaths[at] = path;
+      }
+      _applyMetadata(path);
+      return true;
+    } catch (error) {
+      _failure = error.toString();
+      return false;
+    }
+  }
+
+  @override
+  bool moveQueueItem(int from, int to) {
+    if (_disposed) return false;
+    final fn = _bindings.queueMove;
+    if (fn == null) return false;
+    if (fn(_engine, from, to) != 0) return false;
+    _syncMirror();
+    if (from < 0 || to < 0 || from >= _queuePaths.length || to >= _queuePaths.length) {
+      return true;
+    }
+    final item = _queuePaths.removeAt(from);
+    _queuePaths.insert(to, item);
+    return true;
+  }
+
+  @override
+  bool removeQueueItem(int index) {
+    if (_disposed) return false;
+    final fn = _bindings.queueRemove;
+    if (fn == null) return false;
+    if (fn(_engine, index) != 0) return false;
+    if (index >= 0 && index < _queuePaths.length) {
+      _queuePaths.removeAt(index);
+    }
+    _syncMirror();
+    return true;
+  }
+
+  @override
+  void clearQueue() {
+    if (_disposed) return;
+    _bindings.queueClear?.call(_engine);
+    _queuePaths.clear();
+    _loaded = false;
+    _duration = 0;
+  }
+
+  @override
+  int importQueue(String playlistPath) {
+    if (_disposed) return 0;
+    final fn = _bindings.queueImport;
+    if (fn == null) return 0;
+    final utf8 = playlistPath.toNativeUtf8();
+    try {
+      final added = fn(_engine, utf8);
+      if (added <= 0) return 0;
+      // El motor añade al final en el mismo orden del archivo: se replica para
+      // no quedarnos con rutas vacías en el espejo.
+      _queuePaths.addAll(_readPlaylistPaths(playlistPath));
+      _syncMirror();
+      return added;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  @override
+  bool exportQueue(String playlistPath) {
+    if (_disposed) return false;
+    final fn = _bindings.queueExport;
+    if (fn == null) return false;
+    final utf8 = playlistPath.toNativeUtf8();
+    try {
+      return fn(_engine, utf8) == 0;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  /// Lee un M3U/M3U8/PLS como texto y devuelve rutas absolutas.
+  static List<String> _readPlaylistPaths(String playlistPath) {
+    try {
+      final file = File(playlistPath);
+      if (!file.existsSync()) return const <String>[];
+      final base = file.parent.path;
+      final paths = <String>[];
+      for (final raw in file.readAsLinesSync()) {
+        final line = raw.trim();
+        if (line.isEmpty || line.startsWith('#')) continue;
+        var value = line;
+        final equals = line.indexOf('=');
+        if (equals > 0 && line.substring(0, equals).toLowerCase().startsWith('file')) {
+          value = line.substring(equals + 1).trim();
+        }
+        if (value.isEmpty) continue;
+        paths.add(value.startsWith('/') ? value : '$base/$value');
+      }
+      return paths;
+    } catch (_) {
+      return const <String>[];
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Biblioteca
+  // ---------------------------------------------------------------------
+
+  @override
+  int get libraryRemoved => _libraryRemoved;
+
+  @override
+  Future<List<LibraryTrack>> scanDirectory(String root) async {
+    if (_disposed) return const <LibraryTrack>[];
+    if (_bindings.libraryCreate == null || _bindings.libraryScan == null) {
+      return const <LibraryTrack>[];
+    }
+    try {
+      final scan = await Isolate.run(() => _scanLibraryInIsolate(root));
+      if (_disposed) return const <LibraryTrack>[];
+      _libraryRemoved = scan.removed;
+      return List<LibraryTrack>.unmodifiable(
+        scan.paths.map(LibraryTrack.fromPath),
+      );
+    } catch (error) {
+      _failure = error.toString();
+      return const <LibraryTrack>[];
+    }
+  }
 
   @override
   void seek(double seconds) => _bindings.seek(_engine, seconds);
@@ -557,7 +884,58 @@ class _Bindings {
         coverAt =
             lib.lookupFunction<_CoverAtNative, _CoverAtDart>('ch_engine_cover_at'),
         engineLastErrorFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_last_error'),
-        coreLastErrorFn = lib.lookupFunction<_PlainTextNative, _PlainTextDart>('ch_core_last_error');
+        coreLastErrorFn = lib.lookupFunction<_PlainTextNative, _PlainTextDart>('ch_core_last_error'),
+        playIndex = lib.providesSymbol('ch_engine_play_index')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_play_index')
+            : null,
+        loadAdd = lib.providesSymbol('ch_engine_load_add')
+            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_load_add')
+            : null,
+        queueAdd = lib.providesSymbol('ch_engine_queue_add')
+            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_queue_add')
+            : null,
+        queueCount = lib.providesSymbol('ch_engine_queue_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_count')
+            : null,
+        queueIndex = lib.providesSymbol('ch_engine_queue_index')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_index')
+            : null,
+        queueClear = lib.providesSymbol('ch_engine_queue_clear')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_queue_clear')
+            : null,
+        queueMove = lib.providesSymbol('ch_engine_queue_move')
+            ? lib.lookupFunction<_TwoIntsNative, _TwoIntsDart>('ch_engine_queue_move')
+            : null,
+        queueRemove = lib.providesSymbol('ch_engine_queue_remove')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_queue_remove')
+            : null,
+        queueInsert = lib.providesSymbol('ch_engine_queue_insert')
+            ? lib.lookupFunction<_IntAndPathNative, _IntAndPathDart>('ch_engine_queue_insert')
+            : null,
+        queueImport = lib.providesSymbol('ch_engine_queue_import')
+            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_queue_import')
+            : null,
+        queueExport = lib.providesSymbol('ch_engine_queue_export')
+            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_queue_export')
+            : null,
+        libraryCreate = lib.providesSymbol('ch_library_create')
+            ? lib.lookupFunction<_LibCreateNative, _LibCreateDart>('ch_library_create')
+            : null,
+        libraryDestroy = lib.providesSymbol('ch_library_destroy')
+            ? lib.lookupFunction<_LibDestroyNative, _LibDestroyDart>('ch_library_destroy')
+            : null,
+        libraryScan = lib.providesSymbol('ch_library_scan')
+            ? lib.lookupFunction<_LibScanNative, _LibScanDart>('ch_library_scan')
+            : null,
+        libraryCount = lib.providesSymbol('ch_library_count')
+            ? lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_count')
+            : null,
+        libraryPath = lib.providesSymbol('ch_library_path')
+            ? lib.lookupFunction<_LibPathNative, _LibPathDart>('ch_library_path')
+            : null,
+        libraryRemovedFn = lib.providesSymbol('ch_library_removed')
+            ? lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_removed')
+            : null;
 
   static final _Bindings instance = _Bindings._(_open());
 
@@ -599,6 +977,23 @@ class _Bindings {
   final _IntDart? shuffle;
   final _SetIntDart? setChannelMode;
   final _IntDart? channelMode;
+  final _SetIntDart? playIndex;
+  final _PathArgDart? loadAdd;
+  final _PathArgDart? queueAdd;
+  final _IntDart? queueCount;
+  final _IntDart? queueIndex;
+  final _ControlDart? queueClear;
+  final _TwoIntsDart? queueMove;
+  final _SetIntDart? queueRemove;
+  final _IntAndPathDart? queueInsert;
+  final _PathArgDart? queueImport;
+  final _PathArgDart? queueExport;
+  final _LibCreateDart? libraryCreate;
+  final _LibDestroyDart? libraryDestroy;
+  final _LibScanDart? libraryScan;
+  final _LibCountDart? libraryCount;
+  final _LibPathDart? libraryPath;
+  final _LibCountDart? libraryRemovedFn;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;

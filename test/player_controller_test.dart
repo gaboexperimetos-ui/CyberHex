@@ -165,6 +165,177 @@ void main() {
     expect(fake.shuffleRequests, 0);
   });
 
+  // -------------------------------------------------------------------
+  // Cola y biblioteca (fase 1B)
+  // -------------------------------------------------------------------
+
+  test('QueueItem y LibraryTrack comparan por contenido', () {
+    const a = QueueItem(path: '/m/a.flac', title: 'a');
+    const b = QueueItem(path: '/m/a.flac', title: 'a');
+    const c = QueueItem(path: '/m/a.flac', title: 'otra');
+    expect(a, b);
+    expect(a.hashCode, b.hashCode);
+    expect(a, isNot(c));
+
+    final track = LibraryTrack.fromPath('/musica/Artista - Tema.mp3');
+    expect(track.title, 'Artista - Tema');
+    expect(track.extension, 'mp3');
+    expect(track.directory, '/musica');
+    expect(track, LibraryTrack.fromPath('/musica/Artista - Tema.mp3'));
+    expect(track.hashCode, LibraryTrack.fromPath('/musica/Artista - Tema.mp3').hashCode);
+  });
+
+  test('enqueue añade al final y el snapshot lo refleja', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.enqueue('/m/a.flac'), isTrue);
+    expect(controller.enqueue('/m/b.mp3'), isTrue);
+
+    expect(fake.enqueueCalls, 2);
+    final queue = controller.snapshot.queue;
+    expect(queue, hasLength(2));
+    expect(queue.first.title, 'a');
+    expect(queue.last.title, 'b');
+    expect(controller.snapshot.queueIndex, -1);
+  });
+
+  test('playAt salta a la pista y respeta los índices fuera de rango', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.enqueue('/m/a.flac');
+    controller.enqueue('/m/b.mp3');
+
+    expect(controller.playAt(1), isTrue);
+    expect(fake.playAtCalls, 1);
+    expect(controller.snapshot.queueIndex, 1);
+    expect(controller.snapshot.title, 'b');
+    expect(controller.snapshot.playing, isTrue);
+    expect(controller.position.value, 0);
+
+    expect(controller.playAt(9), isFalse);
+    expect(controller.playAt(-1), isFalse);
+  });
+
+  test('playNext inserta justo después de la pista actual', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.enqueue('/m/a.flac');
+    controller.enqueue('/m/c.mp3');
+    controller.playAt(0);
+
+    expect(controller.playNext('/m/b.mp3'), isTrue);
+    expect(fake.playNextCalls, 1);
+    expect(fake.queuePaths, ['/m/a.flac', '/m/b.mp3', '/m/c.mp3']);
+    expect(controller.snapshot.queue.map((i) => i.title).toList(),
+        ['a', 'b', 'c']);
+  });
+
+  test('moveQueueItem reordena sin perder la pista activa', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.enqueue('/m/a.flac');
+    controller.enqueue('/m/b.mp3');
+    controller.enqueue('/m/c.ogg');
+    controller.playAt(0);
+
+    expect(controller.moveQueueItem(0, 2), isTrue);
+    expect(fake.queuePaths, ['/m/b.mp3', '/m/c.ogg', '/m/a.flac']);
+    // La pista que sonaba (a) se movió al final: el índice la sigue.
+    expect(controller.snapshot.queueIndex, 2);
+    expect(controller.snapshot.title, 'a');
+  });
+
+  test('removeQueueItem quita y ajusta el índice activo', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.enqueue('/m/a.flac');
+    controller.enqueue('/m/b.mp3');
+    controller.enqueue('/m/c.ogg');
+    controller.playAt(2);
+
+    expect(controller.removeQueueItem(0), isTrue);
+    expect(fake.queuePaths, ['/m/b.mp3', '/m/c.ogg']);
+    expect(controller.snapshot.queueIndex, 1);
+
+    expect(controller.removeQueueItem(5), isFalse);
+  });
+
+  test('clearQueue vacía la cola y suelta la pista', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.enqueue('/m/a.flac');
+    controller.playAt(0);
+
+    controller.clearQueue();
+
+    expect(fake.clearCalls, 1);
+    expect(controller.snapshot.queue, isEmpty);
+    expect(controller.snapshot.queueIndex, -1);
+    expect(controller.snapshot.hasTrack, isFalse);
+  });
+
+  test('con la cola protegida, abrir una pista no vacía la cola', () async {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.queueProtected = true;
+    expect(controller.snapshot.queueProtected, isTrue);
+
+    controller.enqueue('/m/vieja1.flac');
+    controller.enqueue('/m/vieja2.flac');
+
+    final error = await controller.openFile('/m/nueva.mp3');
+    expect(error, isNull);
+    expect(fake.loadAndPlayCalls, 1);
+    // Las dos anteriores siguen y la nueva se añade al final.
+    expect(fake.queuePaths, ['/m/vieja1.flac', '/m/vieja2.flac', '/m/nueva.mp3']);
+    expect(controller.snapshot.queue, hasLength(3));
+    expect(controller.snapshot.queueIndex, 2);
+    expect(controller.snapshot.playing, isTrue);
+  });
+
+  test('sin la cola protegida, abrir una pista reemplaza la cola', () async {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.enqueue('/m/vieja1.flac');
+    controller.enqueue('/m/vieja2.flac');
+
+    final error = await controller.openFile('/m/nueva.mp3');
+    expect(error, isNull);
+    expect(fake.loadAndPlayCalls, 0);
+    expect(fake.queuePaths, ['/m/nueva.mp3']);
+    expect(controller.snapshot.queue, hasLength(1));
+  });
+
+  test('scanDirectory cachea el resultado de la biblioteca', () async {
+    final fake = FakePlayer()
+      ..library = [
+        LibraryTrack.fromPath('/m/a.flac'),
+        LibraryTrack.fromPath('/m/sub/b.mp3'),
+      ];
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    final tracks = await controller.scanDirectory('/m');
+
+    expect(fake.scanCalls, 1);
+    expect(tracks, hasLength(2));
+    expect(tracks.last.title, 'b');
+    expect(tracks.last.directory, '/m/sub');
+    expect(controller.libraryTracks, tracks);
+    expect(controller.libraryRemoved, 0);
+  });
+
   test('dispose libera el motor', () {
     final fake = FakePlayer();
     final controller = PlayerController(fake);

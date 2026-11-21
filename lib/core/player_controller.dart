@@ -29,9 +29,30 @@ class PlayerController extends ChangeNotifier {
   Future<bool>? _loading;
   String? _error;
   double _volume = 1;
+  bool _queueProtected = false;
+  List<QueueItem> _queue = const <QueueItem>[];
+  int _queueIndex = -1;
+  List<LibraryTrack> _libraryTracks = const <LibraryTrack>[];
   bool _disposed = false;
 
   PlayerSnapshot get snapshot => _snapshot;
+
+  /// ¿La cola está protegida? Con el flag activo, abrir un archivo suelto lo
+  /// añade al final y lo reproduce **sin** vaciar lo que ya había.
+  bool get queueProtected => _queueProtected;
+
+  set queueProtected(bool value) {
+    if (_disposed || value == _queueProtected) return;
+    _queueProtected = value;
+    _refresh();
+  }
+
+  /// Último resultado de [scanDirectory]; la vista de biblioteca lo usa para no
+  /// repetir el escaneo al volver de la pantalla de reproducción.
+  List<LibraryTrack> get libraryTracks => _libraryTracks;
+
+  /// Pistas que el último escaneo dio por desaparecidas.
+  int get libraryRemoved => _player.libraryRemoved;
 
   List<double> get eqGains => _player.eqGains;
 
@@ -42,6 +63,7 @@ class PlayerController extends ChangeNotifier {
     if (_disposed) return;
     _timer ??= Timer.periodic(_tickInterval, (_) => pump());
     pump();
+    _refreshQueue();
   }
 
   /// Procesa eventos y refresca el estado una vez.
@@ -64,11 +86,44 @@ class PlayerController extends ChangeNotifier {
       // El motor avisa cuando entra una pista nueva (también en gapless o
       // crossfade): hay que releer etiquetas y carátula, porque pueden haber
       // cambiado sin pasar por load().
-      if (event.kind == PlayerEventKind.track) {
-        _player.syncTrackInfo();
-        position.value = 0;
+      switch (event.kind) {
+        case PlayerEventKind.track:
+          _player.syncTrackInfo();
+          position.value = 0;
+          _refreshQueue();
+        case PlayerEventKind.queue:
+          _refreshQueue();
+        case PlayerEventKind.state:
+        case PlayerEventKind.end:
+        case PlayerEventKind.sleep:
+        case PlayerEventKind.unknown:
+          break;
       }
     }
+  }
+
+  /// Relee la cola del motor y notifica solo si cambió.
+  ///
+  /// Construir `QueueItem`s cuesta (recorre rutas y nombres), así que no se
+  /// hace en cada tick de 80 ms: solo cuando llega `EV_QUEUE`/`EV_TRACK` o tras
+  /// una mutación nuestra.
+  void _refreshQueue() {
+    if (_disposed) return;
+    final items = _player.queueItems;
+    final index = _player.queueIndex;
+    if (index == _queueIndex && _sameQueue(items, _queue)) return;
+    _queue = items;
+    _queueIndex = index;
+    _refresh();
+  }
+
+  static bool _sameQueue(List<QueueItem> a, List<QueueItem> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   void _refresh() {
@@ -85,6 +140,9 @@ class PlayerController extends ChangeNotifier {
       volume: _volume,
       repeatMode: _player.repeatMode,
       shuffle: _player.shuffle,
+      queue: _queue,
+      queueIndex: _queueIndex,
+      queueProtected: _queueProtected,
       error: _error,
     );
     if (next != _snapshot) {
@@ -98,7 +156,10 @@ class PlayerController extends ChangeNotifier {
   /// Devuelve `null` si fue bien, o el mensaje de error para enseñarlo.
   Future<String?> openFile(String path) async {
     if (_disposed || _loading != null) return null;
-    final future = _player.loadAsync(path);
+    // Con la cola protegida, `load_add` añade al final y reproduce sin vaciar;
+    // sin ella, `load` deja la cola con esta única pista.
+    final future =
+        _queueProtected ? _player.loadAndPlayAsync(path) : _player.loadAsync(path);
     _loading = future;
     _refresh();
     final ok = await future;
@@ -110,6 +171,7 @@ class PlayerController extends ChangeNotifier {
     } else {
       _error = _player.lastError;
     }
+    _refreshQueue();
     _refresh();
     return ok ? null : _error;
   }
@@ -176,6 +238,98 @@ class PlayerController extends ChangeNotifier {
     if (_disposed) return;
     _player.toggleShuffle();
     _refresh();
+  }
+
+  // ---------------------------------------------------------------------
+  // Cola
+  // ---------------------------------------------------------------------
+
+  /// Salta a la pista `index` de la cola y la reproduce.
+  ///
+  /// Devuelve `false` si el índice no existe o el motor no pudo abrirla.
+  bool playAt(int index) {
+    if (_disposed) return false;
+    if (index < 0 || index >= _player.queueLength) return false;
+    final ok = _player.playAt(index);
+    if (ok) {
+      position.value = 0;
+      _error = null;
+      _loading = null;
+    } else {
+      _error = _player.lastError;
+    }
+    _refreshQueue();
+    _refresh();
+    return ok;
+  }
+
+  /// Añade `path` al final de la cola sin tocar lo que suena.
+  bool enqueue(String path) {
+    if (_disposed) return false;
+    final ok = _player.enqueue(path);
+    _refreshQueue();
+    return ok;
+  }
+
+  /// Inserta `path` justo después de la pista actual.
+  bool playNext(String path) {
+    if (_disposed) return false;
+    final ok = _player.playNext(path);
+    _refreshQueue();
+    return ok;
+  }
+
+  /// Añade al final y reproduce, conservando la cola.
+  Future<bool> loadAndPlay(String path) async {
+    if (_disposed) return false;
+    final ok = await _player.loadAndPlayAsync(path);
+    if (_disposed) return false;
+    if (ok) {
+      position.value = 0;
+      _error = null;
+    } else {
+      _error = _player.lastError;
+    }
+    _refreshQueue();
+    _refresh();
+    return ok;
+  }
+
+  bool moveQueueItem(int from, int to) {
+    if (_disposed) return false;
+    final ok = _player.moveQueueItem(from, to);
+    _refreshQueue();
+    return ok;
+  }
+
+  bool removeQueueItem(int index) {
+    if (_disposed) return false;
+    final ok = _player.removeQueueItem(index);
+    _refreshQueue();
+    _refresh();
+    return ok;
+  }
+
+  void clearQueue() {
+    if (_disposed) return;
+    _player.clearQueue();
+    position.value = 0;
+    _refreshQueue();
+    _refresh();
+  }
+
+  // ---------------------------------------------------------------------
+  // Biblioteca
+  // ---------------------------------------------------------------------
+
+  /// Escanea `root` de forma recursiva y cachea el resultado.
+  Future<List<LibraryTrack>> scanDirectory(String root) async {
+    if (_disposed) return const <LibraryTrack>[];
+    final tracks = await _player.scanDirectory(root);
+    if (_disposed) return tracks;
+    _libraryTracks = tracks;
+    notifyListeners();
+    return tracks;
   }
 
   void setBand(int index, double db) {

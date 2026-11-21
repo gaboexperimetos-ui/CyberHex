@@ -67,6 +67,23 @@ class FakePlayer implements PlayerApi {
   int repeatRequests = 0;
   int shuffleRequests = 0;
 
+  /// Cola simulada: rutas en orden. La mantiene este doble igual que el motor
+  /// mantiene la suya.
+  final List<String> queuePaths = <String>[];
+  int queueIndexValue = -1;
+
+  /// Biblioteca que devolverá [scanDirectory].
+  List<LibraryTrack> library = const <LibraryTrack>[];
+
+  int scanCalls = 0;
+  int playAtCalls = 0;
+  int enqueueCalls = 0;
+  int playNextCalls = 0;
+  int loadAndPlayCalls = 0;
+  int moveCalls = 0;
+  int removeCalls = 0;
+  int clearCalls = 0;
+
   int playCalls = 0;
   int pauseCalls = 0;
   int nextCalls = 0;
@@ -94,6 +111,11 @@ class FakePlayer implements PlayerApi {
     hasTrack = true;
     position = 0;
     if (duration == 0) duration = 120;
+    // ch_engine_load deja la cola con esta única pista.
+    queuePaths
+      ..clear()
+      ..add(path);
+    queueIndexValue = 0;
     return true;
   }
 
@@ -179,6 +201,137 @@ class FakePlayer implements PlayerApi {
 
   @override
   PlayerEvent? pollEvent() => _events.isEmpty ? null : _events.removeAt(0);
+
+  // ---------------------------------------------------------------------
+  // Cola
+  // ---------------------------------------------------------------------
+
+  @override
+  int get queueLength => queuePaths.length;
+
+  @override
+  int get queueIndex => queueIndexValue;
+
+  @override
+  List<QueueItem> get queueItems => List<QueueItem>.unmodifiable(<QueueItem>[
+        for (var i = 0; i < queuePaths.length; i++)
+          QueueItem(
+            path: queuePaths[i],
+            title: titleFromPath(queuePaths[i]),
+            artist: i == queueIndexValue ? artist : '',
+          ),
+      ]);
+
+  @override
+  bool playAt(int index) {
+    playAtCalls++;
+    if (index < 0 || index >= queuePaths.length) return false;
+    queueIndexValue = index;
+    title = titleFromPath(queuePaths[index]);
+    hasTrack = true;
+    position = 0;
+    isPlaying = true;
+    return true;
+  }
+
+  @override
+  bool enqueue(String path) {
+    enqueueCalls++;
+    queuePaths.add(path);
+    return true;
+  }
+
+  @override
+  bool playNext(String path) {
+    playNextCalls++;
+    final at = queueIndexValue < 0
+        ? queuePaths.length
+        : math.min(queueIndexValue + 1, queuePaths.length);
+    queuePaths.insert(at, path);
+    return true;
+  }
+
+  @override
+  Future<bool> loadAndPlayAsync(String path) async {
+    loadAndPlayCalls++;
+    loadedPaths.add(path);
+    if (!loadResult) return false;
+    queuePaths.add(path);
+    queueIndexValue = queuePaths.length - 1;
+    title = titleFromPath(path);
+    hasTrack = true;
+    position = 0;
+    if (duration == 0) duration = 120;
+    isPlaying = true;
+    return true;
+  }
+
+  @override
+  bool moveQueueItem(int from, int to) {
+    moveCalls++;
+    if (from < 0 || to < 0 || from >= queuePaths.length || to >= queuePaths.length) {
+      return false;
+    }
+    if (from == to) return true;
+    final item = queuePaths.removeAt(from);
+    queuePaths.insert(to, item);
+    if (queueIndexValue == from) {
+      queueIndexValue = to;
+    } else if (from < queueIndexValue && to >= queueIndexValue) {
+      queueIndexValue -= 1;
+    } else if (from > queueIndexValue && to <= queueIndexValue) {
+      queueIndexValue += 1;
+    }
+    return true;
+  }
+
+  @override
+  bool removeQueueItem(int index) {
+    removeCalls++;
+    if (index < 0 || index >= queuePaths.length) return false;
+    queuePaths.removeAt(index);
+    if (queuePaths.isEmpty) {
+      queueIndexValue = -1;
+      hasTrack = false;
+      isPlaying = false;
+    } else if (index < queueIndexValue) {
+      queueIndexValue -= 1;
+    } else if (index == queueIndexValue) {
+      queueIndexValue = math.min(index, queuePaths.length - 1);
+      title = titleFromPath(queuePaths[queueIndexValue]);
+    }
+    return true;
+  }
+
+  @override
+  void clearQueue() {
+    clearCalls++;
+    queuePaths.clear();
+    queueIndexValue = -1;
+    hasTrack = false;
+    isPlaying = false;
+    duration = 0;
+    position = 0;
+  }
+
+  @override
+  int importQueue(String playlistPath) => 0;
+
+  @override
+  bool exportQueue(String playlistPath) => false;
+
+  // ---------------------------------------------------------------------
+  // Biblioteca
+  // ---------------------------------------------------------------------
+
+  @override
+  int get libraryRemoved => 0;
+
+  @override
+  Future<List<LibraryTrack>> scanDirectory(String root) async {
+    scanCalls++;
+    return library;
+  }
 
   @override
   void dispose() {
