@@ -36,7 +36,7 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **20 295 líneas Dart** + **5 565 de tests** (226 casos). Estado
+- App: **20 295 líneas Dart** + **5 682 de tests** (224 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
@@ -108,7 +108,7 @@ lib/                        app Flutter                                 20 295 l
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       226 tests Dart                             5 565 líneas
+test/                       224 tests Dart                             5 682 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
