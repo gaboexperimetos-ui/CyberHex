@@ -53,7 +53,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
             ),
             Text(
               '${gains.length} bandas · 20 Hz – 20 kHz · ±18 dB',
-              style: TextStyle(fontSize: 12, color: chMuted),
+              style: const TextStyle(fontSize: 12, color: chMuted),
             ),
             const SizedBox(height: 10),
             SizedBox(
@@ -84,7 +84,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
             const SizedBox(height: 6),
             Text(
               'Desliza en horizontal para recorrer todo el espectro.',
-              style: TextStyle(fontSize: 11, color: chMuted),
+              style: const TextStyle(fontSize: 11, color: chMuted),
             ),
           ],
         ),
