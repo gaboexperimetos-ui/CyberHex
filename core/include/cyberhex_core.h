@@ -31,6 +31,16 @@ const char* ch_engine_output_device_name(int32_t index);
 int32_t     ch_engine_output_device(ch_engine* engine);
 int32_t     ch_engine_set_output_device(ch_engine* engine, int32_t index);
 
+/* Lista de reproducción y avance gapless. */
+int32_t ch_engine_queue_add(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_queue_count(ch_engine* engine);
+int32_t ch_engine_queue_index(ch_engine* engine);
+int32_t ch_engine_queue_clear(ch_engine* engine);
+int32_t ch_engine_next(ch_engine* engine);
+int32_t ch_engine_previous(ch_engine* engine);
+int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);
+int32_t ch_engine_gapless(ch_engine* engine);
+
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);

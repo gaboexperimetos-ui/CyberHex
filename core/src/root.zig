@@ -10,6 +10,7 @@ const RenderFn = *const fn (?*anyopaque, [*]f32, u32) callconv(.c) void;
 const RING_FRAMES: usize = SAMPLE_RATE * 4; // 4 segundos de margen
 const SCRATCH_FRAMES: usize = 4096;
 const NO_SEEK: usize = std.math.maxInt(usize);
+const MAX_SEGMENTS: usize = 256;
 
 const ch_decoder = opaque {};
 
@@ -64,13 +65,55 @@ fn parseLeadingFloat(text: []const u8) ?f32 {
     return std.fmt.parseFloat(f32, text[0..end]) catch null;
 }
 
+fn copyCString(dst: *[256]u8, src: [*c]const u8) void {
+    dst[0] = 0;
+    if (src == null) return;
+    const s = std.mem.span(src);
+    const n = @min(s.len, dst.len - 1);
+    @memcpy(dst[0..n], s[0..n]);
+    dst[n] = 0;
+}
+
 const Ring = struct {
     buf: []f32 = undefined,
     cap: usize = 0,
-    read: usize = 0, // frames consumidos
-    write: usize = 0, // frames escritos
-    discard: usize = 0, // frames que el lector debe saltar
+    read: usize = 0,
+    write: usize = 0,
+    discard: usize = 0,
 };
+
+const SpinLock = struct {
+    state: std.atomic.Mutex = .unlocked,
+
+    fn lock(self: *SpinLock) void {
+        while (!self.state.tryLock()) std.Thread.yield() catch {};
+    }
+
+    fn tryLock(self: *SpinLock) bool {
+        return self.state.tryLock();
+    }
+
+    fn unlock(self: *SpinLock) void {
+        self.state.unlock();
+    }
+};
+
+const Segment = struct {
+    start: usize = 0,
+    end: usize = 0,
+    index: usize = 0,
+    title: [256]u8 = @splat(0),
+    artist: [256]u8 = @splat(0),
+    album: [256]u8 = @splat(0),
+    rg_gain: f32 = 1,
+    rg_gain_db: f32 = 0,
+    rg_peak: f32 = 0,
+    cover: ?[]u8 = null,
+};
+
+threadlocal var tls_title: [256]u8 = undefined;
+threadlocal var tls_artist: [256]u8 = undefined;
+threadlocal var tls_album: [256]u8 = undefined;
 
 pub const Engine = struct {
     allocator: Allocator,
@@ -89,19 +132,23 @@ pub const Engine = struct {
     playing: bool = false,
     eof: bool = false,
     played: usize = 0,
-    frames: usize = 0,
     seek_req: usize = NO_SEEK,
+    skip_req: usize = NO_SEEK,
     volume_bits: u32 = @bitCast(@as(f32, 1)),
     rg_enabled: bool = true,
-    rg_gain: f32 = 1,
-    rg_gain_db: f32 = 0,
-    rg_peak: f32 = 0,
     equalizer: eq.Equalizer = .{},
 
-    title: [256]u8 = @splat(0),
-    artist: [256]u8 = @splat(0),
-    album: [256]u8 = @splat(0),
-    cover: ?[]u8 = null,
+    segments: [MAX_SEGMENTS]Segment = undefined,
+    seg_count: usize = 0,
+    running_end: usize = 0,
+    seg_lock: SpinLock = .{},
+    last_rg: f32 = 1,
+
+    playlist: std.ArrayListUnmanaged([:0]u8) = .empty,
+    queue_index: usize = 0,
+    list_mutex: SpinLock = .{},
+    gapless: bool = true,
+    retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     err: [256]u8 = @splat(0),
 
@@ -115,30 +162,117 @@ pub const Engine = struct {
         self.err[0] = 0;
     }
 
+    fn fail(self: *Engine, msg: []const u8, code: i32) i32 {
+        self.setError(msg);
+        return code;
+    }
+
     fn volume(self: *const Engine) f32 {
         return @bitCast(@atomicLoad(u32, &self.volume_bits, .monotonic));
     }
 
-    fn loadReplayGain(self: *Engine, d: *ch_decoder) void {
-        self.rg_gain = 1;
-        self.rg_gain_db = 0;
-        self.rg_peak = 0;
-
-        const db = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_GAIN"))) orelse 0;
-        self.rg_gain_db = db;
-        var linear = std.math.pow(f32, 10, db / 20);
-
-        const peak = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_PEAK"))) orelse 0;
-        self.rg_peak = @max(peak, 0);
-        if (self.rg_peak > 0 and linear * self.rg_peak > 1) {
-            linear = 1 / self.rg_peak;
+    fn findSegment(self: *Engine, frame: usize) ?usize {
+        var i = self.seg_count;
+        while (i > 0) {
+            i -= 1;
+            if (frame >= self.segments[i].start) return i;
         }
-        self.rg_gain = linear;
+        return if (self.seg_count > 0) 0 else null;
     }
 
-    fn fail(self: *Engine, msg: []const u8, code: i32) i32 {
-        self.setError(msg);
-        return code;
+    fn trimAfter(self: *Engine, pos: usize) void {
+        if (pos + 1 >= self.seg_count) return;
+        for (self.segments[pos + 1 .. self.seg_count]) |*s| {
+            if (s.cover) |c| self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            s.* = .{};
+        }
+        self.seg_count = pos + 1;
+    }
+
+    fn resetSegments(self: *Engine) void {
+        self.seg_lock.lock();
+        for (self.segments[0..self.seg_count]) |*s| {
+            if (s.cover) |c| self.retired_covers.append(self.allocator, c) catch self.allocator.free(c);
+            s.* = .{};
+        }
+        self.seg_count = 0;
+        self.running_end = 0;
+        self.seg_lock.unlock();
+    }
+
+    fn addSegment(self: *Engine, index: usize, d: *ch_decoder) bool {
+        if (self.seg_count >= MAX_SEGMENTS) return false;
+
+        var seg = Segment{};
+        seg.index = index;
+
+        const seconds = ch_decode_duration(d);
+        const frames_f: f64 = if (seconds > 0) seconds * SAMPLE_RATE else 0;
+        var frames: usize = if (frames_f > 0) @intFromFloat(frames_f) else 0;
+        if (frames == 0) frames = SAMPLE_RATE;
+
+        copyCString(&seg.title, ch_decode_title(d));
+        copyCString(&seg.artist, ch_decode_artist(d));
+        copyCString(&seg.album, ch_decode_album(d));
+
+        const db = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_GAIN"))) orelse 0;
+        seg.rg_gain_db = db;
+        var linear = std.math.pow(f32, 10, db / 20);
+        const peak = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "REPLAYGAIN_TRACK_PEAK"))) orelse 0;
+        seg.rg_peak = @max(peak, 0);
+        if (seg.rg_peak > 0 and linear * seg.rg_peak > 1) linear = 1 / seg.rg_peak;
+        seg.rg_gain = linear;
+
+        var size: u64 = 0;
+        const ptr = ch_decode_cover(d, &size);
+        if (ptr != null and size > 0) {
+            const n: usize = @intCast(size);
+            if (self.allocator.alloc(u8, n)) |copy| {
+                @memcpy(copy, ptr[0..n]);
+                seg.cover = copy;
+            } else |_| {}
+        }
+
+        self.seg_lock.lock();
+        seg.start = self.running_end;
+        seg.end = seg.start + frames;
+        self.segments[self.seg_count] = seg;
+        self.seg_count += 1;
+        self.running_end = seg.end;
+        self.seg_lock.unlock();
+        return true;
+    }
+
+    fn audibleIndex(self: *Engine) ?usize {
+        self.seg_lock.lock();
+        defer self.seg_lock.unlock();
+        const p = @atomicLoad(usize, &self.played, .acquire);
+        if (self.findSegment(p)) |pos| return self.segments[pos].index;
+        return null;
+    }
+
+    fn audibleGain(self: *Engine) f32 {
+        if (self.seg_lock.tryLock()) {
+            defer self.seg_lock.unlock();
+            const p = @atomicLoad(usize, &self.played, .acquire);
+            if (self.findSegment(p)) |pos| {
+                self.last_rg = self.segments[pos].rg_gain;
+                return self.last_rg;
+            }
+            return 1;
+        }
+        return self.last_rg;
+    }
+
+    fn copyMetaField(self: *Engine, out: *[256]u8, comptime field: []const u8) void {
+        self.seg_lock.lock();
+        defer self.seg_lock.unlock();
+        out[0] = 0;
+        const p = @atomicLoad(usize, &self.played, .acquire);
+        if (self.findSegment(p)) |pos| {
+            const src = @field(self.segments[pos], field);
+            @memcpy(out[0..], src[0..]);
+        }
     }
 
     fn writeRingAt(self: *Engine, start_frame: usize, data: []const f32) void {
@@ -181,6 +315,7 @@ pub const Engine = struct {
         while (done < total) {
             if (@atomicLoad(bool, &self.stop, .acquire)) break;
             if (@atomicLoad(usize, &self.seek_req, .acquire) != NO_SEEK) break;
+            if (@atomicLoad(usize, &self.skip_req, .acquire) != NO_SEEK) break;
             if (!@atomicLoad(bool, &self.playing, .acquire)) break;
             const w = @atomicLoad(usize, &self.ring.write, .acquire);
             const r = @atomicLoad(usize, &self.ring.read, .acquire);
@@ -223,14 +358,107 @@ pub const Engine = struct {
         return false;
     }
 
+    fn openDecoderOnly(self: *Engine, index: usize) bool {
+        self.list_mutex.lock();
+        if (index >= self.playlist.items.len) {
+            self.list_mutex.unlock();
+            return false;
+        }
+        const path = self.playlist.items[index];
+        const d = ch_decode_open(path.ptr, SAMPLE_RATE, CHANNELS) orelse {
+            self.list_mutex.unlock();
+            return false;
+        };
+        const old = self.decoder;
+        self.decoder = d;
+        self.queue_index = index;
+        self.list_mutex.unlock();
+
+        if (old) |o| ch_decode_close(o);
+        return true;
+    }
+
+    fn beginAt(self: *Engine, index: usize) i32 {
+        self.resetSegments();
+        if (!self.openDecoderOnly(index)) {
+            const msg = std.mem.span(ch_decode_last_error());
+            return self.fail(if (msg.len == 0) "no se pudo decodificar el archivo" else msg, -2);
+        }
+        const d = self.decoder.?;
+        _ = self.addSegment(index, d);
+        @atomicStore(usize, &self.played, 0, .release);
+        @atomicStore(bool, &self.eof, false, .release);
+        return 0;
+    }
+
+    fn openNextAuto(self: *Engine) bool {
+        self.list_mutex.lock();
+        const next = self.queue_index + 1;
+        if (next >= self.playlist.items.len) {
+            self.list_mutex.unlock();
+            return false;
+        }
+        const path = self.playlist.items[next];
+        const d = ch_decode_open(path.ptr, SAMPLE_RATE, CHANNELS) orelse {
+            self.list_mutex.unlock();
+            return false;
+        };
+        const old = self.decoder;
+        self.decoder = d;
+        self.queue_index = next;
+        self.list_mutex.unlock();
+
+        if (old) |o| ch_decode_close(o);
+        _ = self.addSegment(next, d);
+        @atomicStore(bool, &self.eof, false, .release);
+        @atomicStore(bool, &self.playing, true, .release);
+        return true;
+    }
+
     fn doSeek(self: *Engine, target: u64) void {
         const d = self.decoder orelse return;
+        const p = @atomicLoad(usize, &self.played, .acquire);
+
+        var seg_pos: usize = 0;
+        var seg_start: usize = 0;
+        var seg_end: usize = 0;
+        var seg_index: usize = 0;
+        var found = false;
+        self.seg_lock.lock();
+        if (self.findSegment(p)) |pos| {
+            const s = &self.segments[pos];
+            seg_pos = pos;
+            seg_start = s.start;
+            seg_end = s.end;
+            seg_index = s.index;
+            found = true;
+        }
+        self.seg_lock.unlock();
+
+        if (!found) {
+            self.flushRing();
+            _ = ch_decode_seek_frame(d, target);
+            @atomicStore(bool, &self.eof, false, .release);
+            @atomicStore(usize, &self.played, @intCast(target), .release);
+            return;
+        }
+
+        if (self.queue_index != seg_index) {
+            if (!self.openDecoderOnly(seg_index)) return;
+        }
+        const dd = self.decoder orelse return;
         self.flushRing();
-        _ = ch_decode_seek_frame(d, target);
+        _ = ch_decode_seek_frame(dd, target);
+
+        const span = seg_end - seg_start;
+        const t: usize = @min(@as(usize, @intCast(target)), span);
+        @atomicStore(usize, &self.played, seg_start + t, .release);
         @atomicStore(bool, &self.eof, false, .release);
-        const frames = @atomicLoad(usize, &self.frames, .acquire);
-        const clamped = if (frames > 0) @min(target, @as(u64, frames)) else target;
-        @atomicStore(usize, &self.played, @intCast(clamped), .release);
+
+        self.seg_lock.lock();
+        self.trimAfter(seg_pos);
+        self.running_end = seg_end;
+        self.seg_lock.unlock();
     }
 
     fn render(self: *Engine, out: []f32) void {
@@ -247,9 +475,7 @@ pub const Engine = struct {
             @atomicStore(usize, &self.ring.read, r +% skip, .release);
         }
 
-        if (!@atomicLoad(bool, &self.playing, .acquire)) {
-            return;
-        }
+        if (!@atomicLoad(bool, &self.playing, .acquire)) return;
 
         const r = @atomicLoad(usize, &self.ring.read, .acquire);
         const w = @atomicLoad(usize, &self.ring.write, .acquire);
@@ -265,30 +491,23 @@ pub const Engine = struct {
         const produced = take * CHANNELS;
         self.equalizer.process(out[0..produced], take);
 
-        const vol = self.volume();
-        var gain = vol;
-        if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) gain *= self.rg_gain;
+        var gain = self.volume();
+        if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) gain *= self.audibleGain();
         if (gain != 1) {
             for (out[0..produced]) |*s| s.* *= gain;
         }
 
-        if (take == 0 and @atomicLoad(bool, &self.eof, .acquire)) {
-            @atomicStore(bool, &self.playing, false, .release);
+        if (take == 0) {
+            const seeking = @atomicLoad(usize, &self.seek_req, .acquire) != NO_SEEK;
+            if (!seeking and @atomicLoad(bool, &self.eof, .acquire)) {
+                self.seg_lock.lock();
+                const last_end = if (self.seg_count > 0) self.segments[self.seg_count - 1].end else 0;
+                self.seg_lock.unlock();
+                if (@atomicLoad(usize, &self.played, .acquire) >= last_end) {
+                    @atomicStore(bool, &self.playing, false, .release);
+                }
+            }
         }
-    }
-
-    fn storeCover(self: *Engine, d: *ch_decoder) void {
-        if (self.cover) |old| {
-            self.allocator.free(old);
-            self.cover = null;
-        }
-        var size: u64 = 0;
-        const ptr = ch_decode_cover(d, &size);
-        if (ptr == null or size == 0) return;
-        const n: usize = @intCast(size);
-        const copy = self.allocator.alloc(u8, n) catch return;
-        @memcpy(copy, ptr[0..n]);
-        self.cover = copy;
     }
 };
 
@@ -298,6 +517,15 @@ fn decoderLoop(self: *Engine) void {
         if (target != NO_SEEK) {
             @atomicStore(bool, &self.idle, false, .release);
             self.doSeek(@intCast(target));
+            continue;
+        }
+        const skip = @atomicRmw(usize, &self.skip_req, .Xchg, NO_SEEK, .acq_rel);
+        if (skip != NO_SEEK) {
+            @atomicStore(bool, &self.idle, false, .release);
+            const was_playing = @atomicLoad(bool, &self.playing, .acquire);
+            self.flushRing();
+            _ = self.beginAt(skip);
+            if (was_playing) @atomicStore(bool, &self.playing, true, .release);
             continue;
         }
         if (!@atomicLoad(bool, &self.playing, .acquire)) {
@@ -328,6 +556,9 @@ fn decoderLoop(self: *Engine) void {
 
         const got = ch_decode_read(d, self.scratch.ptr, self.scratch_frames);
         if (got == 0) {
+            if (@atomicLoad(bool, &self.gapless, .acquire) and self.openNextAuto()) {
+                continue;
+            }
             @atomicStore(bool, &self.eof, true, .release);
             continue;
         }
@@ -341,26 +572,23 @@ fn renderAudio(user: ?*anyopaque, out: [*]f32, frames: u32) callconv(.c) void {
     self.render(out[0 .. @as(usize, frames) * CHANNELS]);
 }
 
-fn copyCString(dst: *[256]u8, src: [*c]const u8) void {
-    dst[0] = 0;
-    if (src == null) return;
-    const s = std.mem.span(src);
-    const n = @min(s.len, dst.len - 1);
-    @memcpy(dst[0..n], s[0..n]);
-    dst[n] = 0;
-}
-
 fn destroyEngine(e: *Engine) void {
     if (e.audio) |audio| ch_audio_destroy(audio);
     if (e.decoder) |d| ch_decode_close(d);
-    if (e.cover) |c| e.allocator.free(c);
+    for (e.segments[0..e.seg_count]) |*s| {
+        if (s.cover) |c| e.allocator.free(c);
+    }
+    for (e.retired_covers.items) |c| e.allocator.free(c);
+    e.retired_covers.deinit(e.allocator);
+    for (e.playlist.items) |p| e.allocator.free(p);
+    e.playlist.deinit(e.allocator);
     e.allocator.free(e.scratch);
     e.allocator.free(e.ring.buf);
     e.allocator.destroy(e);
 }
 
 export fn ch_core_version() [*c]const u8 {
-    return @ptrCast("0.2.0");
+    return @ptrCast("0.3.0");
 }
 
 export fn ch_core_last_error() [*c]const u8 {
@@ -437,45 +665,32 @@ export fn ch_engine_load(self: ?*Engine, path: [*c]const u8) i32 {
 
     @atomicStore(bool, &e.playing, false, .release);
     @atomicStore(usize, &e.seek_req, NO_SEEK, .release);
-    if (!e.waitIdle(2000)) {
-        return e.fail("el motor de audio no respondió", -3);
-    }
-
-    if (e.decoder) |old| {
-        ch_decode_close(old);
-        e.decoder = null;
-    }
-
-    const d = ch_decode_open(p, SAMPLE_RATE, CHANNELS) orelse {
-        const msg = std.mem.span(ch_decode_last_error());
-        return e.fail(if (msg.len == 0) "no se pudo decodificar el archivo" else msg, -2);
-    };
+    @atomicStore(usize, &e.skip_req, NO_SEEK, .release);
+    if (!e.waitIdle(2000)) return e.fail("el motor de audio no respondió", -3);
 
     e.flushRing();
 
-    e.decoder = d;
-    const seconds = ch_decode_duration(d);
-    const frames_f: f64 = if (seconds > 0) seconds * SAMPLE_RATE else 0;
-    const frames: usize = if (frames_f > 0) @intFromFloat(frames_f) else 0;
-    @atomicStore(usize, &e.frames, frames, .release);
-    @atomicStore(usize, &e.played, 0, .release);
-    @atomicStore(bool, &e.eof, false, .release);
+    e.list_mutex.lock();
+    clearPlaylist(e);
+    const added = addPath(e, std.mem.span(p));
+    e.list_mutex.unlock();
+    if (added == null) return e.fail("sin memoria para la lista de reproducción", -2);
 
-    copyCString(&e.title, ch_decode_title(d));
-    copyCString(&e.artist, ch_decode_artist(d));
-    copyCString(&e.album, ch_decode_album(d));
-    e.loadReplayGain(d);
-    e.storeCover(d);
-
-    return 0;
+    return e.beginAt(0);
 }
 
 export fn ch_engine_play(self: ?*Engine) i32 {
     const e = self orelse return -1;
     if (e.decoder == null) return e.fail("no hay pista cargada", -2);
-    const frames = @atomicLoad(usize, &e.frames, .acquire);
+
     const played = @atomicLoad(usize, &e.played, .acquire);
-    if (frames > 0 and played >= frames) {
+    var at_end = false;
+    e.seg_lock.lock();
+    if (e.seg_count > 0) {
+        at_end = played >= e.segments[e.seg_count - 1].end;
+    }
+    e.seg_lock.unlock();
+    if (at_end) {
         @atomicStore(usize, &e.seek_req, 0, .release);
         @atomicStore(bool, &e.eof, false, .release);
     }
@@ -489,15 +704,112 @@ export fn ch_engine_pause(self: ?*Engine) i32 {
     return 0;
 }
 
+fn addPath(self: *Engine, path: []const u8) ?usize {
+    const copy = self.allocator.dupeSentinel(u8, path, 0) catch return null;
+    self.playlist.append(self.allocator, copy) catch {
+        self.allocator.free(copy);
+        return null;
+    };
+    return self.playlist.items.len - 1;
+}
+
+fn clearPlaylist(self: *Engine) void {
+    for (self.playlist.items) |p| self.allocator.free(p);
+    self.playlist.clearRetainingCapacity();
+    self.queue_index = 0;
+}
+
+export fn ch_engine_queue_add(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    const p = path orelse return -2;
+    e.list_mutex.lock();
+    const index = addPath(e, std.mem.span(p));
+    e.list_mutex.unlock();
+    if (index) |i| return @intCast(i);
+    return e.fail("sin memoria para la lista de reproducción", -2);
+}
+
+export fn ch_engine_queue_count(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    return @intCast(e.playlist.items.len);
+}
+
+export fn ch_engine_queue_index(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    if (e.audibleIndex()) |i| return @intCast(i);
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    return @intCast(e.queue_index);
+}
+
+export fn ch_engine_queue_clear(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    @atomicStore(bool, &e.playing, false, .release);
+    @atomicStore(usize, &e.seek_req, NO_SEEK, .release);
+    @atomicStore(usize, &e.skip_req, NO_SEEK, .release);
+    _ = e.waitIdle(2000);
+    e.flushRing();
+    e.list_mutex.lock();
+    if (e.decoder) |d| {
+        ch_decode_close(d);
+        e.decoder = null;
+    }
+    clearPlaylist(e);
+    e.list_mutex.unlock();
+    e.resetSegments();
+    @atomicStore(usize, &e.played, 0, .release);
+    @atomicStore(bool, &e.eof, true, .release);
+    return 0;
+}
+
+export fn ch_engine_next(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    const current = e.audibleIndex() orelse e.queue_index;
+    const target = current + 1;
+    e.list_mutex.lock();
+    const ok = target < e.playlist.items.len;
+    e.list_mutex.unlock();
+    if (!ok) return e.fail("no hay pista siguiente", -2);
+    @atomicStore(usize, &e.skip_req, target, .release);
+    @atomicStore(bool, &e.playing, true, .release);
+    return 0;
+}
+
+export fn ch_engine_previous(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    const current = e.audibleIndex() orelse e.queue_index;
+    if (current == 0) return e.fail("no hay pista anterior", -2);
+    @atomicStore(usize, &e.skip_req, current - 1, .release);
+    @atomicStore(bool, &e.playing, true, .release);
+    return 0;
+}
+
+export fn ch_engine_set_gapless(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(bool, &e.gapless, enabled != 0, .release);
+    return 0;
+}
+
+export fn ch_engine_gapless(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (@atomicLoad(bool, &e.gapless, .acquire)) 1 else 0;
+}
+
 export fn ch_engine_seek(self: ?*Engine, seconds: f64) i32 {
     const e = self orelse return -1;
     if (e.decoder == null) return e.fail("no hay pista cargada", -2);
-    const frames = @atomicLoad(usize, &e.frames, .acquire);
+
+    const played = @atomicLoad(usize, &e.played, .acquire);
+    var span: usize = 0;
+    e.seg_lock.lock();
+    if (e.findSegment(played)) |pos| span = e.segments[pos].end - e.segments[pos].start;
+    e.seg_lock.unlock();
+
     const target_f = @max(0, seconds) * SAMPLE_RATE;
     var clamped = target_f;
-    if (frames > 0) {
-        clamped = @min(target_f, @as(f64, @floatFromInt(frames)));
-    }
+    if (span > 0) clamped = @min(target_f, @as(f64, @floatFromInt(span)));
     const frame: usize = @intFromFloat(clamped);
     @atomicStore(usize, &e.seek_req, frame, .release);
     return 0;
@@ -518,12 +830,20 @@ export fn ch_engine_set_replaygain(self: ?*Engine, enabled: i32) i32 {
 
 export fn ch_engine_replaygain_gain_db(self: ?*Engine) f32 {
     const e = self orelse return 0;
-    return e.rg_gain_db;
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    if (e.findSegment(p)) |pos| return e.segments[pos].rg_gain_db;
+    return 0;
 }
 
 export fn ch_engine_replaygain_peak(self: ?*Engine) f32 {
     const e = self orelse return 0;
-    return e.rg_peak;
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    if (e.findSegment(p)) |pos| return e.segments[pos].rg_peak;
+    return 0;
 }
 
 export fn ch_engine_output_device_count() i32 {
@@ -591,10 +911,6 @@ export fn ch_engine_set_band_gain(self: ?*Engine, band: i32, db: f32) i32 {
     const e = self orelse return -1;
     if (band < 0 or band >= eq.BAND_COUNT) return e.fail("banda de EQ fuera de rango", -2);
     var gains: [eq.BAND_COUNT]f32 = @splat(0);
-    var i: usize = 0;
-    while (i < eq.BAND_COUNT) : (i += 1) {
-        gains[i] = 0;
-    }
     gains[@intCast(band)] = db;
     e.equalizer.setGains(&gains);
     return 0;
@@ -602,12 +918,28 @@ export fn ch_engine_set_band_gain(self: ?*Engine, band: i32, db: f32) i32 {
 
 export fn ch_engine_position(self: ?*Engine) f64 {
     const e = self orelse return 0;
-    return @as(f64, @floatFromInt(@atomicLoad(usize, &e.played, .acquire))) / SAMPLE_RATE;
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    if (e.findSegment(p)) |pos| {
+        const s = &e.segments[pos];
+        if (p >= s.start and p <= s.end) {
+            return @as(f64, @floatFromInt(p - s.start)) / SAMPLE_RATE;
+        }
+    }
+    return 0;
 }
 
 export fn ch_engine_duration(self: ?*Engine) f64 {
     const e = self orelse return 0;
-    return @as(f64, @floatFromInt(@atomicLoad(usize, &e.frames, .acquire))) / SAMPLE_RATE;
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    if (e.findSegment(p)) |pos| {
+        const s = &e.segments[pos];
+        return @as(f64, @floatFromInt(s.end - s.start)) / SAMPLE_RATE;
+    }
+    return 0;
 }
 
 export fn ch_engine_sample_rate(self: ?*Engine) f64 {
@@ -627,17 +959,20 @@ export fn ch_engine_is_playing(self: ?*Engine) i32 {
 
 export fn ch_engine_title(self: ?*Engine) [*c]const u8 {
     const e = self orelse return @ptrCast("");
-    return @ptrCast(&e.title);
+    e.copyMetaField(&tls_title, "title");
+    return @ptrCast(&tls_title);
 }
 
 export fn ch_engine_artist(self: ?*Engine) [*c]const u8 {
     const e = self orelse return @ptrCast("");
-    return @ptrCast(&e.artist);
+    e.copyMetaField(&tls_artist, "artist");
+    return @ptrCast(&tls_artist);
 }
 
 export fn ch_engine_album(self: ?*Engine) [*c]const u8 {
     const e = self orelse return @ptrCast("");
-    return @ptrCast(&e.album);
+    e.copyMetaField(&tls_album, "album");
+    return @ptrCast(&tls_album);
 }
 
 export fn ch_engine_cover(self: ?*Engine, size: ?*u64) [*c]const u8 {
@@ -645,9 +980,14 @@ export fn ch_engine_cover(self: ?*Engine, size: ?*u64) [*c]const u8 {
         if (size) |s| s.* = 0;
         return null;
     };
-    if (e.cover) |cover| {
-        if (size) |s| s.* = @intCast(cover.len);
-        return @ptrCast(cover.ptr);
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    if (e.findSegment(p)) |pos| {
+        if (e.segments[pos].cover) |cover| {
+            if (size) |s| s.* = @intCast(cover.len);
+            return @ptrCast(cover.ptr);
+        }
     }
     if (size) |s| s.* = 0;
     return null;

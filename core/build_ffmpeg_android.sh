@@ -56,14 +56,14 @@ for abi in "${TARGETS[@]}"; do
       --sysroot="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot" \
       --enable-static --disable-shared \
       --disable-programs --disable-doc \
-      --disable-avdevice --disable-swscale --disable-postproc --disable-avfilter \
+      --disable-avdevice --disable-swscale --disable-avfilter \
       --disable-network --disable-encoders --disable-muxers --disable-bsfs \
       --disable-indevs --disable-outdevs --disable-devices \
       --disable-autodetect --disable-iconv --disable-zlib --disable-bzlib \
       --disable-lzma --disable-xlib --disable-libxcb \
-      --disable-symver >/dev/null
-    make -j"$JOBS" >/dev/null
-    make install >/dev/null
+      --disable-symver >configure.log 2>&1
+    make -j"$JOBS" >build.log 2>&1
+    make install >>build.log 2>&1
   )
   echo "==> listo $abi -> $PREFIX/lib"
 done

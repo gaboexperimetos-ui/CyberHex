@@ -52,4 +52,7 @@ app.*.map.json
 /core/zig-out/
 /android/app/src/main/jniLibs/
 /android/local.properties
+/core/third_party/build-*/
+/core/third_party/ffmpeg-android/
+/core/third_party/ffmpeg.tar.xz
 
