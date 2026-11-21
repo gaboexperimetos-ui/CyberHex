@@ -8,6 +8,7 @@ import 'core/player_controller.dart';
 import 'core/session_store.dart';
 import 'core/theme_controller.dart';
 import 'platform/external_file_channel.dart';
+import 'platform/desktop_channel.dart';
 import 'platform/media_session_channel.dart';
 import 'theme.dart';
 import 'ui/core_error_screen.dart';
@@ -37,6 +38,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
   PlayerController? _controller;
   MediaSessionChannel? _mediaSession;
   ExternalFileChannel? _externalFiles;
+  DesktopChannel? _desktop;
   SessionKeeper? _session;
   late final ThemeController _theme = ThemeController();
   bool _ownsController = false;
@@ -84,6 +86,15 @@ class _CyberHexAppState extends State<CyberHexApp> {
   void _attachPlatformChannels(PlayerController controller) {
     _attachMediaSession(controller);
     _attachExternalFiles(controller);
+    _attachDesktop(controller);
+  }
+
+  /// Solo en Linux: MPRIS2, siempre encima, notificaciones de escritorio y el
+  /// drag & drop que captura GTK. En Windows/macOS el canal no existe y el
+  /// puente se queda mudo (todo `MissingPluginException`, ignorado).
+  void _attachDesktop(PlayerController controller) {
+    if (!DesktopChannel.isSupported) return;
+    _desktop = DesktopChannel(controller);
   }
 
   /// Solo en Android: el servicio de medios pinta la notificación y reenvía
@@ -130,6 +141,8 @@ class _CyberHexAppState extends State<CyberHexApp> {
     _theme.removeListener(_pushMediaSettings);
     _mediaSession?.dispose();
     _mediaSession = null;
+    _desktop?.dispose();
+    _desktop = null;
     if (_ownsController) {
       _controller?.dispose();
     }
@@ -148,7 +161,11 @@ class _CyberHexAppState extends State<CyberHexApp> {
         theme: _theme.themeData,
         home: controller == null
             ? CoreErrorScreen(message: _error ?? 'no se pudo iniciar el motor')
-            : PlayerPage(controller: controller, theme: _theme),
+            : PlayerPage(
+                controller: controller,
+                theme: _theme,
+                desktop: _desktop,
+              ),
       ),
     );
   }

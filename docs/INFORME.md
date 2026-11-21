@@ -36,7 +36,7 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **16 321 líneas Dart** + **4 619 de tests** (187 casos). Estado
+- App: **16 909 líneas Dart** + **4 941 de tests** (198 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
@@ -71,7 +71,7 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                 16 321 líneas
+lib/                        app Flutter                                 16 909 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
@@ -99,7 +99,7 @@ lib/                        app Flutter                                 16 321 l
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       187 tests Dart                             4 619 líneas
+test/                       198 tests Dart                             4 941 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -485,6 +485,27 @@ cd packaging/linux && makepkg -si            # paquete nativo con .desktop e ico
   `$ORIGIN/lib`). Vigila `src/`, `include/`, `vendor/`, `build.zig(.zon)`.
 - `-DCYBERHEX_DECODER=miniaudio|ffmpeg|auto` desde CMake.
 
+#### Fase 7A (pedido 8): escritorio de verdad, sin paquetes nuevos
+
+| Pieza | Qué hace |
+|---|---|
+| `linux/runner/my_application.cc` (594) | `G_APPLICATION_HANDLES_COMMAND_LINE` con instancia única: `cyberhex archivo.flac` (o «Abrir con CyberHex») llega al canal `cyberhex/intent` (`onOpenFile`), y en arranque en frío sale por `getInitialFile`. La segunda ejecución se reenvía por D-Bus a la primera. `GtkWindow` acepta `text/uri-list`/`text/plain` y manda las rutas a `cyberhex/desktop` (`onDropPaths`). |
+| `linux/runner/mpris_bridge.{h,cc}` (65 + 598) | `org.mpris.MediaPlayer2.cyberhex` por GDBus: `PlayPause`, `Play`, `Pause`, `Stop`, `Next`, `Previous`, `Seek`, `SetPosition`, `OpenUri`, `Raise`, `Quit`, propiedades (`PlaybackStatus`, `Metadata` con `mpris:length`, `LoopStatus`, `Shuffle`, `Volume`, `Position`, `Can*`) y señal `Seeked`. Sin sesión de D-Bus no se registra nada y la app sigue igual. |
+| `lib/platform/desktop_channel.dart` (276) | Lado Dart: empuja metadatos/estado (µs, límite de 1 Hz en la posición), recibe el transporte (`play`…`setShuffle`), expone `setAlwaysOnTop`, `notifyTrack` (`GNotification`) y `Stream<List<String>> drops`. Fuera de Linux todo es `MissingPluginException` ignorada. |
+| `PlayerPage` | Atajos: **espacio** play/pausa, **←/→** ±5 s, **Shift+←/→** anterior/siguiente, **↑/↓** volumen ±5 %, **M** silencio, **L** repetición, **S** aleatorio (con `Focus(autofocus)` para que funcionen sin tocar nada). Drag & drop: la primera pista suena, las demás se encolan y las carpetas se escanean con el motor. |
+| `SettingsPage` | Sección **«Salida de audio y escritorio»**: dispositivo de salida (`outputDevices`/`setOutputDevice`), salida **S16 con dither TPDF**, ventana siempre encima y notificación de la pista actual. |
+
+Decisiones y límites:
+
+- **Las teclas multimedia globales no se capturan con `XGrabKey`**: eso rompe
+  Wayland y pelea con el entorno. Se publican por **MPRIS**, que es el canal que
+  usan GNOME, KDE, `playerctl` y los cascos Bluetooth; el entorno es quien
+  traduce la tecla. Es lo estándar y lo que el usuario espera (**R34**).
+- **El drag & drop lo captura GTK**, no Flutter: el runner entrega rutas, no
+  texto. Si un día Flutter lo captura antes, la ruta no llegaría a Dart (**R33**).
+- Los archivos sueltos siguen abriéndose con el canal `cyberhex/intent` que ya
+  existía: no se duplicó el camino ni se tocó Kotlin.
+
 ### Android
 
 ```bash
@@ -606,7 +627,7 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 47/47 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 49/49 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -734,6 +755,8 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
 | R28 | Paleta solo en parte de la app | el reproductor, el mini-reproductor y los ajustes leen `paletteOf(context)`; el resto de pantallas siguen con las constantes neón, así que el tema Claro se ve a medias fuera del reproductor | `lib/ui/` |
 | R29 | Gestos sin probar en pantalla táctil | doble toque, arrastres y modo bolsillo están probados simulados en `flutter test`; falta verlos con el dedo (zonas, umbrales de velocidad y pulsación larga) | `player_page.dart` |
+| R33 | Runner GTK sin compilar aquí | `my_application.cc` y `mpris_bridge.cc` están escritos contra GTK3/GIO, pero en el sandbox no hay `pkg-config`, cabeceras de GTK ni `cmake`: solo se comprobó el balanceo de llaves/paréntesis y que los `#include` propios existen. Falta verlos con `flutter run -d linux` | `linux/runner/` |
+| R34 | Sin atajos globales fuera de la app | las teclas multimedia y los botones del teclado del portátil no se capturan con `XGrabKey` (rompería Wayland): se delegan en MPRIS, que es lo que usan GNOME/KDE/`playerctl`/Bluetooth. Fuera de un entorno de escritorio no hay teclas globales | `mpris_bridge.cc` |
 | R30 | Widget, azulejo y `MediaBrowserService` sin compilar ni ejecutar | escritos contra la API del sistema (sin AndroidX ni paquetes nuevos), pero aquí no hay JDK/Gradle/emulador: faltan por verificar el aspecto real de los `RemoteViews`, que el lanzador acepte los dos `<receiver>` y que Android Auto liste la app | `android/app/src/main/` |
 | R31 | El navegador de medios solo publica la pista actual | `onLoadChildren` devuelve `cyberhex_now` (título, artista, álbum) desde `PlaybackCache`; no hay catálogo ni carpetas porque la biblioteca vive en Dart y no se puede consultar de forma síncrona desde Kotlin | `CyberHexBrowserService.kt` |
 | R32 | Auto-play por Bluetooth condicionado a un permiso | `ACTION_ACL_CONNECTED` solo se entrega con `BLUETOOTH_CONNECT` (Android 12+), que se declara pero no se pide en runtime: si el usuario no lo concede, ese auto-play no ocurre (el de la clavija sí) | `MediaSessionService.kt` |
@@ -799,9 +822,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (43 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (44 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 7A → linux: MPRIS2, %U, drag & drop, siempre encima y notificaciones
 FASE 6B → android: widget 4x1/4x2, azulejo, coche, doble clic del casco y auto-play
 FASE 6A → app(ui): cuatro temas, color de carátula, gestos, mini-reproductor y bolsillo
 FASE 5 → app(ui): listas .m3u, cinco colas, automix, estadísticas y descargas

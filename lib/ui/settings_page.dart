@@ -1,6 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../core/player_api.dart';
+import '../core/player_controller.dart';
 import '../core/theme_controller.dart';
+import '../platform/desktop_channel.dart';
 import '../theme.dart';
 
 /// Ajustes de aspecto, gestos y capa Android.
@@ -11,14 +14,24 @@ import '../theme.dart';
 /// `configure` del canal `cyberhex/media`, porque la leen el servicio, el widget
 /// y el azulejo rápido sin la app abierta.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, required this.theme});
+  const SettingsPage({super.key, required this.theme, this.player, this.desktop});
 
   final ThemeController theme;
 
+  /// Motor, si está disponible: hace falta para elegir la salida de audio.
+  final PlayerController? player;
+
+  /// Puente de escritorio (Linux); en el móvil llega `null`.
+  final DesktopChannel? desktop;
+
   @override
   Widget build(BuildContext context) {
+    final player = this.player;
+    final listenable = player == null
+        ? theme
+        : Listenable.merge(<Listenable>[theme, player]);
     return AnimatedBuilder(
-      animation: theme,
+      animation: listenable,
       builder: (context, _) {
         final palette = paletteOf(context);
         return Scaffold(
@@ -110,6 +123,105 @@ class SettingsPage extends StatelessWidget {
                         'de ${PlayerAction.values.length} botones.',
                 style: TextStyle(fontSize: 11, color: palette.muted),
               ),
+              const _Section('Salida de audio y escritorio'),
+              if (player == null)
+                Text(
+                  'Sin motor: no hay dispositivos que listar.',
+                  style: TextStyle(fontSize: 12, color: palette.muted),
+                )
+              else ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    'Dispositivo de salida',
+                    style: TextStyle(fontSize: 12, color: palette.foreground),
+                  ),
+                ),
+                if (player.outputDevices.isEmpty)
+                  Text(
+                    'El motor no reporta dispositivos (usa el del sistema).',
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  )
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final device in player.outputDevices)
+                        ChoiceChip(
+                          label: Text(
+                            device.label,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          selected: device.index == player.outputDevice,
+                          selectedColor: palette.accent.withValues(alpha: 0.24),
+                          backgroundColor: palette.surfaceHigh,
+                          side: BorderSide(
+                            color: device.index == player.outputDevice
+                                ? palette.accent
+                                : palette.border,
+                          ),
+                          onSelected: (_) => player.setOutputDevice(device.index),
+                        ),
+                    ],
+                  ),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: player.snapshot.s16Output,
+                  onChanged: player.setS16Output,
+                  title: const Text(
+                    'Salida S16 con dither TPDF',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    'Entrega 16 bits con dither en vez de f32: para DACs y '
+                    'equipos que no aceptan flotante.',
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                ),
+              ],
+              if (desktop != null) ...[
+                ValueListenableBuilder<bool>(
+                  valueListenable: _alwaysOnTop,
+                  builder: (context, onTop, _) => SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    value: onTop,
+                    onChanged: (value) {
+                      _alwaysOnTop.value = value;
+                      desktop!.setAlwaysOnTop(value);
+                    },
+                    title: const Text(
+                      'Ventana siempre encima',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                    subtitle: Text(
+                      'Solo Linux: la ventana queda por delante del resto.',
+                      style: TextStyle(fontSize: 11, color: palette.muted),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(Icons.notifications_active_outlined,
+                      size: 20, color: palette.muted),
+                  title: const Text(
+                    'Notificar la pista nueva',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    'Manda una notificación de escritorio ahora mismo '
+                    '(GNotification).',
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                  onTap: () => desktop!.notifyTrack(
+                    title: player?.snapshot.title ?? 'CyberHex',
+                    body: player?.snapshot.artist,
+                  ),
+                ),
+              ],
               const _Section('Notificación y auriculares'),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -156,6 +268,10 @@ class SettingsPage extends StatelessWidget {
       },
     );
   }
+
+  /// Estado del interruptor «siempre encima». Vive en la página porque el
+  /// runner no lo reporta de vuelta; al reabrir Ajustes vuelve a apagado.
+  static final ValueNotifier<bool> _alwaysOnTop = ValueNotifier<bool>(false);
 
   static String _hex(Color color) =>
       '#${color.toARGB32().toRadixString(16).padLeft(8, '0').substring(2).toUpperCase()}';

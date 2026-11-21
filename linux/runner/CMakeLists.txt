@@ -9,6 +9,8 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
+  # MPRIS2 por GDBus (GIO ya viene con PkgConfig::GTK). Sin paquetes nuevos.
+  "mpris_bridge.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 

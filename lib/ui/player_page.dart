@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
@@ -12,6 +13,7 @@ import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../core/stats_store.dart';
 import '../core/theme_controller.dart';
+import '../platform/desktop_channel.dart';
 import '../theme.dart';
 import 'settings_page.dart';
 import 'audio_lab_sheet.dart';
@@ -24,13 +26,21 @@ import 'tag_editor_sheet.dart';
 import 'visualizer_widget.dart';
 
 class PlayerPage extends StatefulWidget {
-  const PlayerPage({super.key, required this.controller, this.theme});
+  const PlayerPage({
+    super.key,
+    required this.controller,
+    this.theme,
+    this.desktop,
+  });
 
   final PlayerController controller;
 
   /// Ajustes visuales compartidos con el resto de la app. Si falta (pruebas),
   /// la página usa uno en memoria.
   final ThemeController? theme;
+
+  /// Puente de escritorio (Linux): MPRIS y drag & drop. En el móvil es `null`.
+  final DesktopChannel? desktop;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -57,6 +67,11 @@ class _PlayerPageState extends State<PlayerPage>
 
   Offset? _doubleTapAt;
 
+  StreamSubscription<List<String>>? _dropsSubscription;
+
+  /// Volumen previo al silencio, para restaurarlo con otra pulsación.
+  double _volumeBeforeMute = 0.8;
+
   /// Las cinco colas y el automix viven en la página: así sobreviven a abrir y
   /// cerrar la hoja de la cola.
   late final MultiQueueStore _queues = MultiQueueStore();
@@ -77,6 +92,7 @@ class _PlayerPageState extends State<PlayerPage>
     super.initState();
     _pocket = _theme.pocketMode;
     _controller.addListener(_onSnapshot);
+    _dropsSubscription = widget.desktop?.drops.listen(_onDroppedPaths);
     _controller.position.addListener(_rememberPosition);
     _queues.load();
     _playlists.load();
@@ -93,6 +109,7 @@ class _PlayerPageState extends State<PlayerPage>
     _playlists.dispose();
     _stats.dispose();
     _longTracks.dispose();
+    unawaited(_dropsSubscription?.cancel());
     if (widget.theme == null) _theme.dispose();
     _spin.dispose();
     super.dispose();
@@ -223,19 +240,50 @@ class _PlayerPageState extends State<PlayerPage>
         final size = MediaQuery.sizeOf(context);
         final wide = size.width >= 760 && size.width > size.height;
         return Shortcuts(
-          shortcuts: const {
-            SingleActivator(LogicalKeyboardKey.space): _ToggleIntent(),
+          shortcuts: const <ShortcutActivator, Intent>{
+            SingleActivator(LogicalKeyboardKey.space): _PlayerIntent(
+              _PlayerCommand.toggle,
+            ),
+            SingleActivator(LogicalKeyboardKey.arrowLeft): _PlayerIntent(
+              _PlayerCommand.seekBack,
+            ),
+            SingleActivator(LogicalKeyboardKey.arrowRight): _PlayerIntent(
+              _PlayerCommand.seekForward,
+            ),
+            SingleActivator(LogicalKeyboardKey.arrowLeft, shift: true):
+                _PlayerIntent(_PlayerCommand.previous),
+            SingleActivator(LogicalKeyboardKey.arrowRight, shift: true):
+                _PlayerIntent(_PlayerCommand.next),
+            SingleActivator(LogicalKeyboardKey.arrowUp): _PlayerIntent(
+              _PlayerCommand.volumeUp,
+            ),
+            SingleActivator(LogicalKeyboardKey.arrowDown): _PlayerIntent(
+              _PlayerCommand.volumeDown,
+            ),
+            SingleActivator(LogicalKeyboardKey.keyM): _PlayerIntent(
+              _PlayerCommand.mute,
+            ),
+            SingleActivator(LogicalKeyboardKey.keyL): _PlayerIntent(
+              _PlayerCommand.repeat,
+            ),
+            SingleActivator(LogicalKeyboardKey.keyS): _PlayerIntent(
+              _PlayerCommand.shuffle,
+            ),
           },
           child: Actions(
             actions: {
-              _ToggleIntent: CallbackAction<_ToggleIntent>(
-                onInvoke: (_) {
-                  _toggle();
+              _PlayerIntent: CallbackAction<_PlayerIntent>(
+                onInvoke: (intent) {
+                  _runCommand(intent.command);
                   return null;
                 },
               ),
             },
-            child: Scaffold(
+            // Foco en la página para que los atajos lleguen sin tocar nada
+            // (no hay campos de texto aquí que se lo puedan quedar).
+            child: Focus(
+              autofocus: true,
+              child: Scaffold(
               body: Stack(
                 children: [
                   Positioned.fill(child: _background(snapshot, palette)),
@@ -296,6 +344,7 @@ class _PlayerPageState extends State<PlayerPage>
                   if (_pocket)
                     Positioned.fill(child: _pocketOverlay(snapshot, palette)),
                 ],
+              ),
               ),
             ),
           ),
@@ -595,16 +644,146 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  // -----------------------------------------------------------------------
+  // Teclado
+  // -----------------------------------------------------------------------
+
+  /// Atajos del reproductor: espacio, flechas, M (silencio), L (repetición) y
+  /// S (aleatorio). Las teclas multimedia del sistema llegan por MPRIS, no por
+  /// aquí: las captura el entorno de escritorio, que es lo correcto.
+  void _runCommand(_PlayerCommand command) {
+    final snapshot = _controller.snapshot;
+    switch (command) {
+      case _PlayerCommand.toggle:
+        _toggle();
+      case _PlayerCommand.seekBack:
+        _seekBy(-5);
+      case _PlayerCommand.seekForward:
+        _seekBy(5);
+      case _PlayerCommand.next:
+        _controller.next();
+      case _PlayerCommand.previous:
+        _controller.previous();
+      case _PlayerCommand.volumeUp:
+        _setVolume(snapshot.volume + 0.05);
+      case _PlayerCommand.volumeDown:
+        _setVolume(snapshot.volume - 0.05);
+      case _PlayerCommand.mute:
+        if (snapshot.volume > 0.001) {
+          _volumeBeforeMute = snapshot.volume;
+          _setVolume(0);
+        } else {
+          _setVolume(_volumeBeforeMute <= 0.001 ? 0.8 : _volumeBeforeMute);
+        }
+      case _PlayerCommand.repeat:
+        _controller.cycleRepeat();
+      case _PlayerCommand.shuffle:
+        _controller.toggleShuffle();
+    }
+  }
+
+  void _setVolume(double value) {
+    _controller.setVolume(value.clamp(0.0, 1.0).toDouble());
+  }
+
+  // -----------------------------------------------------------------------
+  // Drag & drop (lo captura GTK y llega por `cyberhex/desktop`)
+  // -----------------------------------------------------------------------
+
+  /// Abre el primer archivo (o la primera pista de la primera carpeta) y encola
+  /// el resto. Las carpetas se escanean con el motor, no con `dart:io`.
+  Future<void> _onDroppedPaths(List<String> paths) async {
+    if (paths.isEmpty || !mounted) return;
+
+    var opened = 0;
+    var enqueued = 0;
+    var scanned = 0;
+    var failed = 0;
+
+    for (final path in paths) {
+      final type = FileSystemEntity.typeSync(path);
+      if (type == FileSystemEntityType.directory) {
+        final tracks = await _controller.scanDirectory(path);
+        scanned += tracks.length;
+        for (final track in tracks) {
+          if (opened == 0) {
+            final error = await _controller.openFile(track.path);
+            if (error == null) {
+              opened += 1;
+              _controller.play();
+            } else {
+              failed += 1;
+            }
+          } else if (_controller.enqueue(track.path)) {
+            enqueued += 1;
+          }
+        }
+        continue;
+      }
+      if (type != FileSystemEntityType.file) {
+        failed += 1;
+        continue;
+      }
+      if (opened == 0) {
+        final error = await _controller.openFile(path);
+        if (error == null) {
+          opened += 1;
+          _controller.play();
+        } else {
+          failed += 1;
+        }
+      } else if (_controller.enqueue(path)) {
+        enqueued += 1;
+      }
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          opened == 0
+              ? 'No se pudo abrir nada de lo que soltaste ($failed fallo(s)).'
+              : 'Soltado: $opened en reproducción, $enqueued en cola'
+                  '${scanned > 0 ? ', $scanned pista(s) escaneadas' : ''}'
+                  '${failed > 0 ? ', $failed fallo(s)' : ''}.',
+        ),
+      ),
+    );
+  }
+
   void _openSettings() {
     Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => SettingsPage(theme: _theme)),
+      MaterialPageRoute<void>(
+        builder: (_) => SettingsPage(
+          theme: _theme,
+          player: _controller,
+          desktop: widget.desktop,
+        ),
+      ),
     );
   }
 }
 
-class _ToggleIntent extends Intent {
-  const _ToggleIntent();
+/// Comandos de teclado del reproductor (ver `_runCommand`).
+enum _PlayerCommand {
+  toggle,
+  seekBack,
+  seekForward,
+  next,
+  previous,
+  volumeUp,
+  volumeDown,
+  mute,
+  repeat,
+  shuffle,
 }
+
+class _PlayerIntent extends Intent {
+  const _PlayerIntent(this.command);
+
+  final _PlayerCommand command;
+}
+
 
 class _Header extends StatelessWidget {
   const _Header({

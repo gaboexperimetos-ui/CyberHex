@@ -18,6 +18,49 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 21 · FASE 7A, pedido 8 de 10: escritorio Linux (MPRIS2, %U, DnD)
+
+- **PEDIDO:** `%U` al canal `cyberhex/intent`, MPRIS2 por GDBus, siempre encima,
+  notificaciones de escritorio, atajos, drag & drop, selector de salida y S16 con
+  dither. PROHIBIDO `core/`, `android/`, `pubspec.yaml`. RIESGO ACEPTABLE (sí).
+- **HECHO:**
+  - `linux/runner/my_application.cc` (594, reescrito):
+    `G_APPLICATION_HANDLES_COMMAND_LINE` + instancia única, `onOpenFile` por el
+    canal `cyberhex/intent` y `getInitialFile` en arranque en frío; canales
+    `cyberhex/intent` y `cyberhex/desktop` creados antes del primer frame;
+    `GtkWindow` como destino de `text/uri-list`/`text/plain` → `onDropPaths`;
+    `setAlwaysOnTop` (`gtk_window_set_keep_above`), `notifyTrack`
+    (`GNotification` con acción `app.raise`), `updateMetadata`/`updateState` →
+    MPRIS y `notifySeek` → señal `Seeked`.
+  - `linux/runner/mpris_bridge.{h,cc}` (65 + 598, nuevos): dos interfaces
+    registradas en `/org/mpris/MediaPlayer2` con la misma `GDBusInterfaceVTable`,
+    `PropertiesChanged` a mano, todas las propiedades y métodos del estándar, y
+    traducción a órdenes de texto (`seekrel:`, `volume:`, `loop:`…).
+  - `linux/runner/CMakeLists.txt`: añade `mpris_bridge.cc` (GIO ya entra con GTK).
+  - `lib/platform/desktop_channel.dart` (276, nuevo): metadatos/estado en µs,
+    transporte entrante, `setAlwaysOnTop`, `notifyTrack`, `notifySeek` y flujo
+    `drops`; `MissingPluginException` ignorada.
+  - `lib/ui/player_page.dart`: atajos (espacio, ←/→, Shift+←/→, ↑/↓, M, L, S) con
+    `Focus(autofocus)` y `_runCommand`; drag & drop con `_onDroppedPaths`
+    (primera pista suena, resto a la cola, carpetas por `scanDirectory`).
+  - `lib/ui/settings_page.dart`: sección «Salida de audio y escritorio»
+    (dispositivos, S16+TPDF, siempre encima, notificar pista).
+  - `lib/main.dart`: `DesktopChannel` solo en Linux.
+  - `test/desktop_channel_test.dart` (322): **11 casos** (MPRIS de ida y vuelta,
+    topes, drop, sin runner, atajos).
+- **VERIFICADO:** tree-sitter **49/49**; paridad `PlayerApi` 112/112; 5/5
+  archivos del runner con llaves/paréntesis/corchetes balanceados y `#include`
+  propios existentes; cifras: `lib` 16 909, `test` 4 941, **198 casos**.
+- **NO VERIFICABLE AQUÍ:** **no hay `zig` en el sandbox** (ni `pkg-config`, ni
+  cabeceras GTK, ni `cmake`), así que `zig build test -Ddecoder=miniaudio`,
+  `zig build smoke` y `g++ -fsyntax-only` **no se pudieron ejecutar**: el núcleo
+  sigue como estaba (no se tocó) y el runner solo pasó el balanceo (**R33**). Los
+  atajos globales se delegan en MPRIS (**R34**).
+- **COMMITS:** este turno, un commit en `linux/`, `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** R33 y R34. Pendientes los pedidos 9 y 10.
+
+---
+
 ## 2026-11-21 · turno 20 · FASE 6B, pedido 7 de 10: widget, azulejo, coche y botones del casco
 
 - **PEDIDO:** widgets 4x1/4x2 desde el `MediaSessionService` con `PendingIntent`
