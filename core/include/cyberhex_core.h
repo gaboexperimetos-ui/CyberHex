@@ -119,6 +119,9 @@ int32_t     ch_engine_set_output_device(ch_engine* engine, int32_t index);
 /* Lista de reproducción y avance gapless. */
 int32_t ch_engine_queue_add(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_queue_count(ch_engine* engine);
+/* Ruta de la pista `index` de la cola ("" si no existe). Valida hasta que
+ * cambie la cola: copiala, no guardes el puntero. */
+const char* ch_engine_queue_item(ch_engine* engine, int32_t index);
 int32_t ch_engine_queue_index(ch_engine* engine);
 int32_t ch_engine_queue_clear(ch_engine* engine);
 /* Mueve la pista `from` a la posición `to` (reordena sin cortar el audio). */

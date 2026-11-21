@@ -191,6 +191,9 @@ abstract class PlayerApi {
   void seek(double seconds);
   void setVolume(double value);
 
+  /// Volumen efectivo del motor (0..1), no el último pedido.
+  double get volume => 1;
+
   void setBand(int index, double db);
   void resetEq();
 
@@ -207,6 +210,9 @@ abstract class PlayerApi {
 
   /// Índice de la pista que suena dentro de la cola.
   int get queueIndex => 0;
+
+  /// Ruta de la pista `index` de la cola ("" si no existe).
+  String queueItem(int index) => '';
 
   /// Reproduce la pista `index` de la cola sin vaciarla.
   bool playIndex(int index) => false;

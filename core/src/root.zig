@@ -1843,6 +1843,18 @@ export fn ch_engine_queue_count(self: ?*Engine) i32 {
     return @intCast(e.playlist.items.len);
 }
 
+/// Ruta de la pista `index` de la cola, o "" si no existe. Valida hasta que
+/// cambie la cola: la UI debe copiarla, no guardar el puntero.
+export fn ch_engine_queue_item(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    const i: usize = @intCast(index);
+    if (i >= e.playlist.items.len) return @ptrCast("");
+    return e.playlist.items[i].ptr;
+}
+
 export fn ch_engine_queue_import(self: ?*Engine, path: [*c]const u8) i32 {
     const e = self orelse return -1;
     const p = path orelse return e.fail("ruta nula", -1);

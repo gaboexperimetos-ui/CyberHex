@@ -252,6 +252,35 @@ void main() {
     expect(controller.bufferUnderflows, 2);
   });
 
+  test('previous reinicia la pista si ya pasaron 3 s', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.seek(10);
+    controller.previous();
+    expect(fake.previousCalls, 0, reason: 'reinicia, no cambia de pista');
+    expect(fake.position, 0);
+
+    controller.seek(1);
+    controller.previous();
+    expect(fake.previousCalls, 1);
+  });
+
+  test('la cola expone sus pistas y el volumen efectivo', () {
+    final fake = FakePlayer()..hasTrack = true;
+    fake.queue.addAll(['/musica/a.mp3', '/musica/b.mp3']);
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.queueItem(0), '/musica/a.mp3');
+    expect(controller.queueItem(1), '/musica/b.mp3');
+    expect(controller.queueItem(9), '');
+
+    fake.setVolume(0.6);
+    expect(controller.volume, 0.6);
+  });
+
   test('biblioteca, marcadores, CUE y dispositivos', () {
     final fake = FakePlayer()
       ..libraryTracks = const ['/m/a.flac', '/m/b.mp3']

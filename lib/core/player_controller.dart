@@ -147,11 +147,21 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Pista anterior de la cola.
+  ///
+  /// Si ya se han escuchado más de [_restartThreshold] segundos, primero
+  /// reinicia la pista actual: es lo que espera cualquiera que venga de
+  /// Spotify, Strawberry o Tauon.
   void previous() {
     if (_disposed) return;
+    if (position.value > _restartThreshold) {
+      seek(0);
+      return;
+    }
     _player.previous();
     _refresh();
   }
+
+  static const double _restartThreshold = 3;
 
   /// Mueve la posición, siempre dentro de `[0, duración]`.
   ///
@@ -176,6 +186,9 @@ class PlayerController extends ChangeNotifier {
     _refresh();
   }
 
+  /// Volumen efectivo del motor; puede diferir del pedido si el núcleo acota.
+  double get volume => _player.volume;
+
   void setBand(int index, double db) {
     if (_disposed) return;
     _player.setBand(index, db);
@@ -193,6 +206,8 @@ class PlayerController extends ChangeNotifier {
   int get queueCount => _player.queueCount;
 
   int get queueIndex => _player.queueIndex;
+
+  String queueItem(int index) => _player.queueItem(index);
 
   int get repeatMode => _player.repeatMode;
 

@@ -379,6 +379,9 @@ class NativePlayer extends PlayerApi {
       _bindings.setVolume(_engine, value.clamp(0, 1).toDouble());
 
   @override
+  double get volume => _bindings.volume?.call(_engine) ?? 1;
+
+  @override
   void setBand(int index, double db) {
     eqGains[index] = db;
     final buffer = calloc<Float>(eqGains.length);
@@ -650,6 +653,9 @@ class NativePlayer extends PlayerApi {
 
   @override
   int get queueIndex => _bindings.queueIndex?.call(_engine) ?? 0;
+
+  @override
+  String queueItem(int index) => _text(_bindings.queueItem?.call(_engine, index));
 
   @override
   bool playIndex(int index) => _bindings.playIndex?.call(_engine, index) == 0;
@@ -1197,6 +1203,12 @@ class _Bindings {
         queueExport = lib.providesSymbol('ch_engine_queue_export')
             ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_queue_export')
             : null,
+        queueItem = lib.providesSymbol('ch_engine_queue_item')
+            ? lib.lookupFunction<_TextAtNative, _TextAtDart>('ch_engine_queue_item')
+            : null,
+        volume = lib.providesSymbol('ch_engine_volume')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_volume')
+            : null,
         queueCount = lib.providesSymbol('ch_engine_queue_count')
             ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_count')
             : null,
@@ -1521,6 +1533,8 @@ class _Bindings {
   final _ControlDart? queueClear;
   final _LoadDart? queueImport;
   final _LoadDart? queueExport;
+  final _TextAtDart? queueItem;
+  final _GetFloatDart? volume;
   final _IntDart? queueCount;
   final _IntDart? queueIndex;
   final _SetIntDart? setRepeat;

@@ -101,6 +101,10 @@ class FakePlayer extends PlayerApi {
   int get queueCount => queue.length;
 
   @override
+  String queueItem(int index) =>
+      index < 0 || index >= queue.length ? '' : queue[index];
+
+  @override
   bool playIndex(int index) {
     if (index < 0 || index >= queue.length) return false;
     queueIndex = index;
@@ -475,7 +479,10 @@ class FakePlayer extends PlayerApi {
   }
 
   @override
-  void setVolume(double value) {}
+  double volume = 1;
+
+  @override
+  void setVolume(double value) => volume = value;
 
   @override
   void setBand(int index, double db) {
