@@ -9,6 +9,12 @@ extern "C" {
 typedef struct ch_engine ch_engine;
 
 const char* ch_core_version(void);
+/*
+ * Version del ABI del nucleo. Sube cuando cambia algo incompatible (firmas,
+ * structs o semantica). La app puede exigir un minimo antes de usar funciones
+ * nuevas; el resto se detecta con dlsym/providesSymbol.
+ */
+int32_t ch_engine_abi_version(void);
 const char* ch_core_last_error(void);
 
 ch_engine* ch_engine_create(void);
@@ -29,6 +35,21 @@ int32_t ch_engine_queue_remove(ch_engine* engine, int32_t index);
 int32_t ch_engine_queue_insert(ch_engine* engine, int32_t index, const char* utf8_path);
 
 int32_t ch_engine_set_volume(ch_engine* engine, float volume);
+
+/*
+ * Balance estereo: -1 todo a la izquierda, 0 centrado, +1 a la derecha
+ * (se acota). El canal favorecido no se amplifica, el otro se atenua.
+ */
+int32_t ch_engine_set_balance(ch_engine* engine, float balance);
+float   ch_engine_balance(ch_engine* engine);
+
+/*
+ * Modo de canales: 0 = estereo normal, 1 = mono (misma señal en los dos
+ * altavoces), 2 = canales intercambiados. Util con auriculares de un solo lado
+ * o altavoces mal cableados. Devuelve -2 si el modo no existe.
+ */
+int32_t ch_engine_set_channel_mode(ch_engine* engine, int32_t mode);
+int32_t ch_engine_channel_mode(ch_engine* engine);
 
 /*
  * Temporizador de apagado: pausa (o termina) tras `seconds`, con fundido

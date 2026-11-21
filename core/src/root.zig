@@ -12,6 +12,9 @@ const RenderFn = *const fn (?*anyopaque, [*]f32, u32) callconv(.c) void;
 const RING_FRAMES: usize = SAMPLE_RATE * 4; // 4 segundos de margen
 const SCRATCH_FRAMES: usize = 4096;
 const NO_SEEK: usize = std.math.maxInt(usize);
+
+/// Sube cuando cambia el ABI (nombres, firmas o semantica de las funciones).
+pub const ABI_VERSION: i32 = 3;
 const MAX_SEGMENTS: usize = 256;
 const MAX_XFADE_FRAMES: usize = SAMPLE_RATE * 12;
 const SP_FRAMES: usize = 2048; // ventana del analizador de espectro (~43 ms)
@@ -248,6 +251,9 @@ pub const Engine = struct {
     level_rms: [2]u32 = @splat(0),
     level_peak: [2]u32 = @splat(0),
     pause_fade_bits: u32 = @bitCast(@as(f32, 0.05)),
+    // Balance (-1 izquierda .. +1 derecha) en bits de f32 y modo de canales.
+    balance_bits: u32 = 0,
+    chan_mode: u32 = 0,
     // 0 = ReplayGain por pista, 1 = por album.
     rg_mode: u32 = 0,
     // Loop A-B en marcos absolutos de la cola (NO_SEEK = inactivo).
@@ -1193,11 +1199,27 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             // Ataque rapido, recuperacion lenta (~200 ms).
             const attack: f32 = 0.999;
             const release: f32 = 1.0 - @exp(-1.0 / (0.2 * @as(f32, @floatFromInt(SAMPLE_RATE))));
+            const chan_mode = @atomicLoad(u32, &self.chan_mode, .monotonic);
+            const balance: f32 = @bitCast(@atomicLoad(u32, &self.balance_bits, .monotonic));
+            const gain_l: f32 = 1 - @max(balance, 0);
+            const gain_r: f32 = 1 + @min(balance, 0);
             var i: usize = 0;
             while (i < take) : (i += 1) {
                 g += (target - g) * fade_coeff;
-                var s = out[i * CHANNELS] * g;
-                var s2 = out[i * CHANNELS + 1] * g;
+                var l = out[i * CHANNELS];
+                var rr = out[i * CHANNELS + 1];
+                if (chan_mode == 1) {
+                    // Mono: misma señal en los dos altavoces.
+                    const m = (l + rr) * 0.5;
+                    l = m;
+                    rr = m;
+                } else if (chan_mode == 2) {
+                    const t = l;
+                    l = rr;
+                    rr = t;
+                }
+                var s = l * (g * gain_l);
+                var s2 = rr * (g * gain_r);
                 if (limiting) {
                     const peak = @max(@abs(s), @abs(s2));
                     var desired = lg;
@@ -1437,7 +1459,7 @@ fn destroyEngine(e: *Engine) void {
 }
 
 export fn ch_core_version() [*c]const u8 {
-    return @ptrCast("0.7.0");
+    return @ptrCast("0.8.0");
 }
 
 export fn ch_core_last_error() [*c]const u8 {
@@ -2189,6 +2211,36 @@ export fn ch_engine_set_band_gain(self: ?*Engine, band: i32, db: f32) i32 {
     return 0;
 }
 
+/// Version del ABI del nucleo: sube cuando cambia algo incompatible.
+export fn ch_engine_abi_version() i32 {
+    return ABI_VERSION;
+}
+
+/// Balance estereo: -1 todo a la izquierda, 0 centrado, +1 a la derecha.
+export fn ch_engine_set_balance(self: ?*Engine, balance: f32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(u32, &e.balance_bits, @bitCast(std.math.clamp(balance, -1, 1)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_balance(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic));
+}
+
+/// 0 = estereo normal, 1 = mono (suma a los dos canales), 2 = intercambiados.
+export fn ch_engine_set_channel_mode(self: ?*Engine, mode: i32) i32 {
+    const e = self orelse return -1;
+    if (mode < 0 or mode > 2) return e.fail("modo de canales inválido", -2);
+    @atomicStore(u32, &e.chan_mode, @intCast(mode), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_channel_mode(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return @intCast(@atomicLoad(u32, &e.chan_mode, .monotonic));
+}
+
 /// Loop A-B de la pista actual, en segundos. `end <= start` lo desactiva.
 export fn ch_engine_set_loop(self: ?*Engine, start_s: f64, end_s: f64) i32 {
     const e = self orelse return -1;
@@ -2588,6 +2640,11 @@ test "api: los punteros nulos devuelven error, no revientan" {
     try std.testing.expectEqual(@as(f64, -1.0), ch_engine_loop_start(null));
     try std.testing.expectEqual(@as(f64, -1.0), ch_engine_loop_end(null));
     try std.testing.expectEqual(@as(u64, 0), ch_engine_skipped_tracks(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_balance(null, 0.5));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_balance(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_channel_mode(null, 1));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_channel_mode(null));
+    try std.testing.expectEqual(ABI_VERSION, ch_engine_abi_version());
 }
 
 test "moveIndex reordena sin perder pistas" {
