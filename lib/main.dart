@@ -12,7 +12,12 @@ import 'theme.dart';
 import 'ui/core_error_screen.dart';
 import 'ui/player_page.dart';
 
-void main() {
+Future<void> main() async {
+  // El canal `cyberhex/storage` (filesDir) es asíncrono y el resto de la app
+  // construye sus almacenes con constructores síncronos: se resuelve aquí, una
+  // sola vez, antes de montar la UI (R14).
+  WidgetsFlutterBinding.ensureInitialized();
+  await StorageDirectory.prepare();
   runApp(const CyberHexApp());
 }
 
@@ -58,6 +63,10 @@ class _CyberHexAppState extends State<CyberHexApp> {
 
   /// Restaura la sesión anterior en segundo plano. Solo en producción: en las
   /// pruebas de widget el controlador llega inyectado y no se toca el disco.
+  ///
+  /// [SessionKeeper] usa el [SessionStore] por defecto, que ya apunta al
+  /// directorio de datos resuelto en `main()` (filesDir en Android,
+  /// `~/.local/share/cyberhex` en Linux).
   void _attachSession(PlayerController controller) {
     if (!_ownsController) return;
     final keeper = SessionKeeper(controller: controller);

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cyberhex/core/favorites_store.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/core/session_store.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -66,6 +67,78 @@ void main() {
       expect(const SessionSnapshot().isEmpty, isTrue);
       expect(const SessionSnapshot(queue: ['/m/a.flac'], queueIndex: 0).isEmpty,
           isFalse);
+    });
+  });
+
+  group('StorageDirectory', () {
+    test('CYBERHEX_DATA_DIR manda sobre todo lo demás', () {
+      final dir = StorageDirectory.resolve(
+        environment: {
+          'CYBERHEX_DATA_DIR': '/datos/cyberhex',
+          'XDG_DATA_HOME': '/xdg',
+          'HOME': '/home/ana',
+        },
+        tempPath: '/tmp',
+        windows: false,
+      );
+      expect(dir.path, '/datos/cyberhex');
+    });
+
+    test('Linux: XDG_DATA_HOME primero, luego ~/.local/share', () {
+      final xdg = StorageDirectory.resolve(
+        environment: {'XDG_DATA_HOME': '/xdg', 'HOME': '/home/ana'},
+        tempPath: '/tmp',
+        windows: false,
+      );
+      expect(xdg.path, '/xdg/cyberhex');
+
+      final home = StorageDirectory.resolve(
+        environment: {'HOME': '/home/ana'},
+        tempPath: '/tmp',
+        windows: false,
+      );
+      expect(home.path, '/home/ana/.local/share/cyberhex');
+    });
+
+    test('Windows usa APPDATA', () {
+      final dir = StorageDirectory.resolve(
+        environment: {'APPDATA': r'C:\Users\ana\AppData\Roaming'},
+        tempPath: r'C:\Temp',
+        windows: true,
+      );
+      expect(dir.path, r'C:\Users\ana\AppData\Roaming\CyberHex');
+    });
+
+    test('sin variables cae al temporal, sin reventar', () {
+      final dir = StorageDirectory.resolve(
+        environment: const <String, String>{},
+        tempPath: '/tmp',
+        windows: false,
+      );
+      expect(dir.path, '/tmp/cyberhex');
+    });
+
+    test('ensure crea el directorio y sus padres', () async {
+      final target = Directory('${temp.path}/a/b/c');
+      final ready = await StorageDirectory.ensure(target);
+      expect(ready.path, target.path);
+      expect(target.existsSync(), isTrue);
+    });
+
+    test('ensure sobre algo que ya existe no falla', () async {
+      final ready = await StorageDirectory.ensure(temp);
+      expect(ready.path, temp.path);
+      expect(temp.existsSync(), isTrue);
+    });
+
+    test('los almacenes por defecto viven en el directorio de datos', () {
+      final store = SessionStore();
+      expect(store.file.parent.path, StorageDirectory.current.path);
+      expect(store.file.path, endsWith('/session.json'));
+
+      final favorites = FavoritesStore();
+      expect(favorites.file!.parent.path, StorageDirectory.current.path);
+      expect(favorites.file!.path, endsWith('/favorites.json'));
     });
   });
 

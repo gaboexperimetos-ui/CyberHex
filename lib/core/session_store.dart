@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import 'player_controller.dart';
 
@@ -93,6 +94,106 @@ class SessionSnapshot {
       '${position.toStringAsFixed(1)} s)';
 }
 
+/// Directorio persistente de datos de la app (sesión, favoritos, ajustes).
+///
+/// Prioridad:
+///  1. `CYBERHEX_DATA_DIR` (pruebas, empaquetado, usuarios avanzados);
+///  2. Android: canal `cyberhex/storage` → `context.filesDir`, que **no** se
+///     borra como el caché (R14);
+///  3. Linux/macOS: `$XDG_DATA_HOME/cyberhex` o `~/.local/share/cyberhex`;
+///  4. Windows: `%APPDATA%\CyberHex`;
+///  5. resto: `<temporal>/cyberhex`, para no fallar nunca.
+///
+/// [prepare] se llama una vez en `main()`, antes de montar la UI, porque el
+/// canal de Android es asíncrono y el resto de la app construye sus almacenes
+/// con constructores síncronos.
+class StorageDirectory {
+  static const MethodChannel _channel = MethodChannel('cyberhex/storage');
+
+  static Directory? _cached;
+  static Future<Directory>? _pending;
+
+  /// Directorio ya resuelto. Si nadie llamó a [prepare], se resuelve en el acto
+  /// por la vía síncrona (escritorio o temporal) y **no** se crea nada aquí:
+  /// crear directorios es cosa de [prepare] y de los `save()`.
+  static Directory get current => _cached ??= resolve(
+        environment: Platform.environment,
+        tempPath: Directory.systemTemp.path,
+        windows: Platform.isWindows,
+      );
+
+  /// Resuelve (y crea) el directorio de datos. Idempotente y sin excepciones.
+  static Future<Directory> prepare() {
+    return _pending ??= _prepare();
+  }
+
+  static Future<Directory> _prepare() async {
+    var directory = await _platformDirectory() ?? current;
+    directory = await ensure(directory);
+    _cached = directory;
+    return directory;
+  }
+
+  /// En Android pregunta al canal; en el resto de plataformas devuelve `null`
+  /// para que decida [resolve]. Un canal ausente o con error no es un fallo:
+  /// simplemente no hay `filesDir` al que ir.
+  static Future<Directory?> _platformDirectory() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final path = await _channel.invokeMethod<String>('getAppDataDir');
+      if (path != null && path.isNotEmpty) return Directory(path);
+    } on MissingPluginException {
+      debugPrint('StorageDirectory: sin canal nativo, se usa el temporal');
+    } on PlatformException catch (error) {
+      debugPrint('StorageDirectory: el canal falló ($error)');
+    }
+    return null;
+  }
+
+  /// Crea `directory` si hace falta. Si no se puede, devuelve el temporal.
+  static Future<Directory> ensure(Directory directory) async {
+    try {
+      if (!directory.existsSync()) directory.createSync(recursive: true);
+      return directory;
+    } catch (error) {
+      debugPrint('StorageDirectory: no se pudo crear ${directory.path} ($error)');
+      final fallback = Directory('${Directory.systemTemp.path}/cyberhex');
+      try {
+        if (!fallback.existsSync()) fallback.createSync(recursive: true);
+      } catch (_) {
+        // Si ni el temporal se puede crear, se devuelve igual: los `save()`
+        // fallarán sin romper nada.
+      }
+      return fallback;
+    }
+  }
+
+  /// Resolución por entorno, sin tocar el disco. Pura a propósito: así se puede
+  /// probar con cualquier combinación de variables y plataforma.
+  static Directory resolve({
+    required Map<String, String> environment,
+    required String tempPath,
+    required bool windows,
+  }) {
+    final override = environment['CYBERHEX_DATA_DIR'];
+    if (override != null && override.isNotEmpty) return Directory(override);
+    if (windows) {
+      final appData = environment['APPDATA'];
+      if (appData != null && appData.isNotEmpty) {
+        return Directory('$appData\\CyberHex');
+      }
+    } else {
+      final xdg = environment['XDG_DATA_HOME'];
+      if (xdg != null && xdg.isNotEmpty) return Directory('$xdg/cyberhex');
+      final home = environment['HOME'];
+      if (home != null && home.isNotEmpty) {
+        return Directory('$home/.local/share/cyberhex');
+      }
+    }
+    return Directory('$tempPath/cyberhex');
+  }
+}
+
 /// Persiste la sesión en un JSON pequeño con escritura atómica.
 ///
 /// `save` escribe primero `<archivo>.tmp` y luego renombra: un corte de luz a
@@ -101,42 +202,8 @@ class SessionSnapshot {
 /// Nunca lanza: si el directorio no se puede escribir (permisos, sandbox), se
 /// avisa una vez por consola y la app sigue funcionando sin sesión.
 class SessionStore {
-  SessionStore({File? file}) : file = file ?? File(_defaultPath());
-
-  final File file;
-
-  bool _warned = false;
-
-  /// Directorio de datos:
-  ///  * `CYBERHEX_DATA_DIR` si está definido (útil en tests y para empaquetar);
-  ///  * Linux/macOS: `$XDG_CONFIG_HOME/cyberhex` o `~/.config/cyberhex`;
-  ///  * Windows: `%APPDATA%\CyberHex`;
-  ///  * resto (Android): el temporal del sistema.
-  ///
-  /// En Android puro en Dart no hay forma de llegar al directorio privado de la
-  /// app (`getFilesDir()`) sin un canal nativo o `path_provider`; ver R14 en
-  /// docs/INFORME.md.
-  static String _defaultPath() => '${defaultDirectory().path}/session.json';
-
-  static Directory defaultDirectory() {
-    final override = Platform.environment['CYBERHEX_DATA_DIR'];
-    if (override != null && override.isNotEmpty) return Directory(override);
-    if (Platform.isLinux || Platform.isMacOS) {
-      final xdg = Platform.environment['XDG_CONFIG_HOME'];
-      if (xdg != null && xdg.isNotEmpty) return Directory('$xdg/cyberhex');
-      final home = Platform.environment['HOME'];
-      if (home != null && home.isNotEmpty) {
-        return Directory('$home/.config/cyberhex');
-      }
-    }
-    if (Platform.isWindows) {
-      final appData = Platform.environment['APPDATA'];
-      if (appData != null && appData.isNotEmpty) {
-        return Directory('$appData\\CyberHex');
-      }
-    }
-    return Directory('${Directory.systemTemp.path}/cyberhex');
-  }
+  SessionStore({File? file})
+      : file = file ?? File('${StorageDirectory.current.path}/session.json');
 
   /// Lee la sesión. `null` si no hay archivo, está vacío o está corrupto.
   Future<SessionSnapshot?> load() async {

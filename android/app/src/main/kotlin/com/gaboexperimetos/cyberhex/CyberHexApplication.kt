@@ -2,9 +2,11 @@ package com.gaboexperimetos.cyberhex
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
+import io.flutter.plugin.common.MethodChannel
 
 /**
  * Application de CyberHex: crea el `FlutterEngine` **antes** que cualquier
@@ -62,7 +64,56 @@ class CyberHexApplication : Application() {
             // El canal se engancha aquí (no en la actividad): los botones del
             // casco y de la notificación tienen que funcionar sin ventana.
             MediaBridge.connect(engine, appContext)
+            // Y el de almacenamiento también: Dart pregunta por el directorio
+            // de datos en su `main()`, antes de que exista ninguna actividad.
+            StorageBridge.connect(engine, appContext)
             return engine
         }
+    }
+}
+
+/**
+ * Canal `cyberhex/storage`: entrega a Dart el directorio privado de la app.
+ *
+ * Por qué existe: en Android puro en Dart no hay forma de llegar a
+ * `context.filesDir` sin `path_provider` (una dependencia más) o sin este
+ * canal. `cacheDir` es lo que el sistema puede vaciar cuando le falta espacio,
+ * y por eso la sesión y los favoritos se perdían (R14 del informe).
+ *
+ * Contrato (§8.6): un único método, `getAppDataDir` → `String` con la ruta
+ * absoluta de `filesDir`. Si el canal no existe (escritorio, pruebas), Dart
+ * cae al temporal y sigue funcionando.
+ */
+internal object StorageBridge {
+    private const val CHANNEL = "cyberhex/storage"
+    private const val TAG = "CyberHex.Storage"
+
+    private var channel: MethodChannel? = null
+
+    /** Idempotente: se puede llamar desde la Application y desde la actividad. */
+    fun connect(engine: FlutterEngine, context: Context) {
+        if (channel != null) return
+        val appContext = context.applicationContext ?: context
+        val methodChannel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
+        methodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getAppDataDir" -> {
+                    val dir = appContext.filesDir
+                    if (dir == null) {
+                        result.error("sin_directorio", "filesDir no disponible", null)
+                    } else {
+                        // Se crea por si el sistema limpió la carpeta: escribir
+                        // en una ruta que no existe es el otro modo de perder
+                        // datos.
+                        if (!dir.exists()) dir.mkdirs()
+                        Log.i(TAG, "filesDir: ${dir.absolutePath}")
+                        result.success(dir.absolutePath)
+                    }
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+        channel = methodChannel
     }
 }

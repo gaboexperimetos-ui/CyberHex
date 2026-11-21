@@ -26,6 +26,8 @@ import java.io.FileOutputStream
  * Además:
  *  * engancha el canal `cyberhex/media` en `configureFlutterEngine` (idempotente,
  *    porque el motor ya viene enganchado desde la Application);
+ *  * engancha también `cyberhex/storage`, que devuelve `filesDir` para que Dart
+ *    guarde la sesión y los favoritos fuera del caché (R14);
  *  * pide `POST_NOTIFICATIONS` en Android 13+, necesario para que se vea la
  *    notificación de reproducción (sin permiso el servicio sigue sonando, pero
  *    la notificación no se muestra);
@@ -69,6 +71,9 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MediaBridge.connect(flutterEngine, applicationContext)
         IntentBridge.attach(flutterEngine)
+        // El motor ya lo enganchó la Application; repetirlo aquí es no-op y
+        // cubre el caso de un motor creado por la actividad.
+        StorageBridge.connect(flutterEngine, applicationContext)
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {

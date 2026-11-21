@@ -15,8 +15,8 @@ import 'session_store.dart';
 /// la lista tienen que repintarse en cuanto se marca o desmarca una pista.
 class FavoritesStore extends ChangeNotifier {
   FavoritesStore({File? file})
-      : file = file ??
-            File('${SessionStore.defaultDirectory().path}/favorites.json');
+      : file =
+            file ?? File('${StorageDirectory.current.path}/favorites.json');
 
   /// Sin disco: para pruebas y vistas previas.
   FavoritesStore.memory() : file = null;
