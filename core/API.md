@@ -68,7 +68,9 @@ const char* ch_core_last_error(void);   /* error de creación global */
 ch_engine* ch_engine_create(void);
 void       ch_engine_destroy(ch_engine* engine);
 
-int32_t ch_engine_load(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_load(ch_engine* engine, const char* utf8_path);      /* deja la cola con 1 pista */
+int32_t ch_engine_play_index(ch_engine* engine, int32_t index);         /* reproduce sin vaciar la cola */
+int32_t ch_engine_load_add(ch_engine* engine, const char* utf8_path);   /* añade al final y reproduce */
 int32_t ch_engine_play(ch_engine* engine);
 int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);

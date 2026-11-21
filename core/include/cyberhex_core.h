@@ -15,6 +15,10 @@ ch_engine* ch_engine_create(void);
 void ch_engine_destroy(ch_engine* engine);
 
 int32_t ch_engine_load(ch_engine* engine, const char* utf8_path);
+/* Reproduce la pista `index` de la cola sin vaciarla. */
+int32_t ch_engine_play_index(ch_engine* engine, int32_t index);
+/* Añade la pista al final de la cola y la reproduce (la cola se conserva). */
+int32_t ch_engine_load_add(ch_engine* engine, const char* utf8_path);
 int32_t ch_engine_play(ch_engine* engine);
 int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);

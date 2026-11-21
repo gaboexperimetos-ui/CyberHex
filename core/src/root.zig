@@ -241,11 +241,9 @@ pub const Engine = struct {
     limit_ceiling: f32 = 0.891, // ~ -1 dBFS
     limit_gain: f32 = 1.0,
     sleep_end_ms: u64 = 0,
-    sleep_lock: SpinLock = .{},
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
     buf_underflows: u64 = 0,
-    buf_lock: SpinLock = .{},
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     ev_lock: SpinLock = .{},
@@ -266,7 +264,14 @@ pub const Engine = struct {
     }
 
     fn pushEvent(self: *Engine, kind: c_int, a: c_int, b: c_int, value: f64) void {
-        self.ev_lock.lock();
+        // Se puede llamar desde el hilo de audio: si el consumidor tiene el
+        // candado, se reintenta unas pocas veces y se descarta el evento antes
+        // que bloquear el callback.
+        var tries: usize = 0;
+        while (!self.ev_lock.tryLock()) : (tries += 1) {
+            if (tries >= 64) return;
+            std.atomic.spinLoopHint();
+        }
         const next = (self.ev_head + 1) % self.ev_buf.len;
         if (next == self.ev_tail) {
             self.ev_tail = (self.ev_tail + 1) % self.ev_buf.len;
@@ -1006,9 +1011,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
     }
 
     fn sleepRemainingMs(self: *Engine) i64 {
-        self.sleep_lock.lock();
-        const end = self.sleep_end_ms;
-        self.sleep_lock.unlock();
+        const end = @atomicLoad(u64, &self.sleep_end_ms, .acquire);
         if (end == 0) return -1;
         const now = monoMs();
         if (now >= end) return 0;
@@ -1018,7 +1021,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
     fn sleepGain(self: *Engine) ?f32 {
         const remaining = self.sleepRemainingMs();
         if (remaining < 0) return null;
-        const fade: i64 = @intCast(self.sleep_fade_ms);
+        const fade: i64 = @intCast(@atomicLoad(u32, &self.sleep_fade_ms, .monotonic));
         if (remaining == 0) return 0;
         if (remaining >= fade) return 1;
         if (fade <= 0) return 1;
@@ -1028,9 +1031,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
     fn fireSleep(self: *Engine) void {
         if (self.sleep_fired) return;
         self.sleep_fired = true;
-        self.sleep_lock.lock();
-        self.sleep_end_ms = 0;
-        self.sleep_lock.unlock();
+        @atomicStore(u64, &self.sleep_end_ms, 0, .release);
         @atomicStore(bool, &self.playing, false, .release);
         self.pushEvent(EV_SLEEP, 0, 0, 0);
         self.pushEvent(EV_STATE, 0, 0, 0);
@@ -1066,9 +1067,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         if (avail > self.ring.cap) avail = 0;
         const take = @min(frames_out, avail);
         if (playing and take < frames_out) {
-            self.buf_lock.lock();
-            self.buf_underflows +%= 1;
-            self.buf_lock.unlock();
+            _ = @atomicRmw(u64, &self.buf_underflows, .Add, 1, .monotonic);
         }
         if (take > 0) {
             self.readRingAt(r, out[0 .. take * CHANNELS]);
@@ -1129,8 +1128,8 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             self.fade_gain = if (!playing and g < 0.001) 0 else g;
         }
 
-        if (take > 0) {
-            self.sp_lock.lock();
+        if (take > 0 and self.sp_lock.tryLock()) {
+            defer self.sp_lock.unlock();
             var i: usize = 0;
             while (i < take) : (i += 1) {
                 const l = out[i * CHANNELS];
@@ -1138,7 +1137,6 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 self.sp_buf[self.sp_pos] = (l + rr) * 0.5;
                 self.sp_pos = (self.sp_pos + 1) % SP_FRAMES;
             }
-            self.sp_lock.unlock();
         }
 
         if (take == 0) {
@@ -1476,6 +1474,47 @@ export fn ch_engine_load(self: ?*Engine, path: [*c]const u8) i32 {
     if (added == null) return e.fail("sin memoria para la lista de reproducción", -2);
 
     return e.beginAt(0);
+}
+
+/// Reproduce la pista `index` de la cola **sin vaciarla**: la actual se
+/// reemplaza por la pedida y el resto de la lista se conserva.
+export fn ch_engine_play_index(self: ?*Engine, index: i32) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const count: usize = e.playlist.items.len;
+    e.list_mutex.unlock();
+    if (index < 0 or index >= @as(i32, @intCast(count))) {
+        return e.fail("indice de cola fuera de rango", -1);
+    }
+
+    @atomicStore(bool, &e.playing, false, .release);
+    @atomicStore(usize, &e.seek_req, NO_SEEK, .release);
+    @atomicStore(usize, &e.skip_req, NO_SEEK, .release);
+    if (!e.waitIdle(2000)) return e.fail("el motor de audio no respondió", -3);
+    e.flushRing();
+
+    const rc = e.beginAt(@intCast(index));
+    if (rc != 0) return rc;
+    @atomicStore(bool, &e.playing, true, .release);
+    e.pushEvent(EV_STATE, 1, 0, 0);
+    return 0;
+}
+
+/// Añade `path` al final de la cola y la reproduce, conservando lo que ya
+/// había (a diferencia de `ch_engine_load`, que deja la cola con una pista).
+export fn ch_engine_load_add(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    const p = path orelse return e.fail("ruta nula", -1);
+    e.clearError();
+
+    e.list_mutex.lock();
+    const added = addPath(e, std.mem.span(p));
+    const count: c_int = @intCast(e.playlist.items.len);
+    e.list_mutex.unlock();
+
+    const index = added orelse return e.fail("sin memoria para la lista de reproducción", -2);
+    e.pushEvent(EV_QUEUE, count, 0, 0);
+    return ch_engine_play_index(e, @intCast(index));
 }
 
 export fn ch_engine_play(self: ?*Engine) i32 {
@@ -1900,18 +1939,14 @@ export fn ch_engine_set_volume(self: ?*Engine, volume: f32) i32 {
 export fn ch_engine_set_sleep_timer(self: ?*Engine, seconds: f64, fade_seconds: f64) i32 {
     const e = self orelse return -1;
     if (!(seconds > 0)) {
-        e.sleep_lock.lock();
-        e.sleep_end_ms = 0;
-        e.sleep_lock.unlock();
+        @atomicStore(u64, &e.sleep_end_ms, 0, .release);
         e.sleep_fired = false;
         return 0;
     }
     const now = monoMs();
     const ms: u64 = @intFromFloat(@min(seconds * 1000.0, 604800000.0));
-    e.sleep_lock.lock();
-    e.sleep_end_ms = now + ms;
-    e.sleep_lock.unlock();
-    e.sleep_fade_ms = @intFromFloat(std.math.clamp(fade_seconds * 1000.0, 0.0, 60000.0));
+    @atomicStore(u64, &e.sleep_end_ms, now + ms, .release);
+    @atomicStore(u32, &e.sleep_fade_ms, @intFromFloat(std.math.clamp(fade_seconds * 1000.0, 0.0, 60000.0)), .monotonic);
     e.sleep_fired = false;
     return 0;
 }
@@ -2226,9 +2261,7 @@ export fn ch_engine_buffered_seconds(self: ?*Engine) f64 {
 /// Nº de veces que el hilo de audio se quedo sin datos (underrun).
 export fn ch_engine_buffer_underflows(self: ?*Engine) u64 {
     const e = self orelse return 0;
-    e.buf_lock.lock();
-    defer e.buf_lock.unlock();
-    return e.buf_underflows;
+    return @atomicLoad(u64, &e.buf_underflows, .monotonic);
 }
 
 // ---- Biblioteca de audio (escaneo incremental de carpetas) ----
@@ -2318,4 +2351,56 @@ export fn ch_engine_poll_event(self: ?*Engine, out: ?*ChEvent) i32 {
     ev.* = e.ev_buf[e.ev_tail];
     e.ev_tail = (e.ev_tail + 1) % e.ev_buf.len;
     return 1;
+}
+
+test "eq: frecuencias de banda" {
+    try std.testing.expectEqual(@as(i32, 36), ch_engine_eq_band_count());
+    try std.testing.expectEqual(@as(f32, 20.0), ch_engine_eq_band_freq(0));
+    try std.testing.expectEqual(@as(f32, 20000.0), ch_engine_eq_band_freq(35));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_eq_band_freq(-1));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_eq_band_freq(36));
+}
+
+test "api: los punteros nulos devuelven error, no revientan" {
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_play(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_play_index(null, 0));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_load_add(null, null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_band_gain(null, 0, 3));
+    try std.testing.expectEqual(@as(f64, 0.0), ch_engine_position(null));
+    try std.testing.expectEqual(@as(u64, 0), ch_engine_buffer_underflows(null));
+}
+
+test "moveIndex reordena sin perder pistas" {
+    // 0..4, mover 0 a 3 -> [1, 2, 3, 0, 4]
+    try std.testing.expectEqual(@as(usize, 3), moveIndex(0, 3, 0));
+    try std.testing.expectEqual(@as(usize, 0), moveIndex(0, 3, 1));
+    try std.testing.expectEqual(@as(usize, 1), moveIndex(0, 3, 2));
+    try std.testing.expectEqual(@as(usize, 2), moveIndex(0, 3, 3));
+    try std.testing.expectEqual(@as(usize, 4), moveIndex(0, 3, 4));
+    // mover 3 a 1 -> [0, 3, 1, 2, 4]
+    try std.testing.expectEqual(@as(usize, 0), moveIndex(3, 1, 0));
+    try std.testing.expectEqual(@as(usize, 2), moveIndex(3, 1, 1));
+    try std.testing.expectEqual(@as(usize, 3), moveIndex(3, 1, 2));
+    try std.testing.expectEqual(@as(usize, 1), moveIndex(3, 1, 3));
+    try std.testing.expectEqual(@as(usize, 4), moveIndex(3, 1, 4));
+}
+
+test "parseLeadingFloat lee las etiquetas de ReplayGain" {
+    try std.testing.expectEqual(@as(f32, -7.5), parseLeadingFloat("-7.50 dB").?);
+    try std.testing.expectEqual(@as(f32, 1.2), parseLeadingFloat("+1.2").?);
+    try std.testing.expectEqual(@as(f32, 0.95), parseLeadingFloat("0.950").?);
+    try std.testing.expect(parseLeadingFloat("sin numeros") == null);
+    try std.testing.expect(parseLeadingFloat("") == null);
+}
+
+test "lrcPathFor cambia la extension, no las carpetas" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const uno = try lrcPathFor(a, "/musica/tema.flac");
+    try std.testing.expectEqualStrings("/musica/tema.lrc", uno);
+
+    const dos = try lrcPathFor(a, "/musica/carpeta.con.puntos/tema");
+    try std.testing.expectEqualStrings("/musica/carpeta.con.puntos/tema.lrc", dos);
 }
