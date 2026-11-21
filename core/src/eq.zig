@@ -59,22 +59,39 @@ fn band(freq: f32, gain_db: f32) Coeffs {
 
 pub const Equalizer = struct {
     config: Config = .{},
+    // Ultima copia consistente leida por el hilo de audio: si el escritor se
+    // queda a medias, se reutiliza en lugar de girar dentro del callback.
+    last_config: Config = .{},
     seq: u32 = 0,
     generation: u32 = 0,
     last_generation: u32 = 0,
+    // Ganancias vigentes (para saber que bandas cambiaron de verdad).
+    gains: [BAND_COUNT]f32 = @splat(0),
+    // Bandas cuyo estado hay que reiniciar; se acumula entre cambios.
+    pending_reset: u64 = 0,
     state: [CHANNELS][BAND_COUNT]State = std.mem.zeroes([CHANNELS][BAND_COUNT]State),
 
     pub fn setGains(self: *Equalizer, gains_db: []const f32) void {
         var next: Config = .{};
+        var gains: [BAND_COUNT]f32 = @splat(0);
+        var reset_mask: u64 = 0;
         for (0..BAND_COUNT) |i| {
             const g = if (i < gains_db.len)
                 std.math.clamp(gains_db[i], -MAX_GAIN_DB, MAX_GAIN_DB)
             else
                 0;
             next.coeffs[i] = band(FREQS[i], g);
+            gains[i] = g;
             if (g != 0) {
                 next.mask |= (@as(u64, 1) << @intCast(i));
             }
+            if (g != self.gains[i]) {
+                reset_mask |= (@as(u64, 1) << @intCast(i));
+            }
+        }
+        self.gains = gains;
+        if (reset_mask != 0) {
+            _ = @atomicRmw(u64, &self.pending_reset, .Or, reset_mask, .monotonic);
         }
 
         const s = @atomicLoad(u32, &self.seq, .acquire);
@@ -84,24 +101,39 @@ pub const Equalizer = struct {
         _ = @atomicRmw(u32, &self.generation, .Add, 1, .monotonic);
     }
 
-    fn resetState(self: *Equalizer) void {
-        self.state = std.mem.zeroes([CHANNELS][BAND_COUNT]State);
+    /// Reinicia solo las bandas cuya ganancia cambio: reiniciar las 36 en cada
+    /// movimiento del slider metia un transitorio audible en todo el espectro.
+    fn resetMask(self: *Equalizer, mask: u64) void {
+        for (0..CHANNELS) |ch| {
+            for (0..BAND_COUNT) |b| {
+                if (mask & (@as(u64, 1) << @intCast(b)) != 0) {
+                    self.state[ch][b] = .{};
+                }
+            }
+        }
     }
 
-    fn snapshot(self: *const Equalizer) Config {
-        while (true) {
+    fn snapshot(self: *Equalizer) Config {
+        var attempt: usize = 0;
+        while (attempt < 8) : (attempt += 1) {
             const s1 = @atomicLoad(u32, &self.seq, .acquire);
-            if (s1 & 1 != 0) continue;
-            const set = self.config;
-            const s2 = @atomicLoad(u32, &self.seq, .acquire);
-            if (s1 == s2) return set;
+            if (s1 & 1 == 0) {
+                const set = self.config;
+                const s2 = @atomicLoad(u32, &self.seq, .acquire);
+                if (s1 == s2) {
+                    self.last_config = set;
+                    return set;
+                }
+            }
         }
+        return self.last_config;
     }
 
     pub fn process(self: *Equalizer, buf: []f32, frames: usize) void {
         const gen = @atomicLoad(u32, &self.generation, .acquire);
         if (gen != self.last_generation) {
-            self.resetState();
+            const mask = @atomicRmw(u64, &self.pending_reset, .Xchg, 0, .acq_rel);
+            self.resetMask(mask);
             self.last_generation = gen;
         }
 
@@ -162,4 +194,25 @@ test "un refuerzo cambia la señal" {
         if (@abs(got - want) > 1e-6) changed += 1;
     }
     try std.testing.expect(changed > 0);
+}
+
+test "solo se reinicia el estado de la banda que cambia" {
+    var e: Equalizer = .{};
+    var gains: [BAND_COUNT]f32 = @splat(0);
+
+    gains[3] = 6;
+    e.setGains(&gains);
+    try std.testing.expectEqual(@as(u64, 1) << 3, e.pending_reset);
+
+    // Misma ganancia: no hay nada que reiniciar.
+    e.setGains(&gains);
+    try std.testing.expectEqual(@as(u64, 1) << 3, e.pending_reset);
+
+    gains[7] = -3;
+    e.setGains(&gains);
+    try std.testing.expectEqual((@as(u64, 1) << 3) | (@as(u64, 1) << 7), e.pending_reset);
+
+    var buf = [_]f32{ 0.1, 0.1, 0.1, 0.1 };
+    e.process(&buf, 2);
+    try std.testing.expectEqual(@as(u64, 0), e.pending_reset);
 }
