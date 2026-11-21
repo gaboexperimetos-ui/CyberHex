@@ -57,6 +57,13 @@ float   ch_engine_speed(ch_engine* engine);
 int32_t ch_engine_set_pitch(ch_engine* engine, float semitones);
 float   ch_engine_pitch(ch_engine* engine);
 
+/*
+ * Analizador de espectro sobre el audio que suena (post-EQ, post-volumen).
+ * Escribe `bands` valores 0.0-1.0 en `out`, repartidos logaritmicamente de
+ * 20 Hz a 20 kHz (-80 dB .. 0 dB). Pensado para vúmetros/visualizadores.
+ */
+int32_t ch_engine_spectrum(ch_engine* engine, float* out, int32_t bands);
+
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);

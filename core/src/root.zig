@@ -1,5 +1,6 @@
 const std = @import("std");
 const eq = @import("eq.zig");
+const fft = @import("fft.zig");
 const Stretch = @import("stretch.zig").Stretch;
 
 pub const SAMPLE_RATE: u32 = 48000;
@@ -13,6 +14,7 @@ const SCRATCH_FRAMES: usize = 4096;
 const NO_SEEK: usize = std.math.maxInt(usize);
 const MAX_SEGMENTS: usize = 256;
 const MAX_XFADE_FRAMES: usize = SAMPLE_RATE * 12;
+const SP_FRAMES: usize = 2048; // ventana del analizador de espectro (~43 ms)
 
 const ch_decoder = opaque {};
 
@@ -137,6 +139,12 @@ pub const Engine = struct {
     speed_bits: u32 = @bitCast(@as(f32, 1)),
     pitch_bits: u32 = @bitCast(@as(f32, 0)),
 
+    sp_buf: []f32 = &.{},
+    sp_pos: usize = 0,
+    sp_lock: SpinLock = .{},
+    sp_re: []f32 = &.{},
+    sp_im: []f32 = &.{},
+
     thread: ?std.Thread = null,
     stop: bool = false,
     idle: bool = true,
@@ -197,7 +205,35 @@ pub const Engine = struct {
     }
 
     fn resetStretch(self: *Engine) void {
-        if (self.stretch) |*st| st.reset();
+        if (self.stretch) |*st| {
+            st.configure(self.speedValue(), self.pitchValue());
+            st.reset();
+        }
+    }
+
+    fn stretchStale(self: *const Engine) bool {
+        const st = if (self.stretch) |*s| s else return false;
+        return st.speed != self.speedValue() or st.pitch != self.pitchValue();
+    }
+
+    fn applyHotStretchChange(self: *Engine) void {
+        const d = self.decoder orelse {
+            self.resetStretch();
+            return;
+        };
+        const p = @atomicLoad(usize, &self.played, .acquire);
+        var target: usize = 0;
+        self.seg_lock.lock();
+        if (self.findSegment(p)) |pos| {
+            const s = &self.segments[pos];
+            if (p > s.start) target = @min(p - s.start, s.end - s.start);
+        }
+        self.seg_lock.unlock();
+
+        self.resetStretch();
+        self.flushRing();
+        _ = ch_decode_seek_frame(d, target);
+        @atomicStore(bool, &self.eof, false, .release);
     }
 
     fn ringFree(self: *Engine) usize {
@@ -679,6 +715,18 @@ pub const Engine = struct {
             for (out[0..produced]) |*s| s.* *= gain;
         }
 
+        if (take > 0) {
+            self.sp_lock.lock();
+            var i: usize = 0;
+            while (i < take) : (i += 1) {
+                const l = out[i * CHANNELS];
+                const rr = out[i * CHANNELS + 1];
+                self.sp_buf[self.sp_pos] = (l + rr) * 0.5;
+                self.sp_pos = (self.sp_pos + 1) % SP_FRAMES;
+            }
+            self.sp_lock.unlock();
+        }
+
         if (take == 0) {
             const seeking = @atomicLoad(usize, &self.seek_req, .acquire) != NO_SEEK;
             const skipping = @atomicLoad(usize, &self.skip_req, .acquire) != NO_SEEK;
@@ -692,6 +740,52 @@ pub const Engine = struct {
                     @atomicStore(bool, &self.playing, false, .release);
                 }
             }
+        }
+    }
+
+    fn spectrum(self: *Engine, out: []f32) void {
+        const bands = out.len;
+        if (bands == 0) return;
+        if (!@atomicLoad(bool, &self.playing, .acquire)) {
+            @memset(out, 0);
+            return;
+        }
+
+        self.sp_lock.lock();
+        const pos = self.sp_pos;
+        var i: usize = 0;
+        while (i < SP_FRAMES) : (i += 1) {
+            const idx = (pos + i) % SP_FRAMES;
+            const phase = 2.0 * std.math.pi * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(SP_FRAMES));
+            self.sp_re[i] = self.sp_buf[idx] * (0.5 - 0.5 * @cos(phase));
+            self.sp_im[i] = 0;
+        }
+        self.sp_lock.unlock();
+
+        fft.fft(self.sp_re, self.sp_im);
+
+        const bin_hz = @as(f32, @floatFromInt(SAMPLE_RATE)) / @as(f32, @floatFromInt(SP_FRAMES));
+        const max_bin = SP_FRAMES / 2;
+        var b: usize = 0;
+        while (b < bands) : (b += 1) {
+            const t0 = @as(f32, @floatFromInt(b)) / @as(f32, @floatFromInt(bands));
+            const t1 = @as(f32, @floatFromInt(b + 1)) / @as(f32, @floatFromInt(bands));
+            const f0 = 20.0 * std.math.pow(f32, 1000.0, t0);
+            const f1 = 20.0 * std.math.pow(f32, 1000.0, t1);
+            var lo: usize = @intFromFloat(@floor(f0 / bin_hz));
+            var hi: usize = @intFromFloat(@ceil(f1 / bin_hz));
+            if (lo < 1) lo = 1;
+            if (hi > max_bin) hi = max_bin;
+            if (hi <= lo) hi = lo + 1;
+
+            var sum: f32 = 0;
+            var k = lo;
+            while (k < hi) : (k += 1) {
+                sum += self.sp_re[k] * self.sp_re[k] + self.sp_im[k] * self.sp_im[k];
+            }
+            const mean = sum / @as(f32, @floatFromInt(hi - lo));
+            const db = 10.0 * std.math.log10(mean + 1e-20);
+            out[b] = std.math.clamp((db + 80.0) / 80.0, 0.0, 1.0);
         }
     }
 };
@@ -718,6 +812,10 @@ fn decoderLoop(self: *Engine) void {
             sleepMs(2);
             continue;
         }
+        if (self.stretchStale()) {
+            self.applyHotStretchChange();
+            continue;
+        }
         if (@atomicLoad(bool, &self.eof, .acquire)) {
             @atomicStore(bool, &self.idle, true, .release);
             sleepMs(2);
@@ -731,13 +829,6 @@ fn decoderLoop(self: *Engine) void {
 
         if (self.stretchActive()) {
             const st = &self.stretch.?;
-            const sp = self.speedValue();
-            const pt = self.pitchValue();
-            if (st.speed != sp or st.pitch != pt) {
-                st.configure(sp, pt);
-                st.reset();
-                self.flushRing();
-            }
 
             if (!self.drainStretch(st)) {
                 sleepMs(2);
@@ -807,13 +898,16 @@ fn destroyEngine(e: *Engine) void {
     e.playlist.deinit(e.allocator);
     if (e.stretch) |*st| st.deinit();
     e.allocator.free(e.stretch_buf);
+    e.allocator.free(e.sp_im);
+    e.allocator.free(e.sp_re);
+    e.allocator.free(e.sp_buf);
     e.allocator.free(e.scratch);
     e.allocator.free(e.ring.buf);
     e.allocator.destroy(e);
 }
 
 export fn ch_core_version() [*c]const u8 {
-    return @ptrCast("0.4.0");
+    return @ptrCast("0.5.0");
 }
 
 export fn ch_core_last_error() [*c]const u8 {
@@ -843,8 +937,38 @@ export fn ch_engine_create() ?*Engine {
     };
     self.scratch_frames = SCRATCH_FRAMES;
 
+    self.sp_buf = alloc.alloc(f32, SP_FRAMES) catch {
+        setGlobalError("no se pudo reservar el analizador de espectro");
+        alloc.free(self.scratch);
+        alloc.free(self.ring.buf);
+        alloc.destroy(self);
+        return null;
+    };
+    self.sp_re = alloc.alloc(f32, SP_FRAMES) catch {
+        setGlobalError("no se pudo reservar el analizador de espectro");
+        alloc.free(self.sp_buf);
+        alloc.free(self.scratch);
+        alloc.free(self.ring.buf);
+        alloc.destroy(self);
+        return null;
+    };
+    self.sp_im = alloc.alloc(f32, SP_FRAMES) catch {
+        setGlobalError("no se pudo reservar el analizador de espectro");
+        alloc.free(self.sp_re);
+        alloc.free(self.sp_buf);
+        alloc.free(self.scratch);
+        alloc.free(self.ring.buf);
+        alloc.destroy(self);
+        return null;
+    };
+    @memset(self.sp_buf, 0);
+    self.sp_pos = 0;
+
     self.stretch = Stretch.init(alloc) catch {
         setGlobalError("no se pudo reservar el motor de velocidad/tono");
+        alloc.free(self.sp_im);
+        alloc.free(self.sp_re);
+        alloc.free(self.sp_buf);
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
         alloc.destroy(self);
@@ -853,6 +977,9 @@ export fn ch_engine_create() ?*Engine {
     self.stretch_buf = alloc.alloc(f32, SCRATCH_FRAMES * CHANNELS) catch {
         setGlobalError("no se pudo reservar el búfer de estiramiento");
         self.stretch.?.deinit();
+        alloc.free(self.sp_im);
+        alloc.free(self.sp_re);
+        alloc.free(self.sp_buf);
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
         alloc.destroy(self);
@@ -866,6 +993,9 @@ export fn ch_engine_create() ?*Engine {
         copyAudioError();
         if (self.stretch) |*st| st.deinit();
         alloc.free(self.stretch_buf);
+        alloc.free(self.sp_im);
+        alloc.free(self.sp_re);
+        alloc.free(self.sp_buf);
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
         alloc.destroy(self);
@@ -878,6 +1008,9 @@ export fn ch_engine_create() ?*Engine {
         self.audio = null;
         if (self.stretch) |*st| st.deinit();
         alloc.free(self.stretch_buf);
+        alloc.free(self.sp_im);
+        alloc.free(self.sp_re);
+        alloc.free(self.sp_buf);
         alloc.free(self.scratch);
         alloc.free(self.ring.buf);
         alloc.destroy(self);
@@ -1119,6 +1252,15 @@ export fn ch_engine_set_pitch(self: ?*Engine, semitones: f32) i32 {
 export fn ch_engine_pitch(self: ?*Engine) f32 {
     const e = self orelse return 0;
     return e.pitchValue();
+}
+
+export fn ch_engine_spectrum(self: ?*Engine, out: [*c]f32, bands: i32) i32 {
+    const e = self orelse return -1;
+    if (bands <= 0 or out == null) return -1;
+    if (e.sp_buf.len == 0) return -1;
+    const n: usize = @intCast(bands);
+    e.spectrum(out[0..n]);
+    return 0;
 }
 
 export fn ch_engine_seek(self: ?*Engine, seconds: f64) i32 {

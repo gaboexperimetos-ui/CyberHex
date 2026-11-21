@@ -92,6 +92,9 @@ float   ch_engine_speed(ch_engine* engine);
 int32_t ch_engine_set_pitch(ch_engine* engine, float semitones);
 float   ch_engine_pitch(ch_engine* engine);
 
+/* Analizador de espectro: `bands` valores 0..1 de 20 Hz a 20 kHz (-80..0 dB). */
+int32_t ch_engine_spectrum(ch_engine* engine, float* out, int32_t bands);
+
 /* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB. */
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
@@ -153,6 +156,13 @@ ch_engine_destroy(e);
 - **Tono**: `set_pitch(-12..+12)` remuestrea con interpolación cúbica y
   time-stretch compensatorio, así que cambia la frecuencia sin cambiar la
   duración. Velocidad y tono se combinan (p. ej. +12 semitonos a 2x).
+- **Cambios en caliente**: `set_speed`/`set_pitch` con una pista sonando
+  reconfiguran el motor al instante: se vacía el búfer, se reposiciona el
+  decodificador en la posición audible y se reanuda. La posición no salta.
+- **Espectro**: `ch_engine_spectrum(engine, out, bands)` entrega `bands`
+  valores 0..1 repartidos logarítmicamente de 20 Hz a 20 kHz (-80 dB a 0 dB),
+  medidos sobre el audio ya ecualizado y con volumen. En pausa devuelve ceros.
+  Con 32 bandas, 440 Hz cae en la banda 13 y 880 Hz en la 17.
 - **Seek**: relativo al inicio de la pista audible, acotado a su duración. La
   posición se actualiza al instante aunque el audio tarde un bloque.
 - **ReplayGain**: se aplica por pista al pasar a ella; la ganancia se limita
