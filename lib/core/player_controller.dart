@@ -83,6 +83,8 @@ class PlayerController extends ChangeNotifier {
       playing: _player.isPlaying,
       busy: _loading != null,
       volume: _volume,
+      repeatMode: _player.repeatMode,
+      shuffle: _player.shuffle,
       error: _error,
     );
     if (next != _snapshot) {
@@ -159,6 +161,20 @@ class PlayerController extends ChangeNotifier {
     if (_disposed) return;
     _volume = value.clamp(0, 1).toDouble();
     _player.setVolume(_volume);
+    _refresh();
+  }
+
+  /// Cicla el modo de repetición: apagado → todo → una → apagado.
+  void cycleRepeat() {
+    if (_disposed) return;
+    _player.cycleRepeat();
+    _refresh();
+  }
+
+  /// Activa o desactiva la reproducción aleatoria.
+  void toggleShuffle() {
+    if (_disposed) return;
+    _player.toggleShuffle();
     _refresh();
   }
 

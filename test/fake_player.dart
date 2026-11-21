@@ -57,6 +57,16 @@ class FakePlayer implements PlayerApi {
   /// Rutas cargadas, en orden.
   final List<String> loadedPaths = [];
 
+  @override
+  int repeatMode = 0;
+
+  @override
+  bool shuffle = false;
+
+  /// Cuántas veces se pidió cambiar de modo (para comprobar la llamada).
+  int repeatRequests = 0;
+  int shuffleRequests = 0;
+
   int playCalls = 0;
   int pauseCalls = 0;
   int nextCalls = 0;
@@ -130,6 +140,30 @@ class FakePlayer implements PlayerApi {
 
   @override
   void setVolume(double value) {}
+
+  @override
+  void setRepeatMode(int mode) {
+    repeatRequests++;
+    repeatMode = math.max(0, math.min(2, mode));
+  }
+
+  @override
+  void setShuffle(bool enabled) {
+    shuffleRequests++;
+    shuffle = enabled;
+  }
+
+  @override
+  void cycleRepeat() {
+    repeatRequests++;
+    repeatMode = (repeatMode + 1) % 3;
+  }
+
+  @override
+  void toggleShuffle() {
+    shuffleRequests++;
+    shuffle = !shuffle;
+  }
 
   @override
   void setBand(int index, double db) {

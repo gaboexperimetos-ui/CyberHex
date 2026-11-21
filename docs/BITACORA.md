@@ -18,6 +18,52 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 11 · FASE 1A: Recientes, apertura desde el sistema y repeat/shuffle
+
+- **PEDIDO:** Plan Maestro, fase 1A en tres commits atómicos: (1) P0.4 motor
+  cacheado en la `Application` + R12 icono hexagonal; (2) P0.3 abrir audios con
+  `ACTION_VIEW` y `%U`; (3) repetir/aleatorio desde el núcleo hasta la UI.
+  `RIESGO ACEPTABLE`: sí, sí, **no**.
+- **HECHO (1, `bff248c`):** `CyberHexApplication` (nueva) crea el
+  `FlutterEngine` en `onCreate`, ejecuta `DartEntrypoint.createDefault()`, lo
+  cachea como `"cyberhex_engine"` y engancha `MediaBridge` **antes** de que
+  exista ventana. `MainActivity.provideFlutterEngine()` devuelve ese motor y
+  `shouldDestroyEngineWithHost()` responde `false`. `MediaBridge.connect()`
+  pasó a ser idempotente. Manifest: `android:name=".CyberHexApplication"`.
+  `MediaSessionService` usa `R.drawable.ic_launcher_foreground` como `smallIcon`.
+- **HECHO (2, `df02fef`):** manifest con `<intent-filter>` de `ACTION_VIEW`
+  (`DEFAULT`+`BROWSABLE`, `content`/`file`, `audio/*`); `MainActivity` captura el
+  `Uri` en `onCreate` (solo si `savedInstanceState == null`) y en `onNewIntent`,
+  copia los `content://` a `cacheDir/shared_audio/shared_<hash>.<ext>`
+  (extensión por MIME y luego por `DISPLAY_NAME`) y los entrega por el canal
+  `cyberhex/intent` (`getInitialFile` / `onOpenFile`, con el primer archivo
+  pendiente hasta que Dart pregunte). `packaging/linux/cyberhex.desktop`:
+  `Exec=cyberhex %U` + `MimeType` de audio. Dart: `ExternalFileChannel`
+  (carga y reproduce, ignora `MissingPluginException`), enganchado en
+  `main.dart` y liberado en `dispose()`. 8 tests nuevos con
+  `TestDefaultBinaryMessengerBinding`.
+- **HECHO (3, este commit):** `PlayerSnapshot` gana `repeatMode` (0/1/2) y
+  `shuffle`; `NativePlayer` bindea `ch_engine_set_repeat`, `ch_engine_repeat`,
+  `ch_engine_set_shuffle` y `ch_engine_shuffle` con `providesSymbol`;
+  `PlayerApi`/`PlayerController` exponen `cycleRepeat()` (0→1→2→0, leyendo del
+  motor para no desincronizarse) y `toggleShuffle()`; `FakePlayer` los
+  implementa; `player_page.dart` añade una fila con dos píldoras que **escriben
+  el estado** ("Aleatorio: sí/no", "Repetir: no/todo/una") y cambian de color,
+  icono (`repeat` ↔ `repeat_one`) y tooltip. 3 tests nuevos del controlador.
+- **VERIFICADO:** tree-sitter-dart 16/16 limpio; comprobador de firmas 31/31 en
+  `NativePlayer` y `FakePlayer`; canales cruzados `cyberhex/intent`
+  (`getInitialFile` y `onOpenFile` con el mismo nombre a ambos lados) y el de
+  medios intacto; manifest con dos `intent-filter` y XML válido; escáner de
+  llaves/paréntesis en los 4 `.kt` balanceado. Sin tocar `core/`.
+- **NO VERIFICABLE AQUÍ:** `flutter analyze`, `flutter test`, `kotlinc`, Gradle y
+  toda prueba en el teléfono (no hay SDK ni JDK).
+- **COMMITS:** `bff248c`, `df02fef`, este.
+- **ABIERTO / RIESGOS:** el `.desktop` ya pasa `%U` pero el runner de Linux no
+  entrega argv a Dart (P0.6); en escritorio el canal de intents no existe y todo
+  pasa por `MissingPluginException`; falta el primer `flutter build apk` real.
+
+---
+
 ## 2026-11-21 · turno 10 · Fusión de `main` y primer merge a `main`
 
 - **PEDIDO:** "mergea todo". Antes hubo que integrar los dos commits que `main`

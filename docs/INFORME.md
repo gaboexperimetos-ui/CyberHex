@@ -227,11 +227,13 @@ foco. Auriculares fuera: receptor dinámico de `ACTION_AUDIO_BECOMING_NOISY` →
 `pause`. Todos los `PendingIntent` usan `FLAG_IMMUTABLE` en API ≥ 23; cada acción
 lleva su propio *action* y *requestCode* para no colisionar.
 
-> **Limitación conocida (P0.4):** el `FlutterEngine` pertenece a `MainActivity`;
-> si se quita la tarea de Recientes, la actividad —y con ella el motor de
-> audio— se destruye aunque el servicio siga vivo. Para que la música sobreviva
-> a Recientes hace falta un `FlutterEngine` cacheado en una clase `Application`
-> (un cuarto archivo Kotlin, fuera del ALCANCE de este pedido).
+> **Resuelto en P0.4:** `CyberHexApplication` crea el `FlutterEngine` al nacer el
+> proceso, lo deja en `FlutterEngineCache` bajo `"cyberhex_engine"` y engancha
+> `MediaBridge` antes de que exista ninguna ventana. `MainActivity` lo reutiliza
+> (`provideFlutterEngine`) y responde `shouldDestroyEngineWithHost() = false`:
+> cerrar desde Recientes destruye la vista, **no** el isolate de Dart ni el hilo
+> de audio. Se extiende `android.app.Application` y no `FlutterApplication`
+> (deprecada desde Flutter 3.29; era una subclase vacía de `Application`).
 
 ---
 
@@ -246,8 +248,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 14/14 sin errores |
-| Firmas de `PlayerApi` | comprobador propio: 25 miembros en `NativePlayer` y `FakePlayer` | 25/25 en ambos |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 16/16 sin errores |
+| Firmas de `PlayerApi` | comprobador propio: 31 miembros en `NativePlayer` y `FakePlayer` | 31/31 en ambos |
 | Coherencia del canal | grep cruzado Dart↔Kotlin de nombres de método | 2/2 y 7/7 sin huérfanos |
 | XML de Android | `ElementTree` sobre `AndroidManifest.xml` | válido; 6 permisos, 1 servicio `mediaPlayback` |
 | Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 3/3 balanceados |
@@ -291,6 +293,16 @@ lleva su propio *action* y *requestCode* para no colisionar.
     - Todo devuelve `Future<bool>`/`Boolean`; `MissingPluginException` se ignora.
     - Sin `androidx.media` ni media3: `android.media.session.MediaSession` +
       `Notification.MediaStyle` (API 21+), cero dependencias nuevas.
+11. Canal `cyberhex/intent` (abrir audio desde fuera):
+    - **Dart → Kotlin**: `getInitialFile` → `String?` (el archivo con el que se
+      abrió la app; se entrega una sola vez).
+    - **Kotlin → Dart**: `onOpenFile` con la **ruta POSIX** ya materializada.
+    - Un `content://` se copia a `cacheDir/shared_audio/shared_<hash>.<ext>`
+      antes de cruzar el canal: el núcleo solo abre rutas de archivo.
+    - Si el `Intent` llega antes que Dart, queda pendiente y lo recoge
+      `getInitialFile` (no hay carrera perdida).
+12. Repetición: 0 = apagado, 1 = todo, 2 = una; `cycleRepeat()` va 0→1→2→0 y se
+    lee del motor (`ch_engine_repeat`), no de un espejo en Dart.
 
 ---
 
@@ -308,8 +320,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R8 | `ffmpeg.tar.xz` en git | ~decenas de MB; decisión de empaquetado pendiente (A4) | `core/third_party/` |
 | R9 | Sin CI | ninguna acción de GitHub valida nada | `.github/` (no existe) |
 | R10 | Android antes de P0.1 | ~~sin MediaSession ni servicio~~ **resuelto** en P0.1 (notificación, bloqueo, foco, auriculares) | `android/` |
-| R11 | Recientes mata el motor | el `FlutterEngine` vive en la actividad: quitar la tarea corta el audio aunque el servicio siga | `MainActivity.kt` → P0.4 |
-| R12 | Icono de la notificación | `android.R.drawable.ic_media_play` como *small icon* (monocromo del sistema); falta un vector propio | `MediaSessionService.kt` |
+| R11 | ~~Recientes mata el motor~~ | **resuelto**: engine cacheado en `CyberHexApplication`, `shouldDestroyEngineWithHost = false` | `CyberHexApplication.kt` |
+| R12 | ~~Icono genérico en la notificación~~ | **resuelto**: `R.drawable.ic_launcher_foreground` (hexágono propio) | `MediaSessionService.kt` |
 | R13 | FGS desde segundo plano | Android 12+ prohíbe arrancar un FGS en background salvo excepciones; aquí se arranca al pulsar play con la app delante | `MediaBridge.ensureServiceStarted` |
 
 ---
@@ -321,10 +333,11 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | # | Tarea | Alcance | Bloqueos |
 |---|---|---|---|
 | P0.1 | ~~`MediaSession` + servicio en primer plano~~ **HECHO** (turno 9): servicio, foco, notificación y bloqueo, sin dependencias nuevas | Kotlin + manifest + Dart | falta compilar y probar en el teléfono |
-| P0.4 | `FlutterEngine` cacheado en una `Application` propia para que la música sobreviva a "quitar de Recientes" | Kotlin (archivo nuevo) + manifest | requiere otra clase y cambiar el `android:name` del `<application>` |
+| P0.4 | ~~`FlutterEngine` cacheado en una `Application`~~ **HECHO**: `CyberHexApplication` + `provideFlutterEngine` + `shouldDestroyEngineWithHost = false` | Kotlin + manifest | falta probar en el teléfono |
+| P0.6 | Escritorio: consumir `%U` (el `.desktop` ya lo pasa, el runner no lo entrega a Dart) | runner C++ o `dart:io` con `Platform.environment` | requiere tocar el runner de Linux |
 | P0.5 | Bindear en Dart la API que trajo `main`: R128 (`ch_engine_analyze_loudness`), picos de forma de onda, ganancia manual en dB, crossfeed, hojas CUE y guardado de carátula | Dart | círculo de 1 turno; el núcleo ya está fusionado y verificado |
 | P0.2 | Pantallas de **biblioteca** (escaneo con `ch_library_*`) y **cola** (reordenar, quitar, saltar) | Dart | no verificable aquí |
-| P0.3 | Abrir archivos desde el gestor: `Intent.ACTION_VIEW` (Android) y `%U` en `.desktop` | Kotlin/Dart + runner C | requiere pasar argv a Dart |
+| P0.3 | ~~Abrir archivos desde el gestor~~ **HECHO en Android** (`ACTION_VIEW` + copia de `content://` + canal `cyberhex/intent`); el `.desktop` ya lleva `Exec=cyberhex %U` | Kotlin + Dart | en Linux falta el puente de argv (P0.6) |
 
 ### P1 — calidad y plataforma
 
@@ -366,6 +379,9 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 ## 12. Changelog (29 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 1A-3 → app(ui): repetir (off/todo/una) y aleatorio de punta a punta
+FASE 1A-2 → android+app: abrir audios desde el sistema (ACTION_VIEW, %U)
+FASE 1A-1 → android: motor cacheado en la Application (P0.4) + icono hexagonal
 FUSIÓN → main en la rama: 3 conflictos de núcleo resueltos (build.zig, root.zig, API.md)
 PEDIDO 3 → android: servicio en primer plano, MediaSession, foco y notificación
 PEDIDO 2 → app(platform): puente Dart ↔ servicio de medios por MethodChannel

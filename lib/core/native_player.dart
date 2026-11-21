@@ -302,6 +302,37 @@ class NativePlayer implements PlayerApi {
     _bindings.previous?.call(_engine);
   }
 
+  /// Modo de repetición del motor (0 apagado, 1 todo, 2 una).
+  @override
+  int get repeatMode {
+    if (_disposed) return 0;
+    final value = _bindings.repeat?.call(_engine) ?? 0;
+    return math.max(0, math.min(2, value));
+  }
+
+  @override
+  bool get shuffle => !_disposed && (_bindings.shuffle?.call(_engine) ?? 0) != 0;
+
+  @override
+  void setRepeatMode(int mode) {
+    if (_disposed) return;
+    _bindings.setRepeat?.call(_engine, math.max(0, math.min(2, mode)));
+  }
+
+  @override
+  void setShuffle(bool enabled) {
+    if (_disposed) return;
+    _bindings.setShuffle?.call(_engine, enabled ? 1 : 0);
+  }
+
+  /// 0 → 1 → 2 → 0. Se lee del motor para no desincronizarse si otra vía
+  /// (el servicio de medios, un preset guardado) lo cambió por su cuenta.
+  @override
+  void cycleRepeat() => setRepeatMode((repeatMode + 1) % 3);
+
+  @override
+  void toggleShuffle() => setShuffle(!shuffle);
+
   @override
   void seek(double seconds) => _bindings.seek(_engine, seconds);
 
@@ -501,6 +532,18 @@ class _Bindings {
         balance = lib.providesSymbol('ch_engine_balance')
             ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_balance')
             : null,
+        setRepeat = lib.providesSymbol('ch_engine_set_repeat')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_repeat')
+            : null,
+        repeat = lib.providesSymbol('ch_engine_repeat')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_repeat')
+            : null,
+        setShuffle = lib.providesSymbol('ch_engine_set_shuffle')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_shuffle')
+            : null,
+        shuffle = lib.providesSymbol('ch_engine_shuffle')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_shuffle')
+            : null,
         setChannelMode = lib.providesSymbol('ch_engine_set_channel_mode')
             ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_channel_mode')
             : null,
@@ -550,6 +593,10 @@ class _Bindings {
   final _NoArgIntDart? abiVersion;
   final _SetFloatDart? setBalance;
   final _GetFloatDart? balance;
+  final _SetIntDart? setRepeat;
+  final _IntDart? repeat;
+  final _SetIntDart? setShuffle;
+  final _IntDart? shuffle;
   final _SetIntDart? setChannelMode;
   final _IntDart? channelMode;
   final _TextDart titleFn;

@@ -145,7 +145,13 @@ class _PlayerPageState extends State<PlayerPage>
                                 setState(() => _dragging = false);
                               },
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
+                            _ModeRow(
+                              snapshot: snapshot,
+                              onCycleRepeat: _controller.cycleRepeat,
+                              onToggleShuffle: _controller.toggleShuffle,
+                            ),
+                            const SizedBox(height: 4),
                             _Controls(
                               snapshot: snapshot,
                               position: _controller.position,
@@ -444,6 +450,103 @@ class _SeekBar extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Aleatorio y repetición, con el estado escrito para que no haya dudas:
+/// "Aleatorio: sí / no" y "Repetir: no / todo / una".
+class _ModeRow extends StatelessWidget {
+  const _ModeRow({
+    required this.snapshot,
+    required this.onCycleRepeat,
+    required this.onToggleShuffle,
+  });
+
+  final PlayerSnapshot snapshot;
+  final VoidCallback onCycleRepeat;
+  final VoidCallback onToggleShuffle;
+
+  @override
+  Widget build(BuildContext context) {
+    final shuffle = snapshot.shuffle;
+    final repeat = snapshot.repeatMode;
+    final repeatLabel = switch (repeat) {
+      1 => 'Repetir: todo',
+      2 => 'Repetir: una',
+      _ => 'Repetir: no',
+    };
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _ModeButton(
+          icon: Icons.shuffle_rounded,
+          label: shuffle ? 'Aleatorio: sí' : 'Aleatorio: no',
+          active: shuffle,
+          tooltip: shuffle
+              ? 'Aleatorio activado (toca para desactivar)'
+              : 'Aleatorio desactivado (toca para activar)',
+          onPressed: onToggleShuffle,
+        ),
+        const SizedBox(width: 10),
+        _ModeButton(
+          icon: repeat == 2 ? Icons.repeat_one_rounded : Icons.repeat_rounded,
+          label: repeatLabel,
+          active: repeat != 0,
+          tooltip: switch (repeat) {
+            1 => 'Repetir todo (toca para repetir una sola)',
+            2 => 'Repetir una (toca para apagar)',
+            _ => 'Repetición apagada (toca para repetir todo)',
+          },
+          onPressed: onCycleRepeat,
+        ),
+      ],
+    );
+  }
+}
+
+class _ModeButton extends StatelessWidget {
+  const _ModeButton({
+    required this.icon,
+    required this.label,
+    required this.active,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool active;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = active ? chAccent : chMuted;
+    return Tooltip(
+      message: tooltip,
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, size: 18, color: color),
+        label: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          backgroundColor:
+              active ? chAccent.withValues(alpha: 0.14) : Colors.transparent,
+          foregroundColor: color,
+          shape: const StadiumBorder(),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          minimumSize: Size.zero,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          side: BorderSide(color: active ? chAccent : chBorder),
+        ),
+      ),
     );
   }
 }

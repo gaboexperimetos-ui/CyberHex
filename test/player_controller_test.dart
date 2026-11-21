@@ -118,6 +118,53 @@ void main() {
     expect(fake.previousCalls, 0);
   });
 
+  test('cycleRepeat recorre apagado, todo, una y vuelve a apagado', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.snapshot.repeatMode, 0);
+
+    controller.cycleRepeat();
+    expect(controller.snapshot.repeatMode, 1);
+    expect(fake.repeatRequests, 1);
+
+    controller.cycleRepeat();
+    expect(controller.snapshot.repeatMode, 2);
+
+    // Tercera pulsación: vuelve a apagado, no se queda en "una".
+    controller.cycleRepeat();
+    expect(controller.snapshot.repeatMode, 0);
+    expect(fake.repeatRequests, 3);
+  });
+
+  test('toggleShuffle alterna y el snapshot lo refleja', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.snapshot.shuffle, isFalse);
+
+    controller.toggleShuffle();
+    expect(controller.snapshot.shuffle, isTrue);
+    expect(fake.shuffleRequests, 1);
+
+    controller.toggleShuffle();
+    expect(controller.snapshot.shuffle, isFalse);
+  });
+
+  test('cycleRepeat y toggleShuffle se ignoran tras dispose', () {
+    final fake = FakePlayer();
+    final controller = PlayerController(fake);
+    controller.dispose();
+
+    controller.cycleRepeat();
+    controller.toggleShuffle();
+
+    expect(fake.repeatRequests, 0);
+    expect(fake.shuffleRequests, 0);
+  });
+
   test('dispose libera el motor', () {
     final fake = FakePlayer();
     final controller = PlayerController(fake);

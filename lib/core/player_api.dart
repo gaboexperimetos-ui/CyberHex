@@ -38,6 +38,8 @@ class PlayerSnapshot {
     this.playing = false,
     this.busy = false,
     this.volume = 1,
+    this.repeatMode = 0,
+    this.shuffle = false,
     this.error,
   });
 
@@ -50,6 +52,14 @@ class PlayerSnapshot {
   final bool playing;
   final bool busy;
   final double volume;
+
+  /// Modo de repetición del motor: 0 = apagado, 1 = repetir todo,
+  /// 2 = repetir una.
+  final int repeatMode;
+
+  /// ¿Reproducción aleatoria activada?
+  final bool shuffle;
+
   final String? error;
 
   PlayerSnapshot copyWith({
@@ -62,6 +72,8 @@ class PlayerSnapshot {
     bool? playing,
     bool? busy,
     double? volume,
+    int? repeatMode,
+    bool? shuffle,
     String? error,
     bool clearError = false,
   }) {
@@ -75,6 +87,8 @@ class PlayerSnapshot {
       playing: playing ?? this.playing,
       busy: busy ?? this.busy,
       volume: volume ?? this.volume,
+      repeatMode: repeatMode ?? this.repeatMode,
+      shuffle: shuffle ?? this.shuffle,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -91,12 +105,14 @@ class PlayerSnapshot {
         other.playing == playing &&
         other.busy == busy &&
         other.volume == volume &&
+        other.repeatMode == repeatMode &&
+        other.shuffle == shuffle &&
         other.error == error;
   }
 
   @override
   int get hashCode => Object.hash(hasTrack, title, artist, album, cover,
-      duration, playing, busy, volume, error);
+      duration, playing, busy, volume, repeatMode, shuffle, error);
 }
 
 /// Superficie que la UI necesita del motor.
@@ -138,6 +154,21 @@ abstract class PlayerApi {
 
   void seek(double seconds);
   void setVolume(double value);
+
+  /// Modo de repetición: 0 = apagado, 1 = repetir todo, 2 = repetir una.
+  int get repeatMode;
+
+  /// ¿Reproducción aleatoria activada?
+  bool get shuffle;
+
+  void setRepeatMode(int mode);
+  void setShuffle(bool enabled);
+
+  /// Cicla el modo de repetición 0 → 1 → 2 → 0.
+  void cycleRepeat();
+
+  /// Invierte el modo aleatorio.
+  void toggleShuffle();
 
   void setBand(int index, double db);
   void resetEq();
