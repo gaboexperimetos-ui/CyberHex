@@ -36,12 +36,13 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **8 473 líneas Dart** + **2 993 de tests** (112 casos). Estado
+- App: **11 890 líneas Dart** + **3 543 de tests** (140 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
   núcleo, **toda** la API del motor expuesta a Dart con el DSP persistido en la
-  sesión, y el **laboratorio de audio** («toda la fase 2 en pantalla»).
+  sesión, el **laboratorio de audio** («toda la fase 2 en pantalla») y la fase 4
+  de letras, etiquetas y tarjetas compartibles.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -69,18 +70,24 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                  8 473 líneas
+lib/                        app Flutter                                 11 890 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
   core/eq_presets.dart      curvas de EQ por anclajes (interpolación log) + «Mi oído»
+  core/lyrics_parser.dart   .lrc (marcas múltiples, bilingüe, offset) + USLT/LYRICS
+  core/tag_editor.dart      ID3v2 y Vorbis comment: leer y escribir etiquetas y carátula
   platform/media_session_channel.dart  puente Dart del canal cyberhex/media
   ui/audio_lab_sheet.dart   laboratorio: todo el DSP, BPM, WAV, .cue, loop y sueño
+  ui/lyrics_page.dart       visor a pantalla completa con fondo difuminado
+  ui/lyrics_creator_page.dart  estudio: marcar versos al ritmo y guardar .lrc
+  ui/tag_editor_sheet.dart  etiquetas y carátula, individual o por álbum
+  ui/share_card_sheet.dart  tarjeta compartible exportable desde RepaintBoundary
   ui/visualizer_widget.dart vúmetro + espectro (barras o hexágonos) a 30 Hz
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       112 tests Dart                             2 993 líneas
+test/                       140 tests Dart                             3 543 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -337,6 +344,47 @@ ecualizador.
 
 ---
 
+### 5.5 Fase 4: letras sincronizadas, estudio `.lrc`, etiquetas y tarjetas
+
+El núcleo sabe *qué suena* pero no *qué pone en el archivo*: las etiquetas y las
+letras incrustadas son formato de contenedor, así que se leen desde Dart sin
+dependencias (`dart:io` + `dart:typed_data`). Son ~1 200 líneas nuevas de core
+Dart y ~1 800 de UI.
+
+| Pieza | Qué hace |
+|---|---|
+| `LyricsParser` | `.lrc` con marcas múltiples por línea, metadatos (`ti`, `ar`, `al`, `by`, `offset`), **bilingüe** por marca repetida o por `|`, y lectura de `USLT` (ID3v2, v2.3 y v2.4) y de `LYRICS`/`UNSYNCEDLYRICS` (Vorbis comment de FLAC). `indexAt()` por búsqueda binaria sobre el tiempo de presentación (con `offset`) |
+| `LyricsPage` | Pantalla completa con la carátula difuminada (`ImageFiltered` a 42 px de sigma), resaltado y autoscroll por `Scrollable.ensureVisible`, salto exacto al tocar un verso, traducción conmutables y recarga |
+| `LyricsCreatorPage` | Pegar texto → «Preparar versos» → play y «Marcar verso» al ritmo (sella con la posición del motor y avanza), ajuste fino ±0,1 s y deshacer; guarda `tema.lrc` junto al audio con metadatos del motor |
+| `TagEditorSheet` | Título, artista, álbum, año, género, pista y carátula; escribe ID3v2.3 (MP3) o reconstruye los bloques FLAC (Vorbis comment + PICTURE); «aplicar al álbum» usa `albumSiblings` y conserva título y número de cada archivo |
+| `ShareCardSheet` | Tarjeta 340×440 dentro de `RepaintBoundary`: carátula, verso elegido (el que suena al abrir), silueta de onda y marca. Exporta con `toImage(pixelRatio: 3)` → PNG a la ruta que elija el usuario |
+
+Decisiones y límites que conviene tener escritos:
+
+* **La forma de onda de la tarjeta es decorativa y determinista**
+  (`shareWaveform(seed)`): el núcleo no expone los picos de la pista (sigue en
+  P0.5), así que se dibuja una silueta estable a partir de título y artista en
+  lugar de inventar un nivel medido. Está dicho en el código y en la hoja.
+* **Escribir etiquetas reescribe el contenedor, no el audio**: en MP3 se
+  sustituye la etiqueta y se copia el resto; en FLAC se reconstruye la cadena de
+  bloques (STREAMINFO primero) y se copian los frames. Se hace con `.tmp` +
+  `rename`. Implica cargar el archivo en memoria.
+* **Solo `.mp3` y `.flac`**: `TagEditor.canWrite` lo comprueba antes de tocar
+  nada y la hoja lo explica en vez de fallar a medias.
+* **El motor no refresca metadatos** (no hay símbolo para ello): tras guardar, la
+  hoja avisa de que hay que volver a abrir la pista.
+
+Tests nuevos (28, `test/lyrics_and_tags_test.dart`): `LyricsParser` completo
+(metadatos, offset, marcas múltiples, dos formas de bilingüe, texto plano, ida y
+vuelta con `LrcWriter`, basura sin romper), letras incrustadas (USLT UTF-8,
+Vorbis de FLAC, prioridad del `.lrc` de al lado), `TagEditor` (ID3v2 ida y
+vuelta con y sin carátula, audio conservado, FLAC reconstruido, escritura en
+disco, edición de álbum, formato no soportado) y cinco de widget (visor, foro
+vacío, estudio con guardado real, hoja de etiquetas con escritura real y
+tarjeta).
+
+---
+
 ## 6. Plataformas
 
 ### Escritorio (PC, Arch)
@@ -430,7 +478,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 27/27 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 33/33 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -556,6 +604,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R20 | ReplayGain on/off sin getter | el núcleo solo exporta `ch_engine_set_replaygain`; el valor se recuerda en `NativePlayer` (arranca activado, como el motor) y se reenvía al restaurar | `native_player.dart` |
 | R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run` y la hoja solo muestra «Exportando…»: no hay barra de progreso | `native_player.dart`, `audio_lab_sheet.dart` |
 | R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
+| R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
+| R25 | Forma de onda decorativa | la tarjeta compartible dibuja una silueta determinista, no los picos reales, porque el núcleo no los expone | `share_card_sheet.dart` |
 | R23 | Presets a 36 llamadas | aplicar un preset dispara 36 `ch_engine_set_band_gain` seguidos (cada uno recalcula los coeficientes de su banda): es instantáneo, pero si algún día la cadena se vuelve pesada hará falta un volcado en bloque en el núcleo | `eq_presets.dart` |
 | R18 | ~~Paisaje sin mando en la UI~~ | **resuelto**: atajo en el pie del reproductor y control con nivel en el laboratorio | `player_page.dart` |
 | R19 | Coste del exportador | decodifica y procesa a velocidad de CPU; un tema de 5 min tarda unos segundos y ocupa 57 MB en disco. Si el decodificador no sabe la duración, hace dos pasadas | `root.zig` |
@@ -614,9 +664,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (39 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (40 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 4 → app(ui): letras sincronizadas, estudio .lrc, etiquetas y tarjetas compartibles
 FASE 3-3 → app(ui): laboratorio de audio, visualizador, presets y prueba de audición
 FASE 3-2 → app(core): toda la API del motor en Dart y DSP persistido en la sesión
 FASE 3-1 → core: paisajes sonoros, detector de BPM y exportador WAV

@@ -18,6 +18,46 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 17 · FASE 4, pedido 4 de 10: letras, estudio .lrc, etiquetas y tarjetas
+
+- **PEDIDO:** visor de letras sincronizadas (salto al verso, pantalla completa
+  difuminada, bilingüe, letras incrustadas), estudio de letras `.lrc` en vivo,
+  editor de metadatos y carátulas (individual y por álbum) y tarjetas
+  compartibles. PROHIBIDO `core/`, `android/` y `pubspec.yaml`. RIESGO NO
+  ACEPTABLE.
+- **HECHO:**
+  - `lib/core/lyrics_parser.dart` (462): `LyricLine`/`Lyrics`/`LyricsParser`
+    (marcas múltiples, metadatos, `offset`, bilingüe por marca repetida **y** por
+    `|`, búsqueda binaria de la línea actual) + `LrcWriter` (ida y vuelta y
+    guardado junto al audio). Letras incrustadas: `USLT` de ID3v2 (UTF-8,
+    Latin-1 y UTF-16 con BOM) y `LYRICS`/`UNSYNCEDLYRICS` de FLAC.
+  - `lib/core/tag_editor.dart` (773): primitivas `Id3v2` y `Flac` (marcos,
+    *syncsafe*, bloques, comentarios, PICTURE), `TrackTags`, `TagEditor` de
+    lectura/escritura (ID3v2.3 nuevo delante del audio; cadena de bloques FLAC
+    reconstruida), `albumSiblings` y `TagWriteReport`.
+  - `lib/ui/lyrics_page.dart` (433): fondo difuminado con `ImageFiltered`, línea
+    activa, autoscroll con `Scrollable.ensureVisible`, salto al tocar y
+    traducción conmutable.
+  - `lib/ui/lyrics_creator_page.dart` (445): pegar → preparar → marcar al ritmo,
+    ±0,1 s, deshacer y guardado real del `.lrc` con los metadatos del motor.
+  - `lib/ui/tag_editor_sheet.dart` (424) y `lib/ui/share_card_sheet.dart` (476,
+    con `ShareCard` público y `shareWaveform` determinista).
+  - `player_page.dart`: botones «Letras», «Etiquetas» y «Compartir».
+  - `test/lyrics_and_tags_test.dart` (550): **28 casos** nuevos.
+- **VERIFICADO:** tree-sitter **33/33 sin errores**; paridad `PlayerApi` 112/112
+  intacta; cifras: `lib` 11 890, `test` 3 543, **140 casos**; `git status` solo
+  con `lib/`, `test/` y `docs/` (ni `core/`, ni `android/`, ni `pubspec.yaml`).
+- **NO VERIFICABLE AQUÍ:** sin SDK de Flutter los 28 casos están escritos y **no
+  ejecutados**; sin archivos reales del usuario no se puede comprobar el escritor
+  de etiquetas contra carátulas grandes ni FLAC con bloques atípicos (R24); la
+  exportación PNG usa `getSaveLocation` y el diálogo del sistema no existe aquí.
+- **COMMITS:** este turno, un commit en `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** **R24** etiquetas sin validar con la biblioteca real;
+  **R25** la onda de la tarjeta es decorativa (el núcleo no expone picos, P0.5).
+  Pendientes los pedidos 5–10.
+
+---
+
 ## 2026-11-21 · turno 16 · FASE 3, pedido 3 de 10: la UI de audio (laboratorio, vúmetro y presets)
 
 - **PEDIDO:** llevar a la interfaz todo el DSP y lo nuevo del núcleo —que hasta

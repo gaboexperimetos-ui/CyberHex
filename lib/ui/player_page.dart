@@ -4,13 +4,17 @@ import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 
+import '../core/lyrics_parser.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
 import 'audio_lab_sheet.dart';
 import 'library_page.dart';
+import 'lyrics_page.dart';
 import 'queue_sheet.dart';
 import 'eq_sheet.dart';
+import 'share_card_sheet.dart';
+import 'tag_editor_sheet.dart';
 import 'visualizer_widget.dart';
 
 class PlayerPage extends StatefulWidget {
@@ -61,6 +65,26 @@ class _PlayerPageState extends State<PlayerPage>
   void _openQueue() => QueueSheet.show(context, _controller);
 
   void _openLab() => AudioLabSheet.show(context, _controller);
+
+  void _openLyrics() => LyricsPage.show(context, _controller);
+
+  void _openTags() => TagEditorSheet.show(context, _controller);
+
+  /// La tarjeta necesita la letra para proponer un verso: se carga antes de
+  /// abrir la hoja (si no hay, la hoja deja escribir uno).
+  Future<void> _openShare() async {
+    final path = _currentPath();
+    final lyrics = path.isEmpty ? Lyrics.empty : await LyricsParser.loadForAudio(path);
+    if (!mounted) return;
+    await ShareCardSheet.show(context, _controller, lyrics: lyrics);
+  }
+
+  String _currentPath() {
+    final snapshot = _controller.snapshot;
+    final index = snapshot.queueIndex;
+    if (index < 0 || index >= snapshot.queue.length) return '';
+    return snapshot.queue[index].path;
+  }
 
   void _openLibrary() {
     Navigator.of(context).push(
@@ -189,6 +213,13 @@ class _PlayerPageState extends State<PlayerPage>
                               onSeek: _controller.seek,
                             ),
                             const SizedBox(height: 24),
+                            _QuickActions(
+                              onLyrics: _openLyrics,
+                              onTags: _openTags,
+                              onShare: _openShare,
+                              hasTrack: snapshot.hasTrack,
+                            ),
+                            const SizedBox(height: 10),
                             _FooterRow(
                               snapshot: snapshot,
                               onVolume: _controller.setVolume,
@@ -656,6 +687,85 @@ class _Controls extends StatelessWidget {
           icon: const Icon(Icons.forward_10_rounded),
         ),
       ],
+    );
+  }
+}
+
+/// Tres accesos directos: letras, etiquetas y tarjeta compartible.
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({
+    required this.onLyrics,
+    required this.onTags,
+    required this.onShare,
+    required this.hasTrack,
+  });
+
+  final VoidCallback onLyrics;
+  final VoidCallback onTags;
+  final VoidCallback onShare;
+  final bool hasTrack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _Action(
+            icon: Icons.lyrics_rounded,
+            label: 'Letras',
+            onTap: hasTrack ? onLyrics : null,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _Action(
+            icon: Icons.sell_rounded,
+            label: 'Etiquetas',
+            onTap: hasTrack ? onTags : null,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _Action(
+            icon: Icons.ios_share_rounded,
+            label: 'Compartir',
+            onTap: onShare,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Action extends StatelessWidget {
+  const _Action({required this.icon, required this.label, required this.onTap});
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    final color = enabled ? chForeground : chMuted;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(
+          color: chSurface.withValues(alpha: enabled ? 0.85 : 0.45),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: chBorder.withValues(alpha: 0.6)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 20, color: enabled ? chAccent : chMuted),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(fontSize: 11, color: color)),
+          ],
+        ),
+      ),
     );
   }
 }
