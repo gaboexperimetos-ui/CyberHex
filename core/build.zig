@@ -86,10 +86,15 @@ pub fn build(b: *std.Build) void {
     } else {
         const headers = haveFfmpegSystem(b);
         switch (decoder) {
-            .ffmpeg => if (!headers) @panic(
-                "no encuentro las cabeceras de FFmpeg: instala libavcodec-dev/libavformat-dev " ++
-                    "o compila con -Ddecoder=miniaudio",
-            ),
+            .ffmpeg => if (!headers) {
+                // Falla el build con un mensaje claro (y sin traza de pila).
+                b.getInstallStep().dependOn(&b.addFail(
+                    "no encuentro FFmpeg: instala libavcodec-dev/libavformat-dev " ++
+                        "(Arch: pacman -S ffmpeg; Debian: apt install libavcodec-dev libavformat-dev) " ++
+                        "o compila con -Ddecoder=miniaudio",
+                ).step);
+                return;
+            },
             .auto => use_ffmpeg = headers,
             .miniaudio => use_ffmpeg = false,
         }
