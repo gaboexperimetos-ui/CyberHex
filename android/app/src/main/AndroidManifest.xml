@@ -1,4 +1,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      Biblioteca local de audio (el motor sabe escanear carpetas). En Android 13+
+      basta READ_MEDIA_AUDIO; hasta Android 12 hacía falta READ_EXTERNAL_STORAGE.
+      Si el usuario abre archivos con el selector del sistema, no hace falta
+      ninguno de los dos.
+    -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Para que el audio no se corte con la pantalla apagada. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!--
+      Reproducción en segundo plano (pendiente: MediaSession + servicio en primer
+      plano). Cuando exista el servicio hay que descomentar estas dos y declarar
+      android:foregroundServiceType="mediaPlayback" en el <service>.
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    -->
+
     <application
         android:label="CyberHex"
         android:name="${applicationName}"
