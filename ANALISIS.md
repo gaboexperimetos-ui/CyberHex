@@ -28,6 +28,24 @@ Veredicto: **excelente base técnica, producto a medio camino y repo
 desordenado**. Nada crítico de arquitectura; sí bastantes detalles de calidad,
 uno o dos bugs reales y dos decisiones de empaquetado que conviene corregir ya.
 
+### Estado de las correcciones
+
+Ya aplicadas en esta rama (cada una en su commit):
+
+| Hallazgo | Estado | Commit |
+|---|---|---|
+| A1 EQ de 10 bandas con etiquetas falsas | ✅ 36 bandas reales, etiquetas del núcleo | `app: metadatos, carátula y ecualizador…` |
+| A2 `set_band_gain` borraba las demás bandas | ✅ guarda las ganancias vigentes | `core: EQ de 36 bandas consultable…` |
+| A5 Gradle recompilaba siempre / no se podía saltar | ✅ inputs/outputs + `-PskipCoreBuild` | `build(android): tarea del núcleo…` |
+| A6 README de plantilla / sin LICENSE | ✅ README real + MIT | `docs: README real, LICENSE MIT…` |
+| B1 sin metadatos ni carátula | ✅ title/artist/album + portada | `app: metadatos, carátula…` |
+| B2 carga bloqueando el hilo de UI | ✅ `loadAsync` en isolate + spinner | `app: metadatos, carátula…` |
+| C1 `-Drelease=true` inexistente | ✅ corregido en `core/API.md` | `core: EQ de 36 bandas…` |
+
+Siguen pendientes: A3 (load vacía la cola), A4 (FFmpeg versionado), B3 (rebuild
+cada 250 ms), B4/B5 (EQ y spinlocks en el hilo de audio), B6 (deriva en pausa),
+B7 (symlinks en la biblioteca), B8 (background en Android) y B9 (tests).
+
 ---
 
 ## 1. Mapa del proyecto
@@ -266,8 +284,18 @@ daría muchísimo valor por poco esfuerzo.
   build, Gradle y manifest.
 - Comprobación con `gcc -std=c2x -fsyntax-only -Wall -Wextra -Wshadow`: 0
   warnings en los 5 archivos C que no requieren FFmpeg.
-- **No** se pudo compilar Flutter ni Zig en este entorno (no están instalados),
-  así que no hay resultados de `flutter analyze`, `zig build test` ni ejecución
-  real de audio. Las cifras de líneas y de archivos sí están verificadas.
-- Los hallazgos A1, A2, A3, A4, A5, B6 y B7 se verificaron leyendo el código
-  concreto citado; los de rendimiento (B3/B4/B5) son análisis estático.
+- Tras aplicar las correcciones se instaló **Zig 0.17.1** (el que declara la
+  API) y se verificó de verdad:
+  - `zig build-obj src/root.zig -lc` compila sin errores;
+  - `zig test` pasa en `eq.zig` (2), `fft.zig` (1) y `stretch.zig` (3);
+  - el `.so` completo enlaza con el backend miniaudio
+    (`root.zig + audio.c + decode_miniaudio.c + playlist/lyrics/library/markers`);
+  - los 20 símbolos que usa `native_player.dart` están exportados;
+  - prueba de humo con `dlopen` + C: 36 bandas con sus frecuencias, `0` fuera
+    de rango, `set_band_gain(-1) = -2`, y reproducción real de un WAV
+    (`load=0`, `duration=1.00`, `position=0.390` tras 400 ms, `covers=0`).
+- **No** se pudo compilar ni analizar Flutter/Dart en este entorno: no hay SDK
+  y las descargas de Flutter no son accesibles. Los cambios de Dart están
+  revisados a mano (balance de bloques y tipos), sin `flutter analyze`.
+- Los hallazgos A3, A4, B6 y B7 se verificaron leyendo el código citado; los de
+  rendimiento (B3/B4/B5) son análisis estático.
