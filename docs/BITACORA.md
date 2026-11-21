@@ -18,6 +18,58 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 12 · FASE 1B: cola, biblioteca y sesión
+
+- **PEDIDO:** Fase 1B en tres commits atómicos y reversibles: (1) bindings FFI
+  y estado de cola y biblioteca; (2) pantalla de cola + guardado automático de
+  sesión; (3) pantalla de biblioteca con favoritos. `RIESGO ACEPTABLE`: **no**
+  en los tres.
+- **HECHO (1, `27b567f`):** `QueueItem` (path/title/artist) y `LibraryTrack`
+  (path/title/extension/directory) inmutables con `==`/`hashCode`;
+  `PlayerSnapshot` gana `queue`, `queueIndex` y `queueProtected`. 19 símbolos
+  nuevos con `providesSymbol` (`play_index`, `load_add`, los nueve
+  `queue_*`, los seis `ch_library_*`) que quedan en `null` con una `.so`
+  vieja. Cola espejada en `_queuePaths` porque el contrato no exporta
+  `queue_path`; `load_add` y el escaneo corren en `Isolate.run`. Controlador:
+  `playAt`, `enqueue`, `playNext`, `loadAndPlay`, `moveQueueItem`,
+  `removeQueueItem`, `clearQueue`, `scanDirectory` y el flag
+  `queueProtected`, que hace que `openFile` use `load_add` en vez de `load`.
+  `_refreshQueue()` solo relee ante `EV_QUEUE`/`EV_TRACK` o tras una mutación
+  nuestra (el tick es de 80 ms y construir `QueueItem` cuesta). 11 tests
+  nuevos.
+- **HECHO (2, `ed2d444`):** `lib/ui/queue_sheet.dart` (hoja modal con
+  `ReorderableListView`, `Dismissible`, salto al tocar, vaciar con
+  confirmación y el interruptor «cola protegida») y botón de cola en la
+  cabecera. `lib/core/session_store.dart`: `SessionSnapshot` +
+  `SessionStore` (JSON con `.tmp`→rename, `fromJson` defensivo, nunca lanza) +
+  `SessionKeeper`, que restaura al arrancar sin bloquear (ajustes, cola,
+  `playAt`+`pause`+`seek` para no soltar audio) y guarda con 600 ms de
+  antirrebote al pausar o cambiar de pista. `main.dart` solo lo monta con el
+  motor real: con controlador inyectado no se toca el disco. 14 tests nuevos.
+- **HECHO (3, este commit):** `lib/ui/library_page.dart` (pestañas
+  Canciones/Álbumes/Artistas/Carpetas/Favoritos, búsqueda instantánea sin
+  tildes, orden por título/artista/álbum/duración, filtro «ocultar < 30 s»,
+  menú contextual con reproducir ahora / siguiente / añadir a la cola /
+  favorito / ficha técnica) y `lib/core/favorites_store.dart` (JSON atómico,
+  `ChangeNotifier`, `FavoritesStore.memory()` para pruebas). Artista y álbum
+  salen de la jerarquía de carpetas porque el núcleo solo entrega rutas.
+  Botón de biblioteca en la cabecera del reproductor. 11 tests de widget.
+- **VERIFICADO:** tree-sitter-dart 22/22 sin errores; `PlayerApi` 45/45
+  miembros implementados en `NativePlayer` **y** `FakePlayer`; cifras: `lib`
+  4 602 líneas, `test` 1 632, 66 casos; sin dependencias nuevas; `core/`,
+  `android/` y `pubspec.yaml` intactos.
+- **NO VERIFICABLE AQUÍ:** `flutter analyze`/`flutter test` (sin SDK): los 66
+  casos están escritos, no ejecutados. Los tres commits tocan solo
+  `lib/`, `test/` y `docs/`.
+- **COMMITS:** `27b567f` (1), `ed2d444` (2), y el de este turno (3).
+- **ABIERTO / RIESGOS:** **R14** la sesión y los favoritos no llegan a un
+  directorio privado en Android sin un canal nativo (15 líneas en `android/`,
+  pedido aparte); **R15** sin consulta de duración por ruta, la ordenación por
+  duración y el filtro de cortas solo ven lo ya reproducido. Pendiente de
+  decisión: si la biblioteca debe recordar la última carpeta escaneada.
+
+---
+
 ## 2026-11-21 · turno 11 · FASE 1A: Recientes, apertura desde el sistema y repeat/shuffle
 
 - **PEDIDO:** Plan Maestro, fase 1A en tres commits atómicos: (1) P0.4 motor

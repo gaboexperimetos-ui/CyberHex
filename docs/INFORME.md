@@ -36,8 +36,9 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo (tras fusionar `main`): **6 807 líneas**, **173 funciones FFI**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **2 074 líneas Dart** + **578 de tests**. Estado centralizado en
-  `PlayerController` (testeable **sin** la `.so`).
+- App: **4 602 líneas Dart** + **1 632 de tests** (66 casos). Estado
+  centralizado en `PlayerController` (testeable **sin** la `.so`). Fase 1B
+  cerrada: cola, biblioteca y sesión que sobrevive al cierre.
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -143,15 +144,44 @@ Flutter UI (lib/)  ──PlayerController──  native_player.dart
 | `player_controller.dart` | `ChangeNotifier`; drena eventos, refresca snapshot, `ValueNotifier<double> position` |
 | `native_player.dart` | Implementa `PlayerApi` sobre FFI; **todo símbolo opcional con `providesSymbol`** (una `.so` vieja sigue cargando) |
 | `platform/media_session_channel.dart` | Puente con Android: `updateMetadata`/`updateState` (throttle 1 s) hacia Kotlin y comandos (`play`, `pause`, `toggle`, `next`, `previous`, `seek`, `setVolume`, `duck`) hacia el controlador |
+| `session_store.dart` | `SessionSnapshot` + `SessionStore` (JSON con `.tmp`→rename) y `SessionKeeper`, que restaura al arrancar y guarda al pausar o cambiar de pista |
+| `favorites_store.dart` | Conjunto de rutas favoritas en JSON, `ChangeNotifier`, escritura atómica |
 | `ui/player_page.dart` | Consume `ListenableBuilder` + `ValueListenableBuilder`; teclado (espacio) |
 | `ui/eq_sheet.dart` | 36 bandas contra el controlador |
+| `ui/queue_sheet.dart` | Cola: arrastrar para ordenar, deslizar para quitar, vaciar y «cola protegida» |
+| `ui/library_page.dart` | Biblioteca: 5 pestañas, búsqueda, orden, filtro de cortas y menú contextual |
 
 `PlayerApi` incluye `next()`/`previous()`; `NativePlayer` los bindea con
 `providesSymbol` y quedan en `null` (no-op) si la `.so` es anterior a la ABI que
 los exporta.
 
-Tests: 9 del controlador + 7 del canal de medios + 3 de widget + 1 de tema, todos
-con `FakePlayer`/canal simulado (sin FFI, sin teléfono).
+Tests: 22 del controlador + 14 de sesión + 11 de biblioteca + 7 del canal de
+medios + 3 de la pantalla + 8 de archivos externos + 1 de tema, todos con
+`FakePlayer`/canal simulado (sin FFI, sin teléfono).
+
+### 5.1 Cola, biblioteca y sesión (fase 1B)
+
+- **Cola espejada.** El contrato C no exporta `queue_path`: solo
+  `ch_engine_queue_count` y `ch_engine_queue_index`. `NativePlayer` mantiene
+  `_queuePaths` y **toda** mutación de la cola pasa por él (`queue_add`,
+  `queue_insert`, `play_index`, `load_add`, `move`, `remove`, `clear`,
+  `import`, `export`); si el motor tuviera más pistas de las conocidas se
+  rellenan con rutas vacías (`QueueItem.isPlayable == false`) en vez de
+  inventar nombres. `load()` y `play_index` reinician el espejo.
+- **`load_add` no devuelve el índice** (delega en `play_index` y devuelve 0):
+  el índice audible se lee después con `ch_engine_queue_index`.
+- **Rutas, no etiquetas.** La biblioteca solo da rutas
+  (`ch_library_path`), así que `titleFromPath` recorta el nombre y artista y
+  álbum se deducen de la jerarquía (`<raíz>/Artista/Álbum/pista`). La duración
+  solo se conoce para lo ya reproducido (R15).
+- **Sin congelar la UI.** `load_add` y `ch_library_scan` corren en
+  `Isolate.run`: el handle de biblioteca se crea, escanea, copia y destruye
+  dentro del isolate, y solo cruzan cadenas.
+- **Sesión.** JSON plano (`queue`, `queueIndex`, `position`, `volume`,
+  `repeatMode`, `shuffle`) con escritura atómica. Al restaurar se hace
+  `playAt` + `pause` + `seek` para dejar la pista cargada en la posición
+  exacta **sin** soltar audio al abrir la app. Guardado con 600 ms de
+  antirrebote al pausar o cambiar de pista; `dispose` vacía lo pendiente.
 
 ---
 
@@ -248,8 +278,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 16/16 sin errores |
-| Firmas de `PlayerApi` | comprobador propio: 31 miembros en `NativePlayer` y `FakePlayer` | 31/31 en ambos |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 22/22 sin errores |
+| Firmas de `PlayerApi` | comprobador propio: 45 miembros en `NativePlayer` y `FakePlayer` | 45/45 en ambos |
 | Coherencia del canal | grep cruzado Dart↔Kotlin de nombres de método | 2/2 y 7/7 sin huérfanos |
 | XML de Android | `ElementTree` sobre `AndroidManifest.xml` | válido; 6 permisos, 1 servicio `mediaPlayback` |
 | Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 3/3 balanceados |
@@ -303,6 +333,15 @@ lleva su propio *action* y *requestCode* para no colisionar.
       `getInitialFile` (no hay carrera perdida).
 12. Repetición: 0 = apagado, 1 = todo, 2 = una; `cycleRepeat()` va 0→1→2→0 y se
     lee del motor (`ch_engine_repeat`), no de un espejo en Dart.
+13. La cola es del motor y su **espejo de rutas** es de `NativePlayer`: nadie
+    más puede mutar la cola sin pasar por él, o el espejo se desincroniza.
+    `queue_add` devuelve el índice; `load_add` no (se lee con `queue_index`).
+14. `queueProtected` cambia el significado de `openFile`: con el flag, se usa
+    `load_add` (añade al final y reproduce); sin él, `load` (la cola queda con
+    esa única pista). La UI no decide, solo cambia el flag.
+15. La sesión es un JSON pequeño y prescindible: si falta, está vacío o está
+    corrupto, la app arranca igual. Nunca se guarda una pista sin ruta y el
+    índice se recoloca al filtrarlas.
 
 ---
 
@@ -322,6 +361,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R10 | Android antes de P0.1 | ~~sin MediaSession ni servicio~~ **resuelto** en P0.1 (notificación, bloqueo, foco, auriculares) | `android/` |
 | R11 | ~~Recientes mata el motor~~ | **resuelto**: engine cacheado en `CyberHexApplication`, `shouldDestroyEngineWithHost = false` | `CyberHexApplication.kt` |
 | R12 | ~~Icono genérico en la notificación~~ | **resuelto**: `R.drawable.ic_launcher_foreground` (hexágono propio) | `MediaSessionService.kt` |
+| R14 | Sesión en Android | sin `path_provider` ni tocar `android/`, Dart no alcanza `getFilesDir()`: en Android la sesión y los favoritos se escriben en el temporal (a menudo no escribible) y se pierden. Arreglo: 15 líneas de canal en `android/` que devuelvan `cacheDir`/`filesDir` (pedido aparte) | `session_store.dart`, `favorites_store.dart` |
+| R15 | Duración en la biblioteca | el núcleo solo da rutas: no hay consulta de duración por ruta (`ch_loudness_scan` decodifica el archivo entero). La ordenación por duración y el filtro «< 30 s» solo ven las pistas ya reproducidas; el resto sale con «—» y nunca se oculta | `library_page.dart` |
 | R13 | FGS desde segundo plano | Android 12+ prohíbe arrancar un FGS en background salvo excepciones; aquí se arranca al pulsar play con la app delante | `MediaBridge.ensureServiceStarted` |
 
 ---
@@ -376,9 +417,12 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (29 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (32 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 1B-3 → app(ui): pantalla de biblioteca con favoritos
+FASE 1B-2 → app(ui): pantalla de cola y sesión que sobrevive al cierre
+FASE 1B-1 → app(core): cola de reproducción y biblioteca por FFI
 FASE 1A-3 → app(ui): repetir (off/todo/una) y aleatorio de punta a punta
 FASE 1A-2 → android+app: abrir audios desde el sistema (ACTION_VIEW, %U)
 FASE 1A-1 → android: motor cacheado en la Application (P0.4) + icono hexagonal

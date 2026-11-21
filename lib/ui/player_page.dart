@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'library_page.dart';
 import 'queue_sheet.dart';
 import 'eq_sheet.dart';
 
@@ -56,6 +57,14 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _openQueue() => QueueSheet.show(context, _controller);
+
+  void _openLibrary() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => LibraryPage(controller: _controller),
+      ),
+    );
+  }
 
   Future<void> _openFile() async {
     if (_controller.snapshot.busy) {
@@ -127,6 +136,7 @@ class _PlayerPageState extends State<PlayerPage>
                             _Header(
                               onOpen: _openFile,
                               onQueue: _openQueue,
+                              onLibrary: _openLibrary,
                             ),
                             const SizedBox(height: 28),
                             RepaintBoundary(
@@ -195,10 +205,15 @@ class _ToggleIntent extends Intent {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.onOpen, required this.onQueue});
+  const _Header({
+    required this.onOpen,
+    required this.onQueue,
+    required this.onLibrary,
+  });
 
   final VoidCallback onOpen;
   final VoidCallback onQueue;
+  final VoidCallback onLibrary;
 
   @override
   Widget build(BuildContext context) {
@@ -211,6 +226,11 @@ class _Header extends StatelessWidget {
           color: chForeground,
         )),
         const Spacer(),
+        IconButton(
+          onPressed: onLibrary,
+          tooltip: 'Biblioteca',
+          icon: const Icon(Icons.library_music_rounded),
+        ),
         IconButton(
           onPressed: onQueue,
           tooltip: 'Cola de reproducción',
