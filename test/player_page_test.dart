@@ -48,6 +48,60 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('la cola muestra las pistas y salta a la elegida',
+      (tester) async {
+    final fake = FakePlayer()
+      ..hasTrack = true
+      ..title = 'Canción';
+    fake.queue.addAll(['/musica/uno.flac', '/musica/dos.mp3']);
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.pump();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildCyberHexTheme(),
+      home: PlayerPage(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Cola'));
+    await tester.tap(find.text('Cola'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('uno'), findsOneWidget);
+    expect(find.text('dos'), findsOneWidget);
+
+    await tester.tap(find.text('dos'));
+    await tester.pumpAndSettle();
+    expect(fake.queueIndex, 1);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('los ajustes activan mono en el motor', (tester) async {
+    final fake = FakePlayer()
+      ..hasTrack = true
+      ..title = 'Canción';
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+    controller.pump();
+
+    await tester.pumpWidget(MaterialApp(
+      theme: buildCyberHexTheme(),
+      home: PlayerPage(controller: controller),
+    ));
+
+    await tester.ensureVisible(find.text('Ajustes'));
+    await tester.tap(find.text('Ajustes'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Velocidad'), findsOneWidget);
+    await tester.tap(find.text('Mono'));
+    await tester.pumpAndSettle();
+    expect(fake.mono, isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('el icono cambia a pausa cuando el motor reproduce',
       (tester) async {
     final fake = FakePlayer()

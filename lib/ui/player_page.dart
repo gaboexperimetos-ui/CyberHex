@@ -9,6 +9,9 @@ import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
 import 'eq_sheet.dart';
+import 'lyrics_sheet.dart';
+import 'queue_sheet.dart';
+import 'tools_sheet.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.controller});
@@ -84,6 +87,16 @@ class _PlayerPageState extends State<PlayerPage>
     _controller.toggle();
   }
 
+  /// Abre una hoja con el mismo estilo en toda la app.
+  void _openSheet(Widget sheet) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => sheet,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -129,7 +142,12 @@ class _PlayerPageState extends State<PlayerPage>
                             ),
                             const SizedBox(height: 28),
                             _TrackInfo(snapshot: snapshot, onOpen: _openFile),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 12),
+                            _SpectrumBars(
+                              controller: _controller,
+                              playing: snapshot.playing,
+                            ),
+                            const SizedBox(height: 8),
                             _SeekBar(
                               position: _controller.position,
                               snapshot: snapshot,
@@ -157,12 +175,14 @@ class _PlayerPageState extends State<PlayerPage>
                             _FooterRow(
                               snapshot: snapshot,
                               onVolume: _controller.setVolume,
-                              onEq: () => showModalBottomSheet<void>(
-                                context: context,
-                                showDragHandle: true,
-                                builder: (_) =>
-                                    EqualizerSheet(controller: _controller),
-                              ),
+                              onEq: () => _openSheet(
+                                  EqualizerSheet(controller: _controller)),
+                              onQueue: () =>
+                                  _openSheet(QueueSheet(controller: _controller)),
+                              onLyrics: () => _openSheet(
+                                  LyricsSheet(controller: _controller)),
+                              onTools: () =>
+                                  _openSheet(ToolsSheet(controller: _controller)),
                             ),
                           ],
                         ),
@@ -513,11 +533,17 @@ class _FooterRow extends StatelessWidget {
     required this.snapshot,
     required this.onVolume,
     required this.onEq,
+    required this.onQueue,
+    required this.onLyrics,
+    required this.onTools,
   });
 
   final PlayerSnapshot snapshot;
   final ValueChanged<double> onVolume;
   final VoidCallback onEq;
+  final VoidCallback onQueue;
+  final VoidCallback onLyrics;
+  final VoidCallback onTools;
 
   @override
   Widget build(BuildContext context) {
@@ -537,19 +563,125 @@ class _FooterRow extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        OutlinedButton.icon(
-          onPressed: onEq,
-          icon: const Icon(Icons.equalizer_rounded, size: 18),
-          label: const Text('Ecualizador'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: chForeground,
-            side: const BorderSide(color: chBorder),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            _SheetButton(
+              icon: Icons.equalizer_rounded,
+              label: 'Ecualizador',
+              onTap: onEq,
+            ),
+            _SheetButton(
+              icon: Icons.queue_music_rounded,
+              label: 'Cola',
+              onTap: onQueue,
+            ),
+            _SheetButton(
+              icon: Icons.text_snippet_rounded,
+              label: 'Letra',
+              onTap: onLyrics,
+            ),
+            _SheetButton(
+              icon: Icons.tune_rounded,
+              label: 'Ajustes',
+              onTap: onTools,
+            ),
+          ],
         ),
       ],
     );
   }
+}
+
+class _SheetButton extends StatelessWidget {
+  const _SheetButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: chForeground,
+        side: const BorderSide(color: chBorder),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      ),
+    );
+  }
+}
+
+/// Espectro del audio que suena (post-EQ y post-volumen).
+///
+/// Se repinta con la posición (12,5 Hz) y no con cada cambio del motor; en
+/// pausa se oculta, así no hay trabajo de dibujo sin audio.
+class _SpectrumBars extends StatelessWidget {
+  const _SpectrumBars({required this.controller, required this.playing});
+
+  final PlayerController controller;
+  final bool playing;
+
+  static const int _bands = 28;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!playing) return const SizedBox(height: 30);
+    return SizedBox(
+      height: 30,
+      child: ValueListenableBuilder<double>(
+        valueListenable: controller.position,
+        builder: (context, _, _) {
+          return CustomPaint(
+            size: const Size.fromHeight(30),
+            painter: _SpectrumPainter(controller.spectrum(_bands)),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SpectrumPainter extends CustomPainter {
+  _SpectrumPainter(this.values);
+
+  final List<double> values;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.isEmpty) return;
+    final gap = size.width / (values.length * 3);
+    final barWidth = gap * 2;
+    final paint = Paint()..color = chAccent.withValues(alpha: 0.8);
+    for (var i = 0; i < values.length; i++) {
+      final level = values[i].clamp(0.0, 1.0).toDouble();
+      final barHeight = (level * size.height).clamp(1.5, size.height);
+      final left = i * (barWidth + gap);
+      canvas.drawRRect(
+        RRect.fromLTRBR(
+          left,
+          size.height - barHeight,
+          left + barWidth,
+          size.height,
+          const Radius.circular(2),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SpectrumPainter oldDelegate) =>
+      !listEquals(oldDelegate.values, values);
 }
 
 String _clock(double seconds) {

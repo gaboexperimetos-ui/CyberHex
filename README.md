@@ -23,12 +23,15 @@ Todo ocurre en local: no hay cuentas, ni red, ni telemetría.
 
 ## Estado
 
-El **motor está muy por delante de la app**. El núcleo exporta 78 funciones
-(cola con gapless y crossfade, repeat/shuffle, velocidad y tono, espectro FFT,
-ReplayGain, limitador, temporizador, dispositivos de salida, carátulas
-múltiples, letras LRC, biblioteca incremental y marcadores persistentes), y la
-interfaz usa hoy una parte: abrir un archivo, play/pausa, seek, volumen, EQ real
-de 36 bandas, metadatos y carátula.
+El núcleo exporta **180 funciones** y la app las alcanza **todas** por FFI:
+cola editable con gapless y crossfade, repeat/shuffle, velocidad y tono,
+espectro, ReplayGain y normalización R128, limitador, crossfeed, temporizador,
+dispositivos de salida, carátulas múltiples, letras LRC, biblioteca incremental,
+marcadores persistentes y hojas CUE.
+
+La interfaz ya usa cola, modos de reproducción, letras, ajustes de DSP,
+visualizador de espectro, metadatos y EQ real de 36 bandas. Falta dibujar la
+biblioteca con búsqueda, la forma de onda y la restauración de sesión.
 
 La referencia completa de la API está en [`core/API.md`](core/API.md).
 

@@ -18,6 +18,39 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 11 · ABI completo, absorciones y primera interfaz
+
+- **PEDIDO:** cuatro pasos: (1) comprobar que local y GitHub son iguales,
+  (2) añadir todas las funciones posibles, (3) investigar reproductores
+  similares y absorber lo útil, (4) empezar la interfaz.
+- **HECHO:**
+  - Local y `origin/main` ya coincidían en `64b929f`, sin cambios pendientes.
+  - Dos bugs reales del controlador: el seek no se acotaba y `pump()`
+    sobrescribía con la posición vieja el 0 del evento `TRACK`. Más 5 avisos
+    del analizador. `flutter analyze` pasó de 5 avisos a 0.
+  - 99 símbolos bindeados en cuatro tandas: cola y modos (28), metadatos,
+    letras y carátula (11), medición y DSP (26), biblioteca/marcadores/CUE/
+    salida/análisis (34). `PlayerApi` gana miembros con implementación por
+    defecto para no romper dobles ni `.so` antiguas.
+  - Motor: `ch_engine_queue_item` para que la UI pueda dibujar la cola (180
+    exports). `Anterior` reinicia la pista tras 3 s, como Spotify/Strawberry.
+  - `docs/REFERENCIAS.md`: fooyin, Strawberry, Tauon, Amberol, Musicolet, con
+    tabla de qué se absorbe y qué se descarta (red, CD, conversión).
+  - Interfaz: hojas de **cola**, **letra** y **ajustes** (velocidad, tono,
+    crossfade, preamp, mono, limitador, salida, temporizador) y visualizador de
+    espectro alimentado por `ch_engine_spectrum`.
+- **VERIFICADO:** `flutter analyze` sin issues; `flutter test` 31/31;
+  `zig build` y `zig build test -Ddecoder=miniaudio` OK; los 99 símbolos
+  nuevos comprobados con `nm -D` sobre la `.so` real; 180 exports `ch_*`.
+- **NO VERIFICABLE AQUÍ:** reproducción real a través de los bindings nuevos
+  (no hay audio de prueba versionado) ni la app en el teléfono.
+- **COMMITS:** `a4f6681`, `312237e`, `2de32e8`, `8587acf`, `d27e062`,
+  `6220fe9` y el de la interfaz.
+- **ABIERTO:** biblioteca con búsqueda, forma de onda, restaurar sesión al
+  arrancar, MPRIS (Linux), R11 (`FlutterEngine` cacheado), A4 (FFmpeg en git).
+
+---
+
 ## 2026-11-21 · turno 10 · Fusión de `main` y primer merge a `main`
 
 - **PEDIDO:** "mergea todo". Antes hubo que integrar los dos commits que `main`

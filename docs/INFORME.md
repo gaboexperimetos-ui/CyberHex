@@ -34,7 +34,7 @@
 
 - Reproductor **Flutter + motor nativo propio** (Zig 0.17.1 + C23). Un solo
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
-- Núcleo (tras fusionar `main`): **6 807 líneas**, **173 funciones FFI**, ABI **3**.
+- Núcleo (tras fusionar `main`): **6 807 líneas**, **180 funciones FFI**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
 - App: **2 074 líneas Dart** + **578 de tests**. Estado centralizado en
   `PlayerController` (testeable **sin** la `.so`).
@@ -52,7 +52,7 @@
 
 ```
 core/                       motor nativo (Zig 0.17.1 + C23)          6 807 líneas
-  src/root.zig              173 exports FFI, hilo de audio, render, cola, EQ, eventos
+  src/root.zig              180 exports FFI, hilo de audio, render, cola, EQ, eventos
   src/{cue,fileio,analysis}.c  hojas CUE, guardado de carátula, R128 y picos
   src/{eq,stft,fft,stretch}.zig   DSP puro (con tests)
   src/audio.c               miniaudio: dispositivo, callback
@@ -322,7 +322,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 |---|---|---|---|
 | P0.1 | ~~`MediaSession` + servicio en primer plano~~ **HECHO** (turno 9): servicio, foco, notificación y bloqueo, sin dependencias nuevas | Kotlin + manifest + Dart | falta compilar y probar en el teléfono |
 | P0.4 | `FlutterEngine` cacheado en una `Application` propia para que la música sobreviva a "quitar de Recientes" | Kotlin (archivo nuevo) + manifest | requiere otra clase y cambiar el `android:name` del `<application>` |
-| P0.5 | Bindear en Dart la API que trajo `main`: R128 (`ch_engine_analyze_loudness`), picos de forma de onda, ganancia manual en dB, crossfeed, hojas CUE y guardado de carátula | Dart | círculo de 1 turno; el núcleo ya está fusionado y verificado |
+| P0.5 | ~~Bindear en Dart la API que trajo `main`~~ **HECHO** (turno 11): ABI completo, 180 símbolos alcanzables desde `PlayerApi`, más cola visible (`ch_engine_queue_item`) | Dart + núcleo | verificado con `analyze`, 31 tests y `nm -D` |
 | P0.2 | Pantallas de **biblioteca** (escaneo con `ch_library_*`) y **cola** (reordenar, quitar, saltar) | Dart | no verificable aquí |
 | P0.3 | Abrir archivos desde el gestor: `Intent.ACTION_VIEW` (Android) y `%U` en `.desktop` | Kotlin/Dart + runner C | requiere pasar argv a Dart |
 
