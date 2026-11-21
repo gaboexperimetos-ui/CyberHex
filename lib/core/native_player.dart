@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
+import 'player_api.dart';
+
 typedef _CreateNative = Pointer<Void> Function();
 typedef _CreateDart = Pointer<Void> Function();
 
@@ -50,6 +52,24 @@ typedef _CoverAtDart = Pointer<Uint8> Function(
 typedef _PlainTextNative = Pointer<Utf8> Function();
 typedef _PlainTextDart = Pointer<Utf8> Function();
 
+/// Espejo de `ch_event` (core/include/cyberhex_core.h).
+final class _ChEvent extends Struct {
+  @Int32()
+  external int kind;
+
+  @Int32()
+  external int a;
+
+  @Int32()
+  external int b;
+
+  @Double()
+  external double value;
+}
+
+typedef _PollEventNative = Int32 Function(Pointer<Void>, Pointer<_ChEvent>);
+typedef _PollEventDart = int Function(Pointer<Void>, Pointer<_ChEvent>);
+
 const String _libraryName = 'libcyberhex_core.so';
 
 /// Carga una pista en un isolate aparte: `ch_engine_load` abre el archivo,
@@ -75,8 +95,10 @@ class CyberHexException implements Exception {
   String toString() => message;
 }
 
-class NativePlayer {
-  NativePlayer._(this._engine, this._bindings);
+class NativePlayer implements PlayerApi {
+  NativePlayer._(this._engine, this._bindings) {
+    _eventBuf = calloc<_ChEvent>();
+  }
 
   static NativePlayer? open() {
     try {
@@ -99,7 +121,9 @@ class NativePlayer {
 
   final Pointer<Void> _engine;
   final _Bindings _bindings;
+  late final Pointer<_ChEvent> _eventBuf;
 
+  @override
   final List<double> eqGains = List<double>.filled(_Bindings.instance.eqBandCount(), 0);
 
   String? _title;
@@ -113,16 +137,33 @@ class NativePlayer {
   bool _disposed = false;
 
   /// Título para mostrar: la etiqueta del archivo si existe, o su nombre.
-  String? get title => _title;
+  @override
+  String get title => _title ?? '';
+
+  @override
   String get artist => _artist ?? '';
+
+  @override
   String get album => _album ?? '';
+
   String? get path => _path;
+
+  @override
   Uint8List? get cover => _cover;
+
+  @override
   bool get hasTrack => _loaded;
+
+  @override
   double get duration => _duration;
+
+  @override
   double get position => _bindings.position(_engine);
+
+  @override
   bool get isPlaying => _bindings.isPlaying(_engine) != 0;
 
+  @override
   String get lastError {
     final failure = _failure;
     if (failure != null) {
@@ -136,6 +177,7 @@ class NativePlayer {
   ///
   /// Usa `ch_engine_eq_band_freq`; si la librería cargada es anterior a esa
   /// función, aproxima el reparto logarítmico 20 Hz–20 kHz del núcleo.
+  @override
   late final List<double> eqBandFrequencies = List<double>.unmodifiable([
     for (var i = 0; i < eqGains.length; i++)
       _freqOrFallback(_bindings.eqBandFreq?.call(i) ?? 0, i, eqGains.length),
@@ -147,6 +189,7 @@ class NativePlayer {
     return 20.0 * math.pow(1000.0, index / (count - 1)).toDouble();
   }
 
+  @override
   bool load(String path) {
     if (_disposed) return false;
     final utf8 = path.toNativeUtf8();
@@ -162,6 +205,7 @@ class NativePlayer {
   }
 
   /// Igual que [load] pero fuera del hilo de UI.
+  @override
   Future<bool> loadAsync(String path) async {
     if (_disposed) return false;
     try {
@@ -178,13 +222,19 @@ class NativePlayer {
 
   void _applyMetadata(String path) {
     _path = path;
+    _loaded = true;
+    syncTrackInfo();
+  }
+
+  @override
+  void syncTrackInfo() {
     final tag = _bindings.title(_engine).trim();
-    _title = tag.isEmpty ? _fileName(path) : tag;
+    final fallback = _path == null ? '' : _fileName(_path!);
+    _title = tag.isEmpty ? fallback : tag;
     _artist = _bindings.artist(_engine).trim();
     _album = _bindings.album(_engine).trim();
     _duration = _bindings.duration(_engine);
     _cover = _readCover();
-    _loaded = true;
   }
 
   Uint8List? _readCover() {
@@ -206,10 +256,13 @@ class NativePlayer {
     return null;
   }
 
+  @override
   void play() => _bindings.play(_engine);
 
+  @override
   void pause() => _bindings.pause(_engine);
 
+  @override
   void toggle() {
     if (isPlaying) {
       pause();
@@ -218,11 +271,14 @@ class NativePlayer {
     }
   }
 
+  @override
   void seek(double seconds) => _bindings.seek(_engine, seconds);
 
+  @override
   void setVolume(double value) =>
       _bindings.setVolume(_engine, value.clamp(0, 1).toDouble());
 
+  @override
   void setBand(int index, double db) {
     eqGains[index] = db;
     final buffer = calloc<Float>(eqGains.length);
@@ -236,6 +292,7 @@ class NativePlayer {
     }
   }
 
+  @override
   void resetEq() {
     for (var i = 0; i < eqGains.length; i++) {
       eqGains[i] = 0;
@@ -243,11 +300,43 @@ class NativePlayer {
     setBand(0, 0);
   }
 
+  @override
+  PlayerEvent? pollEvent() {
+    if (_disposed) return null;
+    if (_bindings.pollEvent(_engine, _eventBuf) <= 0) return null;
+    final raw = _eventBuf.ref;
+    return PlayerEvent(
+      _eventKind(raw.kind),
+      a: raw.a,
+      b: raw.b,
+      value: raw.value,
+    );
+  }
+
+  static PlayerEventKind _eventKind(int kind) {
+    switch (kind) {
+      case 1:
+        return PlayerEventKind.state;
+      case 2:
+        return PlayerEventKind.track;
+      case 3:
+        return PlayerEventKind.queue;
+      case 4:
+        return PlayerEventKind.end;
+      case 5:
+        return PlayerEventKind.sleep;
+      default:
+        return PlayerEventKind.unknown;
+    }
+  }
+
+  @override
   void dispose() {
     if (_disposed) {
       return;
     }
     _disposed = true;
+    calloc.free(_eventBuf);
     _bindings.destroy(_engine);
   }
 
@@ -275,6 +364,8 @@ class _Bindings {
         position = lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_position'),
         duration = lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_duration'),
         isPlaying = lib.lookupFunction<_IntNative, _IntDart>('ch_engine_is_playing'),
+        pollEvent =
+            lib.lookupFunction<_PollEventNative, _PollEventDart>('ch_engine_poll_event'),
         titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
         artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
         albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
@@ -299,6 +390,7 @@ class _Bindings {
   final _DoubleDart position;
   final _DoubleDart duration;
   final _IntDart isPlaying;
+  final _PollEventDart pollEvent;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;
