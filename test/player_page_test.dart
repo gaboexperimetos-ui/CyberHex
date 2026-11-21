@@ -20,6 +20,8 @@ void main() {
     expect(find.text('Tu música, en tu máquina'), findsOneWidget);
     expect(find.text('Abrir audio'), findsOneWidget);
     expect(find.text('CYBERHEX'), findsOneWidget);
+    // Desmonta la página antes del tearDown: así se libera el ticker del disco.
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('con pista muestra título, artista, álbum y duración',
@@ -42,6 +44,8 @@ void main() {
     expect(find.text('Canción'), findsOneWidget);
     expect(find.text('Artista · Álbum'), findsOneWidget);
     expect(find.text('3:05 · motor nativo 48 kHz'), findsOneWidget);
+    // Desmonta la página antes del tearDown: así se libera el ticker del disco.
+    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('el icono cambia a pausa cuando el motor reproduce',
@@ -62,5 +66,7 @@ void main() {
     controller.play();
     await tester.pump();
     expect(find.byIcon(Icons.pause_rounded), findsOneWidget);
+    // Desmonta la página antes del tearDown: así se libera el ticker del disco.
+    await tester.pumpWidget(const SizedBox());
   });
 }
