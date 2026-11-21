@@ -25,6 +25,21 @@ int32_t ch_engine_queue_remove(ch_engine* engine, int32_t index);
 int32_t ch_engine_queue_insert(ch_engine* engine, int32_t index, const char* utf8_path);
 
 int32_t ch_engine_set_volume(ch_engine* engine, float volume);
+float   ch_engine_volume(ch_engine* engine);
+
+/* DSP de reproduccion. */
+int32_t ch_engine_set_crossfeed(ch_engine* engine, int32_t enabled, float strength);
+int32_t ch_engine_crossfeed(ch_engine* engine, float* strength);
+int32_t ch_engine_set_mono(ch_engine* engine, int32_t enabled);
+int32_t ch_engine_mono(ch_engine* engine);
+int32_t ch_engine_set_balance(ch_engine* engine, float balance);
+float   ch_engine_balance(ch_engine* engine);
+int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
+
+/* Bucle A-B en segundos (a < b). */
+int32_t ch_engine_set_ab_loop(ch_engine* engine, double a_seconds, double b_seconds);
+int32_t ch_engine_clear_ab_loop(ch_engine* engine);
+int32_t ch_engine_ab_loop(ch_engine* engine, double* a_seconds, double* b_seconds);
 
 /*
  * Temporizador de apagado: pausa (o termina) tras `seconds`, con fundido
@@ -189,6 +204,24 @@ const char* ch_markers_name(const ch_markers* markers, const char* track,
                             int32_t index);
 int32_t   ch_markers_remove(ch_markers* markers, const char* track, int32_t index);
 int32_t   ch_markers_clear(ch_markers* markers, const char* track);
+
+/* Estado de reproduccion: cola, pista actual, posicion y ajustes. */
+int32_t ch_engine_save_state(ch_engine* engine, const char* path);
+int32_t ch_engine_load_state(ch_engine* engine, const char* path, double* position_out);
+
+/* Hojas CUE: una imagen de audio dividida en pistas. */
+typedef struct ch_cue ch_cue;
+ch_cue*   ch_cue_read(const char* path);
+void      ch_cue_free(ch_cue* cue);
+int32_t   ch_cue_count(const ch_cue* cue);
+const char* ch_cue_album(const ch_cue* cue);
+const char* ch_cue_album_performer(const ch_cue* cue);
+const char* ch_cue_file(const ch_cue* cue, int32_t index);
+const char* ch_cue_title(const ch_cue* cue, int32_t index);
+const char* ch_cue_performer(const ch_cue* cue, int32_t index);
+double    ch_cue_start(const ch_cue* cue, int32_t index);
+double    ch_cue_end(const ch_cue* cue, int32_t index);
+int32_t   ch_cue_number(const ch_cue* cue, int32_t index);
 
 #ifdef __cplusplus
 }

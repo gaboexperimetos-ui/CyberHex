@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Compila el núcleo CyberHex (Zig + C23) para Android usando el NDK instalado.
 # Uso: ./build_android.sh [arm64-v8a] [armeabi-v7a] [x86_64] [x86]
-# Sin argumentos compila SOLO arm64-v8a (optimizado para Snapdragon 685 /
-# Cortex-A73 del Redmi Note 13). Otros ABI: pasarlos como argumentos.
+# Sin argumentos compila SOLO arm64-v8a (ARMv8-A genérico + NEON, válido para
+# cualquier móvil 64-bit, incluidos los Helio octa-core). Para afinar a un SoC
+# concreto: CYBERHEX_CPU=cortex_a76 ./build_android.sh (u otro nombre válido de
+# `zig build-lib -mcpu help`). Otros ABI: pasarlos como argumentos.
 set -euo pipefail
 
 CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -43,7 +45,7 @@ fi
 
 for abi in "${TARGETS[@]}"; do
   case "$abi" in
-    arm64-v8a)   ZT=aarch64-linux-android;  NDKARCH=aarch64-linux-android; CPUFLAG=(-mcpu cortex_a73) ;;
+    arm64-v8a)   ZT=aarch64-linux-android;  NDKARCH=aarch64-linux-android; CPUFLAG=(-mcpu "${CYBERHEX_CPU:-baseline}") ;;
     armeabi-v7a) ZT=arm-linux-androideabi;  NDKARCH=arm-linux-androideabi; CPUFLAG=(-mcpu baseline) ;;
     x86_64)      ZT=x86_64-linux-android;   NDKARCH=x86_64-linux-android; CPUFLAG=(-mcpu baseline) ;;
     x86)         ZT=x86-linux-android;      NDKARCH=i686-linux-android; CPUFLAG=(-mcpu baseline) ;;
@@ -77,7 +79,7 @@ EOF
   (
     cd "$CORE_DIR"
     "$ZIG" build-lib \
-      -cflags -std=c23 -O3 -ffast-math -fno-math-errno -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c ./src/lyrics.c ./src/library.c ./src/markers.c \
+      -cflags -std=c23 -O3 -ffast-math -fno-math-errno -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c ./src/lyrics.c ./src/library.c ./src/markers.c ./src/cue.c ./src/fileio.c \
       -Ofast -target "$ZT" --libc "$LIBC" "${CPUFLAG[@]}" \
       -L "$LIBDIR" -L "$FFDIR/lib" -I vendor -I src -I "$FFDIR/include" \
       -lavformat -lavcodec -lavutil -lswresample -lm -ldl \

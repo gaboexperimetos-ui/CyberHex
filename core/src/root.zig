@@ -65,6 +65,10 @@ extern fn c_lib_scan(lib: ?*ch_library, root: [*c]const u8, exts: [*c]const [*c]
 extern fn c_lib_count(lib: ?*const ch_library) c_int;
 extern fn c_lib_path(lib: ?*const ch_library, index: c_int) [*c]const u8;
 extern fn c_lib_removed(lib: ?*const ch_library) c_int;
+
+extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
+extern fn ch_file_free(data: [*c]u8) void;
+extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -237,6 +241,27 @@ pub const Engine = struct {
     limit_enabled: bool = false,
     limit_ceiling: f32 = 0.891, // ~ -1 dBFS
     limit_gain: f32 = 1.0,
+
+    // Bucle A-B (frames; NO_SEEK = desactivado).
+    ab_start: usize = NO_SEEK,
+    ab_end: usize = NO_SEEK,
+
+    // Crossfeed para auriculares.
+    cf_enabled: bool = false,
+    cf_strength_bits: u32 = @bitCast(@as(f32, 0.5)),
+    cf_lp_l: f32 = 0,
+    cf_lp_r: f32 = 0,
+
+    // Mezcla: mono y balance (-1 izquierda .. +1 derecha).
+    mono: bool = false,
+    balance_bits: u32 = @bitCast(@as(f32, 0)),
+
+    // Medidores (ventana desde la ultima lectura).
+    meter_lock: SpinLock = .{},
+    meter_peak_l: f32 = 0,
+    meter_peak_r: f32 = 0,
+    meter_sum: f64 = 0,
+    meter_frames: usize = 0,
     sleep_end_ms: u64 = 0,
     sleep_lock: SpinLock = .{},
     sleep_fade_ms: u32 = 8000,
@@ -1084,6 +1109,15 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         const produced = take * CHANNELS;
         self.equalizer.process(out[0..produced], take);
 
+        // Bucle A-B: al llegar a B se vuelve a A.
+        const ab_end = @atomicLoad(usize, &self.ab_end, .acquire);
+        if (playing and ab_end != NO_SEEK) {
+            const p = @atomicLoad(usize, &self.played, .acquire);
+            if (p >= ab_end) {
+                @atomicStore(usize, &self.seek_req, @atomicLoad(usize, &self.ab_start, .acquire), .release);
+            }
+        }
+
         var target: f32 = 0;
         if (playing) {
             target = self.volume();
@@ -1098,14 +1132,45 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             const limiting = self.limit_enabled;
             const ceiling = self.limit_ceiling;
             var lg = self.limit_gain;
+            const crossfeeding = self.cf_enabled;
+            const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &self.cf_strength_bits, .monotonic)));
+            const cf_wet = 0.6 * std.math.clamp(cf_strength, 0.0, 1.0);
+            const cf_alpha = 1.0 - @exp(-2.0 * std.math.pi * 700.0 / @as(f32, @floatFromInt(SAMPLE_RATE)));
+            var lp_l = self.cf_lp_l;
+            var lp_r = self.cf_lp_r;
+            const is_mono = self.mono;
+            const balance = @as(f32, @bitCast(@atomicLoad(u32, &self.balance_bits, .monotonic)));
+            const bal_l: f32 = if (balance > 0) 1.0 - balance else 1.0;
+            const bal_r: f32 = if (balance < 0) 1.0 + balance else 1.0;
+            var peak_l: f32 = 0;
+            var peak_r: f32 = 0;
+            var sq: f64 = 0;
             // Ataque rapido, recuperacion lenta (~200 ms).
-            const attack: f32 = 0.999;
             const release: f32 = 1.0 - @exp(-1.0 / (0.2 * @as(f32, @floatFromInt(SAMPLE_RATE))));
             var i: usize = 0;
             while (i < take) : (i += 1) {
                 g += (target - g) * FADE_COEFF;
                 var s = out[i * CHANNELS] * g;
                 var s2 = out[i * CHANNELS + 1] * g;
+
+                if (crossfeeding) {
+                    // Bauer simplificado: mezcla el canal opuesto filtrado paso bajo.
+                    lp_l += (s2 - lp_l) * cf_alpha;
+                    lp_r += (s - lp_r) * cf_alpha;
+                    const l2 = s * (1.0 - cf_wet * 0.5) + lp_l * cf_wet;
+                    const r2 = s2 * (1.0 - cf_wet * 0.5) + lp_r * cf_wet;
+                    s = l2;
+                    s2 = r2;
+                }
+                if (is_mono) {
+                    const m = (s + s2) * 0.5;
+                    s = m;
+                    s2 = m;
+                } else if (balance != 0) {
+                    s *= bal_l;
+                    s2 *= bal_r;
+                }
+
                 if (limiting) {
                     const peak = @max(@abs(s), @abs(s2));
                     var desired = lg;
@@ -1115,15 +1180,29 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                     } else {
                         lg += (desired - lg) * release;
                     }
-                    _ = attack;
                     s *= lg;
                     s2 *= lg;
                 }
                 out[i * CHANNELS] = s;
                 out[i * CHANNELS + 1] = s2;
+
+                const al = @abs(s);
+                const ar = @abs(s2);
+                if (al > peak_l) peak_l = al;
+                if (ar > peak_r) peak_r = ar;
+                sq += @as(f64, s) * s + @as(f64, s2) * s2;
             }
             self.limit_gain = lg;
+            self.cf_lp_l = lp_l;
+            self.cf_lp_r = lp_r;
             self.fade_gain = if (!playing and g < 0.001) 0 else g;
+
+            self.meter_lock.lock();
+            if (peak_l > self.meter_peak_l) self.meter_peak_l = peak_l;
+            if (peak_r > self.meter_peak_r) self.meter_peak_r = peak_r;
+            self.meter_sum += sq;
+            self.meter_frames += take;
+            self.meter_lock.unlock();
         }
 
         if (take > 0) {
@@ -1887,11 +1966,109 @@ export fn ch_engine_seek(self: ?*Engine, seconds: f64) i32 {
     return 0;
 }
 
+/// Bucle A-B en segundos (A < B). Al llegar a B vuelve a A.
+export fn ch_engine_set_ab_loop(self: ?*Engine, a_seconds: f64, b_seconds: f64) i32 {
+    const e = self orelse return -1;
+    if (!(a_seconds >= 0) or !(b_seconds > a_seconds)) return -2;
+    const start: usize = @intFromFloat(a_seconds * SAMPLE_RATE);
+    const end: usize = @intFromFloat(b_seconds * SAMPLE_RATE);
+    @atomicStore(usize, &e.ab_start, start, .release);
+    @atomicStore(usize, &e.ab_end, end, .release);
+    return 0;
+}
+
+export fn ch_engine_clear_ab_loop(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    @atomicStore(usize, &e.ab_end, NO_SEEK, .release);
+    @atomicStore(usize, &e.ab_start, NO_SEEK, .release);
+    return 0;
+}
+
+/// Devuelve 1 si hay bucle A-B y escribe A y B (segundos).
+export fn ch_engine_ab_loop(self: ?*Engine, a_seconds: ?*f64, b_seconds: ?*f64) i32 {
+    const e = self orelse return 0;
+    const end = @atomicLoad(usize, &e.ab_end, .acquire);
+    if (end == NO_SEEK) return 0;
+    if (a_seconds) |p| p.* = @as(f64, @floatFromInt(@atomicLoad(usize, &e.ab_start, .acquire))) / SAMPLE_RATE;
+    if (b_seconds) |p| p.* = @as(f64, @floatFromInt(end)) / SAMPLE_RATE;
+    return 1;
+}
+
+/// Crossfeed para auriculares: 0 apagado, fuerza 0..1 (0.5 = moderado).
+export fn ch_engine_set_crossfeed(self: ?*Engine, enabled: i32, strength: f32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(u32, &e.cf_strength_bits, @bitCast(std.math.clamp(strength, 0, 1)), .monotonic);
+    e.cf_enabled = enabled != 0;
+    if (!e.cf_enabled) {
+        e.cf_lp_l = 0;
+        e.cf_lp_r = 0;
+    }
+    return 0;
+}
+
+export fn ch_engine_crossfeed(self: ?*Engine, strength: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (strength) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.cf_strength_bits, .monotonic)));
+    return if (e.cf_enabled) 1 else 0;
+}
+
+/// Mono (1) o estereo (0).
+export fn ch_engine_set_mono(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    e.mono = enabled != 0;
+    return 0;
+}
+
+export fn ch_engine_mono(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.mono) 1 else 0;
+}
+
+/// Balance: -1 solo izquierda, 0 centrado, +1 solo derecha.
+export fn ch_engine_set_balance(self: ?*Engine, balance: f32) i32 {
+    const e = self orelse return -1;
+    @atomicStore(u32, &e.balance_bits, @bitCast(std.math.clamp(balance, -1, 1)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_balance(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return @as(f32, @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic)));
+}
+
+/// Medidores desde la ultima llamada: picos por canal y RMS (dBFS).
+export fn ch_engine_meter(self: ?*Engine, peak_l_db: ?*f32, peak_r_db: ?*f32, rms_db: ?*f32) i32 {
+    const e = self orelse return -1;
+    e.meter_lock.lock();
+    const pl = e.meter_peak_l;
+    const pr = e.meter_peak_r;
+    const sum = e.meter_sum;
+    const n = e.meter_frames;
+    e.meter_peak_l = 0;
+    e.meter_peak_r = 0;
+    e.meter_sum = 0;
+    e.meter_frames = 0;
+    e.meter_lock.unlock();
+
+    if (peak_l_db) |p| p.* = if (pl > 1e-7) 20.0 * std.math.log10(pl) else -120.0;
+    if (peak_r_db) |p| p.* = if (pr > 1e-7) 20.0 * std.math.log10(pr) else -120.0;
+    if (rms_db) |p| {
+        const mean = if (n > 0) sum / @as(f64, @floatFromInt(n)) else 0;
+        p.* = if (mean > 1e-12) @floatCast(10.0 * std.math.log10(mean)) else -120.0;
+    }
+    return 0;
+}
+
 export fn ch_engine_set_volume(self: ?*Engine, volume: f32) i32 {
     const e = self orelse return -1;
     const clamped = std.math.clamp(volume, 0, 1);
     @atomicStore(u32, &e.volume_bits, @bitCast(clamped), .monotonic);
     return 0;
+}
+
+export fn ch_engine_volume(self: ?*Engine) f32 {
+    const e = self orelse return 1.0;
+    return @as(f32, @bitCast(@atomicLoad(u32, &e.volume_bits, .monotonic)));
 }
 
 export fn ch_engine_set_sleep_timer(self: ?*Engine, seconds: f64, fade_seconds: f64) i32 {
@@ -2246,6 +2423,243 @@ export fn ch_library_path(lib: ?*const ch_library, index: i32) [*c]const u8 {
 
 export fn ch_library_removed(lib: ?*const ch_library) i32 {
     return @intCast(c_lib_removed(lib));
+}
+
+// ---- Estado de reproduccion persistente ----
+
+fn appendEscaped(buf: *std.ArrayListUnmanaged(u8), alloc: Allocator, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '\\' => try buf.appendSlice(alloc, "\\\\"),
+            '\t' => try buf.appendSlice(alloc, "\\t"),
+            '\n' => try buf.appendSlice(alloc, "\\n"),
+            '\r' => try buf.appendSlice(alloc, "\\r"),
+            else => try buf.append(alloc, c),
+        }
+    }
+}
+
+fn unescapeAlloc(alloc: Allocator, s: []const u8) ![]u8 {
+    var out = try alloc.alloc(u8, s.len);
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < s.len) : (i += 1) {
+        if (s[i] == '\\' and i + 1 < s.len) {
+            i += 1;
+            out[n] = switch (s[i]) {
+                't' => '\t',
+                'n' => '\n',
+                'r' => '\r',
+                else => s[i],
+            };
+        } else {
+            out[n] = s[i];
+        }
+        n += 1;
+    }
+    return out[0..n];
+}
+
+fn appendNum(buf: *std.ArrayListUnmanaged(u8), alloc: Allocator, value: f64) !void {
+    var tmp: [64]u8 = undefined;
+    const text = try std.fmt.bufPrint(&tmp, "{d:.6}", .{value});
+    try buf.appendSlice(alloc, text);
+}
+
+/// Guarda cola, posicion, pista actual y ajustes en un archivo de texto.
+export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+    buf.appendSlice(e.allocator, "CHSTATE\t1\n") catch return -2;
+
+    e.list_mutex.lock();
+    for (e.playlist.items, 0..) |item, i| {
+        if (i == e.queue_index) {
+            buf.appendSlice(e.allocator, "current\t") catch {};
+        } else {
+            buf.appendSlice(e.allocator, "queue\t") catch {};
+        }
+        appendEscaped(&buf, e.allocator, item) catch {};
+        buf.append(e.allocator, '\n') catch {};
+    }
+    e.list_mutex.unlock();
+
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    var seg_start: usize = 0;
+    e.seg_lock.lock();
+    if (e.findSegment(p)) |pos| seg_start = e.segments[pos].start;
+    e.seg_lock.unlock();
+    const position = @as(f64, @floatFromInt(p -| seg_start)) / SAMPLE_RATE;
+
+    var tmp: [128]u8 = undefined;
+    const posline = std.fmt.bufPrint(&tmp, "pos\t{d:.6}\n", .{position}) catch "";
+    buf.appendSlice(e.allocator, posline) catch {};
+
+    const volume = @as(f32, @bitCast(@atomicLoad(u32, &e.volume_bits, .monotonic)));
+    const speed = e.speedValue();
+    const pitch = @as(f32, @bitCast(@atomicLoad(u32, &e.pitch_bits, .monotonic)));
+    const balance = @as(f32, @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic)));
+    const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &e.cf_strength_bits, .monotonic)));
+    const xfade = @as(f32, @bitCast(@atomicLoad(u32, &e.xfade_bits, .monotonic)));
+
+    const lines = [_]struct { key: []const u8, a: f64, b: f64 }{
+        .{ .key = "volume", .a = volume, .b = 0 },
+        .{ .key = "speed", .a = speed, .b = 0 },
+        .{ .key = "pitch", .a = pitch, .b = 0 },
+        .{ .key = "xfade", .a = xfade, .b = 0 },
+        .{ .key = "balance", .a = balance, .b = 0 },
+        .{ .key = "repeat", .a = @floatFromInt(e.repeat_mode), .b = 0 },
+        .{ .key = "shuffle", .a = if (@atomicLoad(bool, &e.shuffle, .monotonic)) 1 else 0, .b = 0 },
+        .{ .key = "rg", .a = if (@atomicLoad(bool, &e.rg_enabled, .monotonic)) 1 else 0, .b = 0 },
+        .{ .key = "limiter", .a = if (e.limit_enabled) 1 else 0, .b = e.limit_ceiling },
+        .{ .key = "mono", .a = if (e.mono) 1 else 0, .b = 0 },
+        .{ .key = "crossfeed", .a = if (e.cf_enabled) 1 else 0, .b = cf_strength },
+    };
+    for (lines) |line| {
+        buf.appendSlice(e.allocator, line.key) catch {};
+        buf.append(e.allocator, '\t') catch {};
+        appendNum(&buf, e.allocator, line.a) catch {};
+        const has_second = std.mem.eql(u8, line.key, "limiter") or
+            std.mem.eql(u8, line.key, "crossfeed");
+        if (has_second) {
+            buf.append(e.allocator, '\t') catch {};
+            appendNum(&buf, e.allocator, line.b) catch {};
+        }
+        buf.append(e.allocator, '\n') catch {};
+    }
+
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Carga el estado guardado. Deja la pista cargada y en pausa; escribe en
+/// `position_out` la posicion (segundos) a la que saltar. 0 si ok.
+export fn ch_engine_load_state(self: ?*Engine, path: [*c]const u8, position_out: ?*f64) i32 {
+    const e = self orelse return -1;
+    if (position_out) |p| p.* = 0;
+    if (path == null) return -1;
+
+    var size: u64 = 0;
+    const raw = ch_file_read_all(path, &size);
+    if (raw == null) return -2;
+    defer ch_file_free(raw);
+    const data = raw[0..@intCast(size)];
+
+    var paths: std.ArrayListUnmanaged([:0]u8) = .empty;
+    defer {
+        for (paths.items) |p| e.allocator.free(p);
+        paths.deinit(e.allocator);
+    }
+
+    var current: usize = 0;
+    var position: f64 = 0;
+    var volume: f32 = -1;
+    var speed: f32 = -1;
+    var pitch: f32 = -999;
+    var xfade: f32 = -1;
+    var balance: f32 = -999;
+    var repeat_mode: i32 = -1;
+    var shuffle: i32 = -1;
+    var rg: i32 = -1;
+    var limiter: i32 = -1;
+    var limiter_ceiling: f32 = 0;
+    var mono: i32 = -1;
+    var crossfeed: i32 = -1;
+    var cf_strength: f32 = 0.5;
+
+    var it = std.mem.splitScalar(u8, data, '\n');
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+        const tab = std.mem.indexOfScalar(u8, line, '\t') orelse continue;
+        const key = line[0..tab];
+        const rest = line[tab + 1 ..];
+
+        if (std.mem.eql(u8, key, "CHSTATE")) continue;
+        if (std.mem.eql(u8, key, "queue") or std.mem.eql(u8, key, "current")) {
+            const decoded = unescapeAlloc(e.allocator, rest) catch return -2;
+            const sentinel = e.allocator.dupeSentinel(u8, decoded, 0) catch {
+                e.allocator.free(decoded);
+                return -2;
+            };
+            e.allocator.free(decoded);
+            if (std.mem.eql(u8, key, "current")) current = paths.items.len;
+            paths.append(e.allocator, sentinel) catch {
+                e.allocator.free(sentinel);
+                return -2;
+            };
+            continue;
+        }
+
+        const second = std.mem.indexOfScalar(u8, rest, '\t');
+        const first_txt = if (second) |s| rest[0..s] else rest;
+        const second_txt = if (second) |s| rest[s + 1 ..] else "";
+        const value = std.fmt.parseFloat(f64, first_txt) catch continue;
+        const extra = std.fmt.parseFloat(f64, second_txt) catch 0;
+
+        if (std.mem.eql(u8, key, "pos")) position = value
+        else if (std.mem.eql(u8, key, "volume")) volume = @floatCast(value)
+        else if (std.mem.eql(u8, key, "speed")) speed = @floatCast(value)
+        else if (std.mem.eql(u8, key, "pitch")) pitch = @floatCast(value)
+        else if (std.mem.eql(u8, key, "xfade")) xfade = @floatCast(value)
+        else if (std.mem.eql(u8, key, "balance")) balance = @floatCast(value)
+        else if (std.mem.eql(u8, key, "repeat")) repeat_mode = @intFromFloat(value)
+        else if (std.mem.eql(u8, key, "shuffle")) shuffle = @intFromFloat(value)
+        else if (std.mem.eql(u8, key, "rg")) rg = @intFromFloat(value)
+        else if (std.mem.eql(u8, key, "limiter")) {
+            limiter = @intFromFloat(value);
+            limiter_ceiling = @floatCast(extra);
+        } else if (std.mem.eql(u8, key, "mono")) mono = @intFromFloat(value)
+        else if (std.mem.eql(u8, key, "crossfeed")) {
+            crossfeed = @intFromFloat(value);
+            cf_strength = @floatCast(extra);
+        }
+    }
+
+    if (paths.items.len == 0) return -3;
+    if (current >= paths.items.len) current = 0;
+
+    @atomicStore(bool, &e.playing, false, .release);
+    @atomicStore(usize, &e.seek_req, NO_SEEK, .release);
+    @atomicStore(usize, &e.skip_req, NO_SEEK, .release);
+    _ = e.waitIdle(2000);
+    e.flushRing();
+
+    e.list_mutex.lock();
+    if (e.decoder) |d| {
+        ch_decode_close(d);
+        e.decoder = null;
+    }
+    clearPlaylist(e);
+    for (paths.items) |p| {
+        e.playlist.append(e.allocator, p) catch {};
+    }
+    paths.clearRetainingCapacity();
+    e.queue_index = current;
+    e.list_mutex.unlock();
+    e.resetSegments();
+    @atomicStore(usize, &e.played, 0, .release);
+    @atomicStore(bool, &e.eof, true, .release);
+
+    if (volume >= 0) _ = ch_engine_set_volume(e, volume);
+    if (speed > 0) _ = ch_engine_set_speed(e, speed);
+    if (pitch > -900) _ = ch_engine_set_pitch(e, pitch);
+    if (xfade >= 0) _ = ch_engine_set_crossfade(e, xfade);
+    if (balance > -900) _ = ch_engine_set_balance(e, balance);
+    if (repeat_mode >= 0) _ = ch_engine_set_repeat(e, repeat_mode);
+    if (shuffle >= 0) _ = ch_engine_set_shuffle(e, shuffle);
+    if (rg >= 0) _ = ch_engine_set_replaygain(e, rg);
+    if (limiter >= 0) _ = ch_engine_set_limiter(e, limiter, limiter_ceiling);
+    if (mono >= 0) _ = ch_engine_set_mono(e, mono);
+    if (crossfeed >= 0) _ = ch_engine_set_crossfeed(e, crossfeed, cf_strength);
+
+    _ = e.beginAt(current);
+    if (position > 0) {
+        @atomicStore(usize, &e.seek_req, @intFromFloat(position * SAMPLE_RATE), .release);
+    }
+    if (position_out) |p| p.* = position;
+    return 0;
 }
 
 /// Analiza `path` y devuelve en `lead`/`tail` los segundos de silencio al
