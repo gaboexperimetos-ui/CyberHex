@@ -50,6 +50,23 @@ float   ch_engine_gain_db(ch_engine* engine);
 int32_t ch_engine_save_cover(ch_engine* engine, int32_t index, const char* path);
 int32_t ch_engine_set_stereo_width(ch_engine* engine, float width); /* 0 .. 2 */
 float   ch_engine_stereo_width(ch_engine* engine);
+
+/* Audio 9D espacial (auriculares): giro azimutal continuo con ITD <= 0.75 ms,
+   ILD y sombra craneal. speed_hz = vueltas por segundo (0.05 .. 2.0), depth 0 .. 1. */
+int32_t ch_engine_set_9d(ch_engine* engine, int32_t enabled, float speed_hz, float depth);
+int32_t ch_engine_9d_enabled(ch_engine* engine);
+float   ch_engine_9d_speed(ch_engine* engine);
+float   ch_engine_9d_depth(ch_engine* engine);
+
+/* Potenciador estereo: ancho Mid/Side (0 = mono .. 2 = ultra) y realce armonico
+   de graves (0 .. 1) antes del limitador. */
+int32_t ch_engine_set_stereo_enhance(ch_engine* engine, float width, float bass_punch);
+float   ch_engine_bass_punch(ch_engine* engine);
+
+/* Modo karaoke: atenua el centro por encima de ~130 Hz y deja intactos los
+   subgraves. amount 0 (apagado) .. 1 (voz fuera). */
+int32_t ch_engine_set_vocal_cut(ch_engine* engine, float amount);
+float   ch_engine_vocal_cut(ch_engine* engine);
 int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float threshold_db);
 int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);

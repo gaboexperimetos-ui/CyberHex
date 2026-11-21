@@ -1,5 +1,6 @@
 const std = @import("std");
 const eq = @import("eq.zig");
+const dsp = @import("dsp_spatial.zig");
 const fft = @import("fft.zig");
 const Stretch = @import("stretch.zig").Stretch;
 
@@ -94,8 +95,17 @@ fn copyAudioError() void {
     setGlobalError(std.mem.span(ch_audio_last_error()));
 }
 
+/// Duerme `ms` milisegundos sin depender del reloj del sistema.
+///
+/// Antes se usaba `poll` con una lista vacia, que en Zig 0.17 pasa un puntero
+/// no valido al kernel: `poll` devuelve EFAULT y el std lo trata como
+/// `unreachable` (panico). Con la lista vacia lo correcto es `nanosleep`.
 fn sleepMs(ms: u32) void {
-    _ = std.posix.poll(&.{}, @intCast(ms)) catch {};
+    var req: std.c.timespec = .{
+        .sec = @intCast(ms / 1000),
+        .nsec = @intCast((ms % 1000) * 1_000_000),
+    };
+    _ = std.c.nanosleep(&req, null);
 }
 
 fn monoMs() u64 {
@@ -265,8 +275,9 @@ pub const Engine = struct {
     cf_lp_l: f32 = 0,
     cf_lp_r: f32 = 0,
 
-    // Ancho estereo (1 = normal, 0 = mono, 2 = muy amplio).
-    width_bits: u32 = @bitCast(@as(f32, 1)),
+    // Cadena DSP de la fase 2: karaoke -> 9D -> ancho/punch. El ancho estereo
+    // (1 = normal, 0 = mono, 2 = muy amplio) vive ahora en la cadena.
+    dsp: dsp.Dsp = .{},
 
     // Recorte automatico de silencio al abrir pista.
     trim_enabled: bool = false,
@@ -1278,7 +1289,6 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             const ceiling = self.limit_ceiling;
             var lg = self.limit_gain;
             const crossfeeding = self.cf_enabled;
-            const width = @as(f32, @bitCast(@atomicLoad(u32, &self.width_bits, .monotonic)));
             const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &self.cf_strength_bits, .monotonic)));
             const cf_wet = 0.6 * std.math.clamp(cf_strength, 0.0, 1.0);
             const cf_alpha = 1.0 - @exp(-2.0 * std.math.pi * 700.0 / @as(f32, @floatFromInt(SAMPLE_RATE)));
@@ -1311,6 +1321,14 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 var s = l * g;
                 var s2 = rr * g;
 
+                // Karaoke -> 9D -> ancho/punch: atomicos, sin candados y sin
+                // reservar memoria (esto corre en el callback de audio).
+                if (!self.dsp.isIdle()) {
+                    const shaped = self.dsp.process(s, s2);
+                    s = shaped[0];
+                    s2 = shaped[1];
+                }
+
                 if (crossfeeding) {
                     // Bauer simplificado: mezcla el canal opuesto filtrado paso bajo.
                     lp_l += (s2 - lp_l) * cf_alpha;
@@ -1319,13 +1337,6 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                     const r2 = s2 * (1.0 - cf_wet * 0.5) + lp_r * cf_wet;
                     s = l2;
                     s2 = r2;
-                }
-                if (width != 1.0) {
-                    // Matriz mid/side: width 0 = mono, 1 = normal, 2 = amplio.
-                    const mid = (s + s2) * 0.5;
-                    const side = (s - s2) * 0.5 * width;
-                    s = mid + side;
-                    s2 = mid - side;
                 }
                 if (balance != 0) {
                     s *= gain_l;
@@ -2272,16 +2283,64 @@ export fn ch_engine_gain_db(self: ?*Engine) f32 {
     return @as(f32, @bitCast(@atomicLoad(u32, &e.gain_db_bits, .monotonic)));
 }
 
-/// Ancho estereo: 0 = mono, 1 = normal, 2 = amplio.
+/// Ancho estereo: 0 = mono, 1 = normal, 2 = amplio (matriz Mid/Side).
 export fn ch_engine_set_stereo_width(self: ?*Engine, width: f32) i32 {
     const e = self orelse return -1;
-    @atomicStore(u32, &e.width_bits, @bitCast(std.math.clamp(width, 0, 2)), .monotonic);
+    e.dsp.enhancer.setWidth(width);
     return 0;
 }
 
 export fn ch_engine_stereo_width(self: ?*Engine) f32 {
     const e = self orelse return 1;
-    return @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic)));
+    return e.dsp.enhancer.width();
+}
+
+/// Potenciador estereo: ancho (0..2) y punch de graves (0..1) de una vez.
+export fn ch_engine_set_stereo_enhance(self: ?*Engine, width: f32, bass_punch: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.enhancer.set(width, bass_punch);
+    return 0;
+}
+
+export fn ch_engine_bass_punch(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.enhancer.punch();
+}
+
+/// Audio 9D espacial: rotacion azimutal continua para auriculares.
+/// `speed_hz` = vueltas por segundo (0.05..2) y `depth` 0..1.
+export fn ch_engine_set_9d(self: ?*Engine, enabled: i32, speed_hz: f32, depth: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.spatial.set(enabled != 0, speed_hz, depth);
+    if (enabled == 0) e.dsp.spatial.reset();
+    return 0;
+}
+
+export fn ch_engine_9d_enabled(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.dsp.spatial.isEnabled()) 1 else 0;
+}
+
+export fn ch_engine_9d_speed(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.spatial.speed();
+}
+
+export fn ch_engine_9d_depth(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.spatial.depth();
+}
+
+/// Modo karaoke: atenuacion del centro por encima de ~130 Hz (0 = apagado).
+export fn ch_engine_set_vocal_cut(self: ?*Engine, amount: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.vocal.set(amount);
+    return 0;
+}
+
+export fn ch_engine_vocal_cut(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.vocal.amount();
 }
 
 /// Recorte automatico de silencio al abrir cada pista (dBFS).
@@ -2945,7 +3004,7 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
         .{ .key = "limiter", .a = if (e.limit_enabled) 1 else 0, .b = e.limit_ceiling },
         .{ .key = "mono", .a = if (@atomicLoad(u32, &e.chan_mode, .monotonic) == 1) 1 else 0, .b = 0 },
         .{ .key = "chan_mode", .a = @floatFromInt(@atomicLoad(u32, &e.chan_mode, .monotonic)), .b = 0 },
-        .{ .key = "width", .a = @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic))), .b = 0 },
+        .{ .key = "width", .a = e.dsp.enhancer.width(), .b = 0 },
         .{ .key = "trim", .a = if (e.trim_enabled) 1 else 0, .b = e.trim_threshold_db },
         .{ .key = "crossfeed", .a = if (e.cf_enabled) 1 else 0, .b = cf_strength },
     };
@@ -3203,6 +3262,14 @@ test "api: los punteros nulos devuelven error, no revientan" {
     try std.testing.expectEqual(@as(f32, 0.0), ch_engine_balance(null));
     try std.testing.expectEqual(@as(i32, -1), ch_engine_set_channel_mode(null, 1));
     try std.testing.expectEqual(@as(i32, 0), ch_engine_channel_mode(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_9d(null, 1, 0.2, 0.5));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_9d_enabled(null));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_9d_speed(null));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_9d_depth(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_stereo_enhance(null, 1.5, 0.5));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_bass_punch(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_vocal_cut(null, 0.5));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_vocal_cut(null));
     try std.testing.expectEqual(ABI_VERSION, ch_engine_abi_version());
 }
 
@@ -3239,4 +3306,37 @@ test "lrcPathFor cambia la extension, no las carpetas" {
 
     const dos = try lrcPathFor(a, "/musica/carpeta.con.puntos/tema");
     try std.testing.expectEqualStrings("/musica/carpeta.con.puntos/tema.lrc", dos);
+}
+
+test "fase 2: los mandos DSP van y vuelven por la API C" {
+    const e = ch_engine_create() orelse return error.SinMotor;
+    defer ch_engine_destroy(e);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_9d(e, 1, 0.5, 0.8));
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_9d_enabled(e));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), ch_engine_9d_speed(e), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), ch_engine_9d_depth(e), 1e-6);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_stereo_enhance(e, 1.6, 0.7));
+    try std.testing.expectApproxEqAbs(@as(f32, 1.6), ch_engine_stereo_width(e), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), ch_engine_bass_punch(e), 1e-6);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_vocal_cut(e, 0.9));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.9), ch_engine_vocal_cut(e), 1e-6);
+
+    // La API recorta: velocidad y profundidad tienen rango, el karaoke 0..1.
+    _ = ch_engine_set_9d(e, 1, 99, 9);
+    try std.testing.expectEqual(dsp.MAX_SPEED_HZ, ch_engine_9d_speed(e));
+    try std.testing.expectEqual(@as(f32, 1.0), ch_engine_9d_depth(e));
+    _ = ch_engine_set_vocal_cut(e, -3);
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_vocal_cut(e));
+
+    // El ancho historico sigue funcionando y comparte mando con el potenciador.
+    _ = ch_engine_set_stereo_width(e, 0.0);
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_stereo_width(e));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), ch_engine_bass_punch(e), 1e-6);
+
+    // Al apagar el 9D no queda estado: volver a encenderlo arranca del centro.
+    _ = ch_engine_set_9d(e, 0, 0.5, 0.8);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_9d_enabled(e));
 }

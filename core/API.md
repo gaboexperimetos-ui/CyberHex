@@ -359,6 +359,55 @@ escritura atómica.
 - `ch_waveform_peaks(path, buckets, out)` devuelve el máximo por tramo en [0..1]
   para dibujar la forma de onda en la UI.
 
+### 9D espacial, potenciador estereo y karaoke
+
+Los tres procesadores son tridimensionales en el sentido de que trabajan sobre
+la imagen estereo, no sobre un solo canal: cadena `karaoke -> 9D -> ancho/punch`,
+siempre despues del ecualizador y antes de crossfeed, balance y limitador.
+Todos los parametros son `std.atomic.Value` (los flotantes viajan como bits en
+un `u32`), no hay candados y `render` no reserva memoria (§8.2: 48 kHz estereo
+fijos).
+
+```c
+/* 9D: giro azimutal continuo para auriculares. */
+ch_engine_set_9d(engine, 1, 0.15f, 0.7f);   /* on, 0.15 vueltas/s, profundidad */
+ch_engine_9d_enabled(engine);               /* 1 */
+ch_engine_9d_speed(engine);                 /* Hz, 0.05 .. 2.0 */
+ch_engine_9d_depth(engine);                 /* 0 .. 1 */
+
+/* Potenciador estereo. */
+ch_engine_set_stereo_enhance(engine, 1.6f, 0.4f); /* ancho 0..2, punch 0..1 */
+ch_engine_bass_punch(engine);
+ch_engine_set_stereo_width(engine, 0.8f);   /* sigue valiendo: comparte ancho */
+
+/* Karaoke. */
+ch_engine_set_vocal_cut(engine, 0.9f);
+ch_engine_vocal_cut(engine);
+```
+
+* **9D** (`src/dsp_spatial.zig`, `Spatial9D`): el frente (`mid`) pasa por una
+  linea de retardo de 38 muestras de la que se leen dos puntos simetricos, de
+  modo que el oido lejano recibe la señal hasta **36 muestras = 0.75 ms**
+  despues (ITD). Encima se aplica ILD de potencia constante (`sqrt(1 -+ pan)`,
+  asi que en el centro no hay caida de nivel) y un pasa-bajos de 3 kHz de
+  **sombra craneal** solo en el oido que se aleja. La fase avanza
+  `speed_hz / 48000` por muestra y da la vuelta completa sin desbordar. Con
+  `depth = 0` la salida es identica a la entrada.
+* **Potenciador** (`StereoEnhancer`): matriz Mid/Side para el ancho y, para el
+  punch, un pasa-bajos de 120 Hz (menos 35 Hz de continua) cuya señal se satura
+  con `tanh`: se suma solo el **residuo armonico**, no el grave entero, de forma
+  que sube la pegada sin inflar el nivel ni disparar el limitador.
+* **Karaoke** (`VocalCut`): separa el centro con dos polos a 130 Hz; por debajo
+  de 130 Hz se deja pasar todo (bombo y bajo intactos) y por arriba se atenua
+  `amount`. Compensa la perdida del filtro (`low * (1 + 0.22 * amount)`) para
+  que el grave no baje al subir el mando.
+
+Tests (`zig build test`): la rotacion separa los canales de un tono mono
+(diferencia media > 0.02 y tramos con la derecha por delante), `depth = 0` es
+identidad exacta, el ancho 0 colapsa a mono y el 2 duplica el lateral, el punch
+genera un 3er armonico a 180 Hz sin perder el fundamental de 60 Hz, y el karaoke
+conserva el 85 % del grave mientras deja la voz de 1 kHz por debajo del 12 %.
+
 ### Ancho, trim y sonoridad
 
 - `ch_engine_set_stereo_width` controla el ancho de la imagen estereofónica
