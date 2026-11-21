@@ -94,6 +94,10 @@ typedef _LoadStateNative = Int32 Function(
     Pointer<Void>, Pointer<Utf8>, Pointer<Double>);
 typedef _LoadStateDart = int Function(
     Pointer<Void>, Pointer<Utf8>, Pointer<Double>);
+typedef _TagNative = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
+typedef _TagDart = Pointer<Utf8> Function(Pointer<Void>, Pointer<Utf8>);
+typedef _LyricLineNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32);
+typedef _LyricLineDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
 
 const String _libraryName = 'libcyberhex_core.so';
 
@@ -518,6 +522,69 @@ class NativePlayer extends PlayerApi {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Metadatos completos, letras y carátulas
+  // ---------------------------------------------------------------------------
+
+  static String _text(Pointer<Utf8>? ptr) =>
+      ptr == null ? '' : ptr.toDartString().trim();
+
+  @override
+  String get date => _text(_bindings.dateFn?.call(_engine));
+
+  @override
+  String get genre => _text(_bindings.genreFn?.call(_engine));
+
+  @override
+  String get composer => _text(_bindings.composerFn?.call(_engine));
+
+  @override
+  int get trackNumber => _bindings.trackNumber?.call(_engine) ?? 0;
+
+  @override
+  int get discNumber => _bindings.discNumber?.call(_engine) ?? 0;
+
+  @override
+  String tag(String key) {
+    final fn = _bindings.tag;
+    if (fn == null || _disposed) return '';
+    final utf8 = key.toNativeUtf8();
+    try {
+      return _text(fn(_engine, utf8));
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  @override
+  int get sampleRate =>
+      (_bindings.sampleRate?.call(_engine) ?? 0).round();
+
+  @override
+  int get channels => _bindings.channels?.call(_engine) ?? 2;
+
+  @override
+  bool saveCover(int index, String path) =>
+      _pathCall(path, (ptr) => _bindings.saveCover?.call(_engine, index, ptr)) ==
+          0;
+
+  @override
+  int get lyricsCount => _bindings.lyricsCount?.call(_engine) ?? 0;
+
+  @override
+  String get activeLyricLine {
+    final fn = _bindings.lyricLine;
+    if (fn == null || _disposed) return '';
+    const size = 1024;
+    final buffer = calloc<Uint8>(size).cast<Utf8>();
+    try {
+      if (fn(_engine, buffer, size) <= 0) return '';
+      return buffer.toDartString();
+    } finally {
+      calloc.free(buffer);
+    }
+  }
+
   /// Llama a una función que recibe una ruta UTF-8 y libera el buffer.
   /// Devuelve -1 si el motor ya se liberó o la `.so` no expone la función.
   int _pathCall(String path, int? Function(Pointer<Utf8>) call) {
@@ -738,6 +805,39 @@ class _Bindings {
         loadState = lib.providesSymbol('ch_engine_load_state')
             ? lib.lookupFunction<_LoadStateNative, _LoadStateDart>('ch_engine_load_state')
             : null,
+        tag = lib.providesSymbol('ch_engine_tag')
+            ? lib.lookupFunction<_TagNative, _TagDart>('ch_engine_tag')
+            : null,
+        dateFn = lib.providesSymbol('ch_engine_date')
+            ? lib.lookupFunction<_TextNative, _TextDart>('ch_engine_date')
+            : null,
+        genreFn = lib.providesSymbol('ch_engine_genre')
+            ? lib.lookupFunction<_TextNative, _TextDart>('ch_engine_genre')
+            : null,
+        composerFn = lib.providesSymbol('ch_engine_composer')
+            ? lib.lookupFunction<_TextNative, _TextDart>('ch_engine_composer')
+            : null,
+        trackNumber = lib.providesSymbol('ch_engine_track_number')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_track_number')
+            : null,
+        discNumber = lib.providesSymbol('ch_engine_disc_number')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_disc_number')
+            : null,
+        saveCover = lib.providesSymbol('ch_engine_save_cover')
+            ? lib.lookupFunction<_InsertNative, _InsertDart>('ch_engine_save_cover')
+            : null,
+        sampleRate = lib.providesSymbol('ch_engine_sample_rate')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_sample_rate')
+            : null,
+        channels = lib.providesSymbol('ch_engine_channels')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_channels')
+            : null,
+        lyricsCount = lib.providesSymbol('ch_engine_lyrics_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_lyrics_count')
+            : null,
+        lyricLine = lib.providesSymbol('ch_engine_lyric_line')
+            ? lib.lookupFunction<_LyricLineNative, _LyricLineDart>('ch_engine_lyric_line')
+            : null,
         titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
         artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
         albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
@@ -811,6 +911,17 @@ class _Bindings {
   final _DoubleDart? sleepRemaining;
   final _LoadDart? saveState;
   final _LoadStateDart? loadState;
+  final _TagDart? tag;
+  final _TextDart? dateFn;
+  final _TextDart? genreFn;
+  final _TextDart? composerFn;
+  final _IntDart? trackNumber;
+  final _IntDart? discNumber;
+  final _InsertDart? saveCover;
+  final _DoubleDart? sampleRate;
+  final _IntDart? channels;
+  final _IntDart? lyricsCount;
+  final _LyricLineDart? lyricLine;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;

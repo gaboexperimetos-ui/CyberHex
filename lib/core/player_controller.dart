@@ -314,6 +314,33 @@ class PlayerController extends ChangeNotifier {
 
   bool saveState(String path) => _disposed ? false : _player.saveState(path);
 
+  // ---------------------------------------------------------------------------
+  // Metadatos completos, letras y carátulas
+  // ---------------------------------------------------------------------------
+
+  String get date => _player.date;
+
+  String get genre => _player.genre;
+
+  String get composer => _player.composer;
+
+  int get trackNumber => _player.trackNumber;
+
+  int get discNumber => _player.discNumber;
+
+  String tag(String key) => _player.tag(key);
+
+  int get sampleRate => _player.sampleRate;
+
+  int get channels => _player.channels;
+
+  int get lyricsCount => _player.lyricsCount;
+
+  String get activeLyricLine => _player.activeLyricLine;
+
+  bool saveCover(int index, String path) =>
+      _disposed ? false : _player.saveCover(index, path);
+
   /// Restaura el estado y deja la posición en la pista recuperada.
   double? loadState(String path) {
     if (_disposed) return null;

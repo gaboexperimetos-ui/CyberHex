@@ -189,6 +189,50 @@ class FakePlayer extends PlayerApi {
     return seconds;
   }
 
+  // --- Metadatos completos y letras -----------------------------------------
+
+  @override
+  String date = '';
+
+  @override
+  String genre = '';
+
+  @override
+  String composer = '';
+
+  @override
+  int trackNumber = 0;
+
+  @override
+  int discNumber = 0;
+
+  @override
+  int sampleRate = 48000;
+
+  @override
+  int channels = 2;
+
+  @override
+  int lyricsCount = 0;
+
+  @override
+  String activeLyricLine = '';
+
+  /// Etiquetas arbitrarias que devolverá [tag].
+  final Map<String, String> tags = {};
+
+  String? savedCoverPath;
+
+  @override
+  String tag(String key) => tags[key] ?? '';
+
+  @override
+  bool saveCover(int index, String path) {
+    if (index < 0 || cover == null) return false;
+    savedCoverPath = path;
+    return true;
+  }
+
   final List<PlayerEvent> _events = [];
 
   /// Encola un evento como si lo hubiera emitido el motor.

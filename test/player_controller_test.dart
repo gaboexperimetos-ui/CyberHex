@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:cyberhex/core/player_api.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -180,6 +182,37 @@ void main() {
     expect(fake.sleepTimer, 600);
     expect(fake.sleepFade, 10);
     expect(controller.sleepRemaining, 600);
+  });
+
+  test('etiquetas completas, letras y carátula llegan a la UI', () {
+    final fake = FakePlayer()
+      ..hasTrack = true
+      ..date = '1998'
+      ..genre = 'Jazz'
+      ..composer = 'Miles Davis'
+      ..trackNumber = 3
+      ..discNumber = 1
+      ..lyricsCount = 42
+      ..activeLyricLine = 'so what'
+      ..cover = Uint8List.fromList([1, 2, 3]);
+    fake.tags['BPM'] = '132';
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.date, '1998');
+    expect(controller.genre, 'Jazz');
+    expect(controller.composer, 'Miles Davis');
+    expect(controller.trackNumber, 3);
+    expect(controller.discNumber, 1);
+    expect(controller.tag('BPM'), '132');
+    expect(controller.tag('no-existe'), '');
+    expect(controller.sampleRate, 48000);
+    expect(controller.channels, 2);
+    expect(controller.lyricsCount, 42);
+    expect(controller.activeLyricLine, 'so what');
+
+    expect(controller.saveCover(0, '/tmp/portada.jpg'), isTrue);
+    expect(fake.savedCoverPath, '/tmp/portada.jpg');
   });
 
   test('guardar y cargar el estado de reproducción', () {

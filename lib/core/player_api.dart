@@ -217,6 +217,40 @@ abstract class PlayerApi {
   /// Restaura el estado guardado y devuelve la posición a la que saltar.
   double? loadState(String path) => null;
 
+  // ---------------------------------------------------------------------------
+  // Metadatos completos, letras y carátulas
+  // ---------------------------------------------------------------------------
+
+  /// Año/fecha de la pista ("" si no existe).
+  String get date => '';
+
+  String get genre => '';
+
+  String get composer => '';
+
+  /// Número de pista dentro del disco (0 si no existe).
+  int get trackNumber => 0;
+
+  int get discNumber => 0;
+
+  /// Etiqueta arbitraria del archivo, p. ej. `tag('BPM')`.
+  String tag(String key) => '';
+
+  /// Frecuencia de muestreo que reporta el decodificador.
+  int get sampleRate => 0;
+
+  /// Canales de la pista abierta.
+  int get channels => 2;
+
+  /// Guarda la carátula `index` del archivo actual en `path` (JPEG/PNG).
+  bool saveCover(int index, String path) => false;
+
+  /// Líneas de letra sincronizada (LRC) de la pista actual.
+  int get lyricsCount => 0;
+
+  /// Línea de letra que corresponde a la posición actual ("" si no hay).
+  String get activeLyricLine => '';
+
   /// Siguiente evento del motor, o `null` si no hay ninguno pendiente.
   PlayerEvent? pollEvent();
 
