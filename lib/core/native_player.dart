@@ -84,6 +84,16 @@ typedef _U64Native = Uint64 Function(Pointer<Void>);
 typedef _U64Dart = int Function(Pointer<Void>);
 typedef _NoArgIntNative = Int32 Function();
 typedef _NoArgIntDart = int Function();
+typedef _MoveNative = Int32 Function(Pointer<Void>, Int32, Int32);
+typedef _MoveDart = int Function(Pointer<Void>, int, int);
+typedef _InsertNative = Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>);
+typedef _InsertDart = int Function(Pointer<Void>, int, Pointer<Utf8>);
+typedef _SeedNative = Int32 Function(Pointer<Void>, Uint32);
+typedef _SeedDart = int Function(Pointer<Void>, int);
+typedef _LoadStateNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Double>);
+typedef _LoadStateDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Double>);
 
 const String _libraryName = 'libcyberhex_core.so';
 
@@ -110,7 +120,7 @@ class CyberHexException implements Exception {
   String toString() => message;
 }
 
-class NativePlayer implements PlayerApi {
+class NativePlayer extends PlayerApi {
   NativePlayer._(this._engine, this._bindings) {
     _eventBuf = calloc<_ChEvent>();
     _levelBuf = calloc<Float>(4);
@@ -383,6 +393,143 @@ class NativePlayer implements PlayerApi {
 
   int get channelMode => _bindings.channelMode?.call(_engine) ?? 0;
 
+  // ---------------------------------------------------------------------------
+  // Cola y modos de reproducción
+  // ---------------------------------------------------------------------------
+
+  @override
+  int get queueCount => _bindings.queueCount?.call(_engine) ?? 0;
+
+  @override
+  int get queueIndex => _bindings.queueIndex?.call(_engine) ?? 0;
+
+  @override
+  bool playIndex(int index) => _bindings.playIndex?.call(_engine, index) == 0;
+
+  @override
+  bool loadAdd(String path) {
+    final ok =
+        _pathCall(path, (ptr) => _bindings.loadAdd?.call(_engine, ptr)) == 0;
+    if (ok) {
+      _path = path;
+      _loaded = true;
+      syncTrackInfo();
+    }
+    return ok;
+  }
+
+  @override
+  bool queueAdd(String path) =>
+      _pathCall(path, (ptr) => _bindings.queueAdd?.call(_engine, ptr)) == 0;
+
+  @override
+  bool queueInsert(int index, String path) =>
+      _pathCall(path, (ptr) => _bindings.queueInsert?.call(_engine, index, ptr)) ==
+          0;
+
+  @override
+  bool queueMove(int from, int to) =>
+      _bindings.queueMove?.call(_engine, from, to) == 0;
+
+  @override
+  bool queueRemove(int index) =>
+      _bindings.queueRemove?.call(_engine, index) == 0;
+
+  @override
+  bool queueClear() => _bindings.queueClear?.call(_engine) == 0;
+
+  @override
+  int queueImport(String path) =>
+      _pathCall(path, (ptr) => _bindings.queueImport?.call(_engine, ptr));
+
+  @override
+  bool queueExport(String path) =>
+      _pathCall(path, (ptr) => _bindings.queueExport?.call(_engine, ptr)) == 0;
+
+  @override
+  int get repeatMode => _bindings.repeat?.call(_engine) ?? 0;
+
+  @override
+  set repeatMode(int mode) =>
+      _bindings.setRepeat?.call(_engine, mode < 0 ? 0 : (mode > 2 ? 2 : mode));
+
+  @override
+  bool get shuffle => (_bindings.shuffle?.call(_engine) ?? 0) != 0;
+
+  @override
+  set shuffle(bool enabled) =>
+      _bindings.setShuffle?.call(_engine, enabled ? 1 : 0);
+
+  @override
+  void setShuffleSeed(int seed) =>
+      _bindings.setShuffleSeed?.call(_engine, seed & 0xFFFFFFFF);
+
+  @override
+  bool get gapless => (_bindings.gapless?.call(_engine) ?? 0) != 0;
+
+  @override
+  set gapless(bool enabled) =>
+      _bindings.setGapless?.call(_engine, enabled ? 1 : 0);
+
+  @override
+  double get crossfadeSeconds => _bindings.crossfade?.call(_engine) ?? 0;
+
+  @override
+  set crossfadeSeconds(double seconds) =>
+      _bindings.setCrossfade?.call(_engine, seconds.clamp(0.0, 30.0).toDouble());
+
+  @override
+  double get speed => _bindings.speed?.call(_engine) ?? 1;
+
+  @override
+  set speed(double value) =>
+      _bindings.setSpeed?.call(_engine, value.clamp(0.25, 4.0).toDouble());
+
+  @override
+  double get pitch => _bindings.pitch?.call(_engine) ?? 0;
+
+  @override
+  set pitch(double value) =>
+      _bindings.setPitch?.call(_engine, value.clamp(-12.0, 12.0).toDouble());
+
+  @override
+  void setSleepTimer(double seconds, {double fadeSeconds = 5}) =>
+      _bindings.setSleepTimer?.call(_engine, seconds, fadeSeconds);
+
+  @override
+  double get sleepRemaining => _bindings.sleepRemaining?.call(_engine) ?? -1;
+
+  @override
+  bool saveState(String path) =>
+      _pathCall(path, (ptr) => _bindings.saveState?.call(_engine, ptr)) == 0;
+
+  @override
+  double? loadState(String path) {
+    final out = calloc<Double>();
+    try {
+      final rc = _pathCall(
+          path, (ptr) => _bindings.loadState?.call(_engine, ptr, out));
+      if (rc != 0) return null;
+      _loaded = true;
+      syncTrackInfo();
+      return out.value;
+    } finally {
+      calloc.free(out);
+    }
+  }
+
+  /// Llama a una función que recibe una ruta UTF-8 y libera el buffer.
+  /// Devuelve -1 si el motor ya se liberó o la `.so` no expone la función.
+  int _pathCall(String path, int? Function(Pointer<Utf8>) call) {
+    if (_disposed) return -1;
+    final utf8 = path.toNativeUtf8();
+    try {
+      return call(utf8) ?? -1;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
   /// ABI del núcleo cargado (0 si la librería es tan antigua que no lo expone).
   static int get coreAbiVersion => _Bindings.instance.abiVersion?.call() ?? 0;
 
@@ -507,6 +654,90 @@ class _Bindings {
         channelMode = lib.providesSymbol('ch_engine_channel_mode')
             ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_channel_mode')
             : null,
+        playIndex = lib.providesSymbol('ch_engine_play_index')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_play_index')
+            : null,
+        loadAdd = lib.providesSymbol('ch_engine_load_add')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_load_add')
+            : null,
+        queueAdd = lib.providesSymbol('ch_engine_queue_add')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_queue_add')
+            : null,
+        queueInsert = lib.providesSymbol('ch_engine_queue_insert')
+            ? lib.lookupFunction<_InsertNative, _InsertDart>('ch_engine_queue_insert')
+            : null,
+        queueMove = lib.providesSymbol('ch_engine_queue_move')
+            ? lib.lookupFunction<_MoveNative, _MoveDart>('ch_engine_queue_move')
+            : null,
+        queueRemove = lib.providesSymbol('ch_engine_queue_remove')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_queue_remove')
+            : null,
+        queueClear = lib.providesSymbol('ch_engine_queue_clear')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_queue_clear')
+            : null,
+        queueImport = lib.providesSymbol('ch_engine_queue_import')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_queue_import')
+            : null,
+        queueExport = lib.providesSymbol('ch_engine_queue_export')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_queue_export')
+            : null,
+        queueCount = lib.providesSymbol('ch_engine_queue_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_count')
+            : null,
+        queueIndex = lib.providesSymbol('ch_engine_queue_index')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_index')
+            : null,
+        setRepeat = lib.providesSymbol('ch_engine_set_repeat')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_repeat')
+            : null,
+        repeat = lib.providesSymbol('ch_engine_repeat')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_repeat')
+            : null,
+        setShuffle = lib.providesSymbol('ch_engine_set_shuffle')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_shuffle')
+            : null,
+        shuffle = lib.providesSymbol('ch_engine_shuffle')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_shuffle')
+            : null,
+        setShuffleSeed = lib.providesSymbol('ch_engine_set_shuffle_seed')
+            ? lib.lookupFunction<_SeedNative, _SeedDart>('ch_engine_set_shuffle_seed')
+            : null,
+        setGapless = lib.providesSymbol('ch_engine_set_gapless')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_gapless')
+            : null,
+        gapless = lib.providesSymbol('ch_engine_gapless')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_gapless')
+            : null,
+        setCrossfade = lib.providesSymbol('ch_engine_set_crossfade')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_crossfade')
+            : null,
+        crossfade = lib.providesSymbol('ch_engine_crossfade')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_crossfade')
+            : null,
+        setSpeed = lib.providesSymbol('ch_engine_set_speed')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_speed')
+            : null,
+        speed = lib.providesSymbol('ch_engine_speed')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_speed')
+            : null,
+        setPitch = lib.providesSymbol('ch_engine_set_pitch')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_pitch')
+            : null,
+        pitch = lib.providesSymbol('ch_engine_pitch')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_pitch')
+            : null,
+        setSleepTimer = lib.providesSymbol('ch_engine_set_sleep_timer')
+            ? lib.lookupFunction<_SetLoopNative, _SetLoopDart>('ch_engine_set_sleep_timer')
+            : null,
+        sleepRemaining = lib.providesSymbol('ch_engine_sleep_remaining')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_sleep_remaining')
+            : null,
+        saveState = lib.providesSymbol('ch_engine_save_state')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_save_state')
+            : null,
+        loadState = lib.providesSymbol('ch_engine_load_state')
+            ? lib.lookupFunction<_LoadStateNative, _LoadStateDart>('ch_engine_load_state')
+            : null,
         titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
         artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
         albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
@@ -552,6 +783,34 @@ class _Bindings {
   final _GetFloatDart? balance;
   final _SetIntDart? setChannelMode;
   final _IntDart? channelMode;
+  final _SetIntDart? playIndex;
+  final _LoadDart? loadAdd;
+  final _LoadDart? queueAdd;
+  final _InsertDart? queueInsert;
+  final _MoveDart? queueMove;
+  final _SetIntDart? queueRemove;
+  final _ControlDart? queueClear;
+  final _LoadDart? queueImport;
+  final _LoadDart? queueExport;
+  final _IntDart? queueCount;
+  final _IntDart? queueIndex;
+  final _SetIntDart? setRepeat;
+  final _IntDart? repeat;
+  final _SetIntDart? setShuffle;
+  final _IntDart? shuffle;
+  final _SeedDart? setShuffleSeed;
+  final _SetIntDart? setGapless;
+  final _IntDart? gapless;
+  final _SetFloatDart? setCrossfade;
+  final _GetFloatDart? crossfade;
+  final _SetFloatDart? setSpeed;
+  final _GetFloatDart? speed;
+  final _SetFloatDart? setPitch;
+  final _GetFloatDart? pitch;
+  final _SetLoopDart? setSleepTimer;
+  final _DoubleDart? sleepRemaining;
+  final _LoadDart? saveState;
+  final _LoadStateDart? loadState;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;

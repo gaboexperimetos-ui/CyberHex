@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:cyberhex/core/player_api.dart';
 
 /// Doble de `NativePlayer` para pruebas: sin FFI, sin motor, sin audio.
-class FakePlayer implements PlayerApi {
+class FakePlayer extends PlayerApi {
   FakePlayer({
     this.hasTrack = false,
     this.title = '',
@@ -62,6 +62,132 @@ class FakePlayer implements PlayerApi {
   int nextCalls = 0;
   int previousCalls = 0;
   bool disposed = false;
+
+  // --- Cola y modos ---------------------------------------------------------
+
+  /// Rutas de la cola simulada, en orden.
+  final List<String> queue = [];
+
+  @override
+  int queueIndex = 0;
+
+  @override
+  int repeatMode = 0;
+
+  @override
+  bool shuffle = false;
+
+  int shuffleSeed = 0;
+
+  @override
+  bool gapless = false;
+
+  @override
+  double crossfadeSeconds = 0;
+
+  @override
+  double speed = 1;
+
+  @override
+  double pitch = 0;
+
+  double sleepTimer = -1;
+  double sleepFade = 0;
+
+  String? savedStatePath;
+  double? stateToLoad;
+
+  @override
+  int get queueCount => queue.length;
+
+  @override
+  bool playIndex(int index) {
+    if (index < 0 || index >= queue.length) return false;
+    queueIndex = index;
+    position = 0;
+    return true;
+  }
+
+  @override
+  bool loadAdd(String path) {
+    queue.add(path);
+    queueIndex = queue.length - 1;
+    position = 0;
+    hasTrack = true;
+    return true;
+  }
+
+  @override
+  bool queueAdd(String path) {
+    queue.add(path);
+    return true;
+  }
+
+  @override
+  bool queueInsert(int index, String path) {
+    final at = index < 0 || index > queue.length ? queue.length : index;
+    queue.insert(at, path);
+    return true;
+  }
+
+  @override
+  bool queueMove(int from, int to) {
+    if (from < 0 || from >= queue.length || to < 0 || to >= queue.length) {
+      return false;
+    }
+    queue.insert(to, queue.removeAt(from));
+    return true;
+  }
+
+  @override
+  bool queueRemove(int index) {
+    if (index < 0 || index >= queue.length) return false;
+    queue.removeAt(index);
+    return true;
+  }
+
+  @override
+  bool queueClear() {
+    queue.clear();
+    queueIndex = 0;
+    return true;
+  }
+
+  @override
+  int queueImport(String path) => -1;
+
+  @override
+  bool queueExport(String path) {
+    savedStatePath = path;
+    return true;
+  }
+
+  @override
+  void setShuffleSeed(int seed) => shuffleSeed = seed;
+
+  @override
+  void setSleepTimer(double seconds, {double fadeSeconds = 5}) {
+    sleepTimer = seconds;
+    sleepFade = fadeSeconds;
+  }
+
+  @override
+  double get sleepRemaining => sleepTimer;
+
+  @override
+  bool saveState(String path) {
+    savedStatePath = path;
+    return true;
+  }
+
+  @override
+  double? loadState(String path) {
+    final seconds = stateToLoad;
+    if (seconds == null) return null;
+    position = seconds;
+    hasTrack = true;
+    return seconds;
+  }
 
   final List<PlayerEvent> _events = [];
 

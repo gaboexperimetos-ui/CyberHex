@@ -124,4 +124,74 @@ void main() {
     controller.dispose();
     expect(fake.disposed, isTrue);
   });
+
+  test('la cola se edita y se salta a cualquier pista', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.enqueue('/musica/a.mp3'), isTrue);
+    expect(controller.enqueue('/musica/b.mp3'), isTrue);
+    expect(controller.queueCount, 2);
+
+    expect(controller.queueMove(0, 1), isTrue);
+    expect(fake.queue, ['/musica/b.mp3', '/musica/a.mp3']);
+
+    expect(controller.playIndex(1), isTrue);
+    expect(controller.queueIndex, 1);
+    expect(controller.position.value, 0);
+
+    expect(controller.queueInsert(0, '/musica/c.mp3'), isTrue);
+    expect(fake.queue.first, '/musica/c.mp3');
+
+    expect(controller.queueRemove(0), isTrue);
+    expect(controller.queueCount, 2);
+
+    expect(controller.queueClear(), isTrue);
+    expect(controller.queueCount, 0);
+  });
+
+  test('modos de reproducción y temporizador llegan al motor', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    controller.repeatMode = 2;
+    expect(fake.repeatMode, 2);
+
+    controller.shuffle = true;
+    expect(fake.shuffle, isTrue);
+    controller.setShuffleSeed(1234);
+    expect(fake.shuffleSeed, 1234);
+
+    controller.gapless = false;
+    expect(fake.gapless, isFalse);
+
+    controller.crossfadeSeconds = 3.5;
+    expect(fake.crossfadeSeconds, 3.5);
+
+    controller.speed = 1.25;
+    expect(fake.speed, 1.25);
+
+    controller.pitch = -2;
+    expect(fake.pitch, -2);
+
+    controller.setSleepTimer(600, fadeSeconds: 10);
+    expect(fake.sleepTimer, 600);
+    expect(fake.sleepFade, 10);
+    expect(controller.sleepRemaining, 600);
+  });
+
+  test('guardar y cargar el estado de reproducción', () {
+    final fake = FakePlayer()..hasTrack = true;
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(controller.saveState('/tmp/cyberhex-state.json'), isTrue);
+    expect(fake.savedStatePath, '/tmp/cyberhex-state.json');
+
+    fake.stateToLoad = 42.5;
+    expect(controller.loadState('/tmp/cyberhex-state.json'), 42.5);
+    expect(controller.position.value, 42.5);
+  });
 }

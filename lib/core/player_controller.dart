@@ -186,6 +186,144 @@ class PlayerController extends ChangeNotifier {
     _player.resetEq();
   }
 
+  // ---------------------------------------------------------------------------
+  // Cola y modos de reproducción
+  // ---------------------------------------------------------------------------
+
+  int get queueCount => _player.queueCount;
+
+  int get queueIndex => _player.queueIndex;
+
+  int get repeatMode => _player.repeatMode;
+
+  set repeatMode(int mode) {
+    if (_disposed) return;
+    _player.repeatMode = mode;
+    _refresh();
+  }
+
+  bool get shuffle => _player.shuffle;
+
+  set shuffle(bool enabled) {
+    if (_disposed) return;
+    _player.shuffle = enabled;
+    _refresh();
+  }
+
+  void setShuffleSeed(int seed) {
+    if (_disposed) return;
+    _player.setShuffleSeed(seed);
+  }
+
+  bool get gapless => _player.gapless;
+
+  set gapless(bool enabled) {
+    if (_disposed) return;
+    _player.gapless = enabled;
+  }
+
+  double get crossfadeSeconds => _player.crossfadeSeconds;
+
+  set crossfadeSeconds(double seconds) {
+    if (_disposed) return;
+    _player.crossfadeSeconds = seconds;
+  }
+
+  double get speed => _player.speed;
+
+  set speed(double value) {
+    if (_disposed) return;
+    _player.speed = value;
+  }
+
+  double get pitch => _player.pitch;
+
+  set pitch(double value) {
+    if (_disposed) return;
+    _player.pitch = value;
+  }
+
+  /// Añade una pista al final de la cola sin cortar la que suena.
+  bool enqueue(String path) {
+    if (_disposed) return false;
+    final ok = _player.queueAdd(path);
+    if (ok) _refresh();
+    return ok;
+  }
+
+  /// Añade una pista al final de la cola y la reproduce.
+  bool loadAndPlay(String path) {
+    if (_disposed) return false;
+    final ok = _player.loadAdd(path);
+    if (ok) {
+      position.value = 0;
+      _error = null;
+      _refresh();
+    }
+    return ok;
+  }
+
+  /// Salta a una pista de la cola. El título nuevo llega por `CH_EVENT_TRACK`.
+  bool playIndex(int index) {
+    if (_disposed) return false;
+    final ok = _player.playIndex(index);
+    if (ok) position.value = 0;
+    _refresh();
+    return ok;
+  }
+
+  bool queueInsert(int index, String path) {
+    if (_disposed) return false;
+    final ok = _player.queueInsert(index, path);
+    if (ok) _refresh();
+    return ok;
+  }
+
+  bool queueMove(int from, int to) {
+    if (_disposed) return false;
+    final ok = _player.queueMove(from, to);
+    if (ok) _refresh();
+    return ok;
+  }
+
+  bool queueRemove(int index) {
+    if (_disposed) return false;
+    final ok = _player.queueRemove(index);
+    if (ok) _refresh();
+    return ok;
+  }
+
+  bool queueClear() {
+    if (_disposed) return false;
+    final ok = _player.queueClear();
+    if (ok) _refresh();
+    return ok;
+  }
+
+  int queueImport(String path) => _disposed ? -1 : _player.queueImport(path);
+
+  bool queueExport(String path) =>
+      _disposed ? false : _player.queueExport(path);
+
+  void setSleepTimer(double seconds, {double fadeSeconds = 5}) {
+    if (_disposed) return;
+    _player.setSleepTimer(seconds, fadeSeconds: fadeSeconds);
+  }
+
+  double get sleepRemaining => _player.sleepRemaining;
+
+  bool saveState(String path) => _disposed ? false : _player.saveState(path);
+
+  /// Restaura el estado y deja la posición en la pista recuperada.
+  double? loadState(String path) {
+    if (_disposed) return null;
+    final seconds = _player.loadState(path);
+    if (seconds == null) return null;
+    position.value = seconds;
+    _refresh();
+    return seconds;
+  }
+
   @override
   void dispose() {
     _disposed = true;

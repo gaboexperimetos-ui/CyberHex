@@ -142,6 +142,81 @@ abstract class PlayerApi {
   void setBand(int index, double db);
   void resetEq();
 
+  // ---------------------------------------------------------------------------
+  // Cola y modos de reproducción
+  //
+  // Todos los miembros nuevos tienen implementación por defecto: así un doble
+  // de pruebas, o un núcleo antiguo, no obligan a implementar 30 métodos para
+  // compilar y las funciones no disponibles simplemente no hacen nada.
+  // ---------------------------------------------------------------------------
+
+  /// Pistas en la cola.
+  int get queueCount => 0;
+
+  /// Índice de la pista que suena dentro de la cola.
+  int get queueIndex => 0;
+
+  /// Reproduce la pista `index` de la cola sin vaciarla.
+  bool playIndex(int index) => false;
+
+  /// Añade la pista al final de la cola y la reproduce.
+  bool loadAdd(String path) => false;
+
+  /// Añade la pista al final de la cola sin cambiar la que suena.
+  bool queueAdd(String path) => false;
+
+  /// Inserta la pista en la posición `index` de la cola.
+  bool queueInsert(int index, String path) => false;
+
+  bool queueMove(int from, int to) => false;
+  bool queueRemove(int index) => false;
+  bool queueClear() => false;
+
+  /// Importa una lista M3U/M3U8/PLS. Devuelve cuántas pistas añadió o -1.
+  int queueImport(String path) => -1;
+
+  /// Exporta la cola como M3U8.
+  bool queueExport(String path) => false;
+
+  /// 0 = apagada, 1 = toda la cola, 2 = pista actual.
+  int get repeatMode => 0;
+  set repeatMode(int mode) {}
+
+  bool get shuffle => false;
+  set shuffle(bool enabled) {}
+
+  /// Semilla del orden aleatorio: la misma semilla da el mismo orden.
+  void setShuffleSeed(int seed) {}
+
+  /// Precarga la pista siguiente para que no haya hueco entre pistas.
+  bool get gapless => false;
+  set gapless(bool enabled) {}
+
+  /// Segundos de cruce entre pistas (0 = sin crossfade).
+  double get crossfadeSeconds => 0;
+  set crossfadeSeconds(double seconds) {}
+
+  /// Velocidad sin cambiar el tono: 0.25 – 4.0 (1 = normal).
+  double get speed => 1;
+  set speed(double value) {}
+
+  /// Tono en semitonos sin cambiar la duración: -12 – +12.
+  double get pitch => 0;
+  set pitch(double value) {}
+
+  /// Pausa la reproducción tras `seconds` con un fundido de `fadeSeconds`.
+  /// `seconds <= 0` lo desactiva.
+  void setSleepTimer(double seconds, {double fadeSeconds = 5}) {}
+
+  /// Segundos que faltan del temporizador, o -1 si no hay ninguno activo.
+  double get sleepRemaining => -1;
+
+  /// Guarda cola, pista, posición y ajustes en un archivo.
+  bool saveState(String path) => false;
+
+  /// Restaura el estado guardado y devuelve la posición a la que saltar.
+  double? loadState(String path) => null;
+
   /// Siguiente evento del motor, o `null` si no hay ninguno pendiente.
   PlayerEvent? pollEvent();
 
