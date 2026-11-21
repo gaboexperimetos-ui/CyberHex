@@ -41,10 +41,16 @@ Ya aplicadas en esta rama (cada una en su commit):
 | B1 sin metadatos ni carátula | ✅ title/artist/album + portada | `app: metadatos, carátula…` |
 | B2 carga bloqueando el hilo de UI | ✅ `loadAsync` en isolate + spinner | `app: metadatos, carátula…` |
 | C1 `-Drelease=true` inexistente | ✅ corregido en `core/API.md` | `core: EQ de 36 bandas…` |
+| A3 `load` vaciaba la cola | ✅ `play_index` + `load_add` | `core: cola sin vaciar…` |
+| B3 rebuild completo cada 250 ms | ✅ solo al cambiar `isPlaying` + `RepaintBoundary` | `app: deja de reconstruir…` |
+| B4 EQ reiniciaba los 36 filtros al mover un slider | ✅ reinicio por banda | `core(eq): reinicia solo…` |
+| B5 spinlocks en el hilo de audio | ✅ en su mayor parte (eventos, sleep, underflows, espectro, seqlock acotado) | `core: cola sin vaciar…` |
+| B7 symlinks circulares / O(n²) en la biblioteca | ✅ detección de ciclos, profundidad, hash | `core(library): escaneo…` |
+| B9 sin pruebas del núcleo | ✅ 12 tests Zig (5 nuevos) | `core: cola sin vaciar…` |
 
-Siguen pendientes: A3 (load vacía la cola), A4 (FFmpeg versionado), B3 (rebuild
-cada 250 ms), B4/B5 (EQ y spinlocks en el hilo de audio), B6 (deriva en pausa),
-B7 (symlinks en la biblioteca), B8 (background en Android) y B9 (tests).
+Siguen pendientes: A4 (FFmpeg versionado, decisión de empaquetado), B6 (deriva
+de ~50 ms en cada pausa), B8 (background en Android), B9 ampliado (motor y capa
+FFI), y las funciones del núcleo aún sin UI (cola, letras, espectro, marcadores).
 
 ---
 
@@ -287,13 +293,19 @@ daría muchísimo valor por poco esfuerzo.
 - Tras aplicar las correcciones se instaló **Zig 0.17.1** (el que declara la
   API) y se verificó de verdad:
   - `zig build-obj src/root.zig -lc` compila sin errores;
-  - `zig test` pasa en `eq.zig` (2), `fft.zig` (1) y `stretch.zig` (3);
+  - `zig test` pasa entero: **12 tests** (5 nuevos en `root.zig`, 3 en
+    `eq.zig`, 3 en `stretch.zig`, 1 en `fft.zig`);
   - el `.so` completo enlaza con el backend miniaudio
     (`root.zig + audio.c + decode_miniaudio.c + playlist/lyrics/library/markers`);
   - los 20 símbolos que usa `native_player.dart` están exportados;
   - prueba de humo con `dlopen` + C: 36 bandas con sus frecuencias, `0` fuera
     de rango, `set_band_gain(-1) = -2`, y reproducción real de un WAV
-    (`load=0`, `duration=1.00`, `position=0.390` tras 400 ms, `covers=0`).
+    (`load=0`, `duration=1.00`, `position=0.390` tras 400 ms, `covers=0`);
+  - cola: `queue_add` ×2 → `play_index(1)` reproduce la segunda conservando las
+    dos, `play_index(9)` devuelve `-1`, `load_add` deja 3 pistas y `load`
+    vuelve a 1 (comportamiento documentado);
+  - biblioteca: árbol con dos symlinks circulares, borrado y reescaneo, más 400
+    pistas, con **ASan/UBSan** limpio.
 - **No** se pudo compilar ni analizar Flutter/Dart en este entorno: no hay SDK
   y las descargas de Flutter no son accesibles. Los cambios de Dart están
   revisados a mano (balance de bloques y tipos), sin `flutter analyze`.
