@@ -7,9 +7,11 @@ import 'package:flutter/services.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'audio_lab_sheet.dart';
 import 'library_page.dart';
 import 'queue_sheet.dart';
 import 'eq_sheet.dart';
+import 'visualizer_widget.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({super.key, required this.controller});
@@ -57,6 +59,8 @@ class _PlayerPageState extends State<PlayerPage>
   }
 
   void _openQueue() => QueueSheet.show(context, _controller);
+
+  void _openLab() => AudioLabSheet.show(context, _controller);
 
   void _openLibrary() {
     Navigator.of(context).push(
@@ -162,6 +166,16 @@ class _PlayerPageState extends State<PlayerPage>
                               },
                             ),
                             const SizedBox(height: 4),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: VisualizerWidget(
+                                controller: _controller,
+                                bands: 24,
+                                height: 74,
+                                showMeters: false,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
                             _ModeRow(
                               snapshot: snapshot,
                               onCycleRepeat: _controller.cycleRepeat,
@@ -180,10 +194,14 @@ class _PlayerPageState extends State<PlayerPage>
                               onVolume: _controller.setVolume,
                               onEq: () => showModalBottomSheet<void>(
                                 context: context,
+                                isScrollControlled: true,
                                 showDragHandle: true,
                                 builder: (_) =>
                                     EqualizerSheet(controller: _controller),
                               ),
+                              onLab: _openLab,
+                              soundscape: _controller.soundscape,
+                              onSoundscape: _controller.cycleSoundscape,
                             ),
                           ],
                         ),
@@ -647,11 +665,17 @@ class _FooterRow extends StatelessWidget {
     required this.snapshot,
     required this.onVolume,
     required this.onEq,
+    required this.onLab,
+    required this.soundscape,
+    required this.onSoundscape,
   });
 
   final PlayerSnapshot snapshot;
   final ValueChanged<double> onVolume;
   final VoidCallback onEq;
+  final VoidCallback onLab;
+  final SoundscapePreset soundscape;
+  final VoidCallback onSoundscape;
 
   @override
   Widget build(BuildContext context) {
@@ -671,14 +695,65 @@ class _FooterRow extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        OutlinedButton.icon(
-          onPressed: onEq,
-          icon: const Icon(Icons.equalizer_rounded, size: 18),
-          label: const Text('Ecualizador'),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: chForeground,
-            side: const BorderSide(color: chBorder),
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onEq,
+                icon: const Icon(Icons.equalizer_rounded, size: 18),
+                label: const Text('Ecualizador'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: chForeground,
+                  side: const BorderSide(color: chBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onLab,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: const Text('Laboratorio'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: chForeground,
+                  side: const BorderSide(color: chBorder),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Tooltip(
+          message: 'Paisaje sonoro (lluvia, ruido marrón, vinilo)',
+          child: OutlinedButton.icon(
+            onPressed: onSoundscape,
+            icon: Icon(
+              soundscape == SoundscapePreset.off
+                  ? Icons.nights_stay_outlined
+                  : Icons.water_drop_rounded,
+              size: 18,
+              color: soundscape == SoundscapePreset.off ? chMuted : chAccent,
+            ),
+            label: Text(
+              switch (soundscape) {
+                SoundscapePreset.off => 'Paisaje: no',
+                SoundscapePreset.rain => 'Paisaje: lluvia',
+                SoundscapePreset.brown => 'Paisaje: marrón',
+                SoundscapePreset.vinyl => 'Paisaje: vinilo',
+              },
+              style: TextStyle(
+                fontSize: 12,
+                color: soundscape == SoundscapePreset.off ? chMuted : chAccent,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(
+                color: soundscape == SoundscapePreset.off ? chBorder : chAccent,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            ),
           ),
         ),
       ],

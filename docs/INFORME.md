@@ -36,12 +36,12 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **6 699 líneas Dart** + **2 693 de tests** (98 casos). Estado
+- App: **8 473 líneas Dart** + **2 993 de tests** (112 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
-  núcleo, y **toda** la API del motor expuesta a Dart con el DSP persistido en
-  la sesión.
+  núcleo, **toda** la API del motor expuesta a Dart con el DSP persistido en la
+  sesión, y el **laboratorio de audio** («toda la fase 2 en pantalla»).
 - Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
@@ -69,14 +69,18 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                  6 699 líneas
+lib/                        app Flutter                                  8 473 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
+  core/eq_presets.dart      curvas de EQ por anclajes (interpolación log) + «Mi oído»
   platform/media_session_channel.dart  puente Dart del canal cyberhex/media
-  ui/{player_page,eq_sheet,core_error_screen}.dart
+  ui/audio_lab_sheet.dart   laboratorio: todo el DSP, BPM, WAV, .cue, loop y sueño
+  ui/visualizer_widget.dart vúmetro + espectro (barras o hexágonos) a 30 Hz
+  ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
+  ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       98 tests Dart                              2 693 líneas
+test/                       112 tests Dart                             2 993 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -293,6 +297,46 @@ audio, audio corrupto, restauración + guardado y antirrebote).
 
 ---
 
+### 5.4 Fase 3, pedido 3: la UI de audio (todo el DSP en pantalla)
+
+Hasta aquí el DSP existía y se podía llamar, pero **no había dónde tocarlo**: la
+única pantalla de audio era el ecualizador. Este pedido lleva a la interfaz todo
+lo que el núcleo ya sabía hacer, sin añadir una sola dependencia.
+
+| Sitio | Qué se puede hacer |
+|---|---|
+| **Laboratorio de audio** (`AudioLabSheet`, desde el reproductor) | 9D (on/velocidad/profundidad), ancho estéreo, punch, crossfeed Bauer, karaoke, modo noche con su compresión, balance, canales (estéreo/mono/intercambiado), ReplayGain (global y por álbum), velocidad 0.25–4×, tono ±12 semitonos, salida S16 con dither, crossfade, gapless, loop A-B, temporizador de sueño, paisaje sonoro con su nivel, detección de BPM, exportación WAV con el DSP, apertura de hojas `.cue` y marcador en la posición actual |
+| **Visualizador** (`VisualizerWidget`) | Vúmetro RMS/pico por canal con marca de clip y espectro de 24–28 bandas en dos estilos (barras o columnas de hexágonos). En el reproductor en versión compacta y en el laboratorio con medidores |
+| **Ecualizador** (`EqualizerSheet`) | Los 36 mandos de siempre + **10 presets** en chips horizontales y acceso a la prueba de audición |
+| **Prueba de audición** (`HearingTestSheet`) | Aísla una banda sobre la música que suena, pregunta «¿lo oyes?» y propone una curva de compensación; **restaura el EQ** al salir salvo que se acepte |
+| **Pie del reproductor** | Botón de laboratorio y atajo de paisaje sonoro (cicla ninguno → lluvia → marrón → vinilo) |
+
+Decisiones que conviene saber:
+
+* **Los presets son curvas, no tablas de 36 números.** `EqPreset` guarda anclajes
+  (frecuencia, dB) y `gainsFor` interpola en **log-frecuencia**, recorta a ±18 dB y
+  mantiene plano fuera de rango. Si mañana el motor cambia el reparto de bandas,
+  los presets siguen sonando como se pensaron. Se aplican con `setBand` banda a
+  banda (36 llamadas), que es lo único que expone el contrato.
+* **La prueba de audición no genera tonos** (el núcleo no tiene oscilador): deja
+  sola la banda en cuestión a +12 dB y el resto a −18 dB sobre lo que esté
+  sonando. La compensación resultante es suave (+12 dB como máximo, solo en las
+  bandas perdidas) y se deshace con «Plano».
+* **El visualizador sondea a 30 Hz con su propio temporizador**, no con el
+  snapshot de 80 ms ni con un `Ticker` de la pantalla: `levels()`/`spectrum()` no
+  bloquean (contrato del núcleo) y solo repinta el `CustomPaint`. Con
+  `MediaQuery.disableAnimations` se queda en un fotograma.
+* **1 443 líneas en cinco secciones plegables**: la hoja se abre con «Espacial»
+  desplegada y el resto plegado, para que quepa en un móvil de 5" sin marear.
+
+Tests nuevos (14, `test/audio_lab_test.dart`): curvas (plano, interpolación
+logarítmica, recorte, compensación, los 10 presets dentro de rango), visualizador
+(medidores y estilos), laboratorio (secciones, 9D al motor, paisaje, BPM), prueba
+de audición (cancelar restaura y aplica con 10 respuestas) y presets del
+ecualizador.
+
+---
+
 ## 6. Plataformas
 
 ### Escritorio (PC, Arch)
@@ -386,7 +430,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 22/22 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 27/27 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -507,11 +551,13 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R11 | ~~Recientes mata el motor~~ | **resuelto**: engine cacheado en `CyberHexApplication`, `shouldDestroyEngineWithHost = false` | `CyberHexApplication.kt` |
 | R12 | ~~Icono genérico en la notificación~~ | **resuelto**: `R.drawable.ic_launcher_foreground` (hexágono propio) | `MediaSessionService.kt` |
 | R14 | ~~Sesión en Android~~ | **resuelto**: canal `cyberhex/storage` → `filesDir`; en Linux `$XDG_DATA_HOME/cyberhex` o `~/.local/share/cyberhex`; el temporal queda solo como último recurso | `CyberHexApplication.kt`, `session_store.dart` |
-| R16 | DSP sin interfaz todavía | los seis procesadores nuevos se manejan solo por API; la pantalla de ajustes audiófilos es la fase siguiente | `lib/ui/` |
+| R16 | ~~DSP sin interfaz~~ | **resuelto**: el laboratorio de audio expone los seis procesadores, la medición, el transporte y las herramientas | `audio_lab_sheet.dart` |
 | R17 | Coste del DSP | la cadena entera (9D + ancho + punch + crossfeed + noche) son ~40 operaciones por muestra a 48 kHz; en el Redmi es despreciable y `isIdle()` la salta por completo cuando todo está apagado | `dsp_spatial.zig` |
 | R20 | ReplayGain on/off sin getter | el núcleo solo exporta `ch_engine_set_replaygain`; el valor se recuerda en `NativePlayer` (arranca activado, como el motor) y se reenvía al restaurar | `native_player.dart` |
-| R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run`, pero no hay barra de progreso | `native_player.dart` |
-| R18 | Paisaje sin mando en la UI | el núcleo ya lo mezcla, pero hasta la fase 3 de UI no hay control; el nivel interno máximo (0.28) evita sustos | `dsp_ambient.zig` |
+| R21 | Exportar/BPM en isolate | las dos tareas decodifican el archivo entero; un tema largo tarda segundos y ocupa CPU. Van en `Isolate.run` y la hoja solo muestra «Exportando…»: no hay barra de progreso | `native_player.dart`, `audio_lab_sheet.dart` |
+| R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
+| R23 | Presets a 36 llamadas | aplicar un preset dispara 36 `ch_engine_set_band_gain` seguidos (cada uno recalcula los coeficientes de su banda): es instantáneo, pero si algún día la cadena se vuelve pesada hará falta un volcado en bloque en el núcleo | `eq_presets.dart` |
+| R18 | ~~Paisaje sin mando en la UI~~ | **resuelto**: atajo en el pie del reproductor y control con nivel en el laboratorio | `player_page.dart` |
 | R19 | Coste del exportador | decodifica y procesa a velocidad de CPU; un tema de 5 min tarda unos segundos y ocupa 57 MB en disco. Si el decodificador no sabe la duración, hace dos pasadas | `root.zig` |
 | R15 | Duración en la biblioteca | el núcleo solo da rutas: no hay consulta de duración por ruta (`ch_loudness_scan` decodifica el archivo entero). La ordenación por duración y el filtro «< 30 s» solo ven las pistas ya reproducidas; el resto sale con «—» y nunca se oculta | `library_page.dart` |
 | R13 | FGS desde segundo plano | Android 12+ prohíbe arrancar un FGS en background salvo excepciones; aquí se arranca al pulsar play con la app delante | `MediaBridge.ensureServiceStarted` |
@@ -539,8 +585,8 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | P1.2 | Sample rate nativo (44,1/48/96) con `ma_device` a la tasa del dispositivo | toca `ch_audio_create`, decodificadores y EQ |
 | P1.3 | Dither TPDF al convertir a S16 | 20 líneas en `audio.c` |
 | P1.4 | Crossfeed Bauer para auriculares | 30 líneas en `render` |
-| P1.5 | UI del vúmetro y del espectro (`levels`/`spectrum` ya existen) | Dart |
-| P1.6 | UI de ReplayGain por álbum, balance, mono y loop A-B | Dart |
+| P1.5 | ~~UI del vúmetro y del espectro~~ **HECHO** (turno 16): `VisualizerWidget` con barras o hexágonos y medidores RMS/pico | falta verlo en el teléfono |
+| P1.6 | ~~UI de ReplayGain por álbum, balance, mono y loop A-B~~ **HECHO** (turno 16) en el laboratorio de audio | falta verlo en el teléfono |
 
 ### P2 — alcance
 
@@ -568,9 +614,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (38 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (39 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 3-3 → app(ui): laboratorio de audio, visualizador, presets y prueba de audición
 FASE 3-2 → app(core): toda la API del motor en Dart y DSP persistido en la sesión
 FASE 3-1 → core: paisajes sonoros, detector de BPM y exportador WAV
 FASE 2-4 → app(core): bindings y estado Dart de todo el DSP

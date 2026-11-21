@@ -18,6 +18,54 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 16 · FASE 3, pedido 3 de 10: la UI de audio (laboratorio, vúmetro y presets)
+
+- **PEDIDO:** llevar a la interfaz todo el DSP y lo nuevo del núcleo —que hasta
+  ahora solo se podía llamar por API— con un pedido atómico y reversible.
+  PROHIBIDO `core/`, `android/`, `pubspec.yaml`. Sin dependencias nuevas.
+  RIESGO NO ACEPTABLE.
+- **HECHO:**
+  - `lib/core/eq_presets.dart` (215 líneas): `EqAnchor`/`EqPreset` con la curva
+    por anclajes, `gainsFor` (interpolación en log-frecuencia, recorte ±18 dB,
+    extremos planos), `compensationFrom` (+12 dB a lo no oído) y **10 presets**
+    (Plano, Rock, Pop, Jazz, Clásica, Vocal, Graves, Agudos, Electrónica, Noche).
+  - `lib/ui/visualizer_widget.dart` (351): vúmetro RMS/pico con marca de clip y
+    espectro en `CustomPaint` con dos estilos (barras y columnas de hexágonos);
+    suavizado asimétrico, sondeo a 30 Hz con temporizador propio y respeto de
+    `disableAnimations`.
+  - `lib/ui/audio_lab_sheet.dart` (821): cinco secciones plegables —espacial
+    (9D, ancho, punch, crossfeed, karaoke, noche), mezcla (balance, canales,
+    ReplayGain global/álbum, velocidad, tono, S16), avance (crossfade, gapless,
+    loop A-B, temporizador), paisaje y herramientas (BPM, exportar WAV con
+    selector de destino, abrir `.cue` con lista de cortes, marcar aquí, preset
+    de EQ)— más acciones con estado («Exportando…», errores del motor).
+  - `lib/ui/hearing_test_sheet.dart` (271): prueba de audición de 10 bandas
+    sobre la música que suena (sin generador de tonos: deja sola la banda a
+    +12 dB y el resto a −18 dB), curva de compensación y **restauración del EQ**
+    al cancelar (`_applied` evita deshacer lo aceptado).
+  - `eq_sheet.dart`: chips con los 10 presets y acceso a la prueba; `player_page`
+    pasa a `isScrollControlled` y gana el botón «Laboratorio», el atajo de
+    paisaje y un visualizador compacto.
+  - `test/audio_lab_test.dart` (300): **14 casos** nuevos.
+- **VERIFICADO:** tree-sitter sobre `lib/` y `test/` → **27/27 sin errores**;
+  paridad `PlayerApi` intacta (112 miembros, 0 faltantes en ambos); los miembros
+  de `PlayerController`/`PlayerSnapshot` que usa la UI, comprobados por regex
+  (solo falsos positivos de `ChangeNotifier`); recuento: `lib` **8 473** líneas,
+  `test` **2 993**, **112 casos**. `pubspec.yaml` y `core/` sin tocar
+  (`git status` solo con `lib/`, `test/` y `docs/`).
+- **NO VERIFICABLE AQUÍ:** sin SDK de Flutter no hay `flutter analyze` ni
+  `flutter test`: los 14 casos están escritos, **no ejecutados**. Tampoco se
+  puede ver la hoja: alturas, desbordes en pantallas pequeñas, contraste y el
+  resultado visual del visualizador (R22). El `getSaveLocation` del exportador y
+  la lista de cortes `.cue` necesitan un escritorio real.
+- **COMMITS:** este turno, un commit en `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** **R22** UI sin verificación visual; **R23** aplicar un
+  preset son 36 llamadas a `setBand`; **R21** exportar/BPM sin barra de
+  progreso. Pendientes los pedidos 4–10 (letras y etiquetas, listas y descargas,
+  temas y gestos, Android nativo, Linux, radio/nube y CI).
+
+---
+
 ## 2026-11-21 · turno 15 · FASE 3, pedido 2 de 10: toda la API en Dart y DSP en la sesión
 
 - **PEDIDO:** enlazar en Dart **todo** lo que el núcleo expone y aún no llegaba a

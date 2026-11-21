@@ -1,7 +1,9 @@
 import 'package:material_ui/material_ui.dart';
 
+import '../core/eq_presets.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'hearing_test_sheet.dart';
 
 /// Ecualizador real del núcleo: 36 bandas logarítmicas de 20 Hz a 20 kHz,
 /// con ±18 dB de recorrido. Las etiquetas salen de `ch_engine_eq_band_freq`,
@@ -56,6 +58,45 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
               style: const TextStyle(fontSize: 12, color: chMuted),
             ),
             const SizedBox(height: 10),
+            SizedBox(
+              height: 34,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: eqPresets.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                itemBuilder: (context, index) {
+                  final preset = eqPresets[index];
+                  return ActionChip(
+                    label: Text(
+                      preset.name,
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                    tooltip: preset.description,
+                    backgroundColor: chSurfaceHigh,
+                    side: const BorderSide(color: chBorder),
+                    onPressed: () {
+                      applyEqPreset(widget.controller, preset);
+                      setState(() {});
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 4),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () async {
+                  await HearingTestSheet.show(context, widget.controller);
+                  if (mounted) setState(() {});
+                },
+                icon: const Icon(Icons.hearing_rounded, size: 16),
+                label: const Text(
+                  'Prueba de audición',
+                  style: TextStyle(fontSize: 12),
+                ),
+              ),
+            ),
             SizedBox(
               height: 236,
               child: Scrollbar(
