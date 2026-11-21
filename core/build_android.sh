@@ -52,6 +52,13 @@ for abi in "${TARGETS[@]}"; do
   LIBDIR="$SYS/usr/lib/$NDKARCH/$API"
   [ -d "$LIBDIR" ] || { echo "error: no existe $LIBDIR" >&2; exit 1; }
 
+  FFDIR="$CORE_DIR/third_party/ffmpeg-android/$abi"
+  [ -f "$FFDIR/lib/libavformat.a" ] || {
+    echo "error: faltan las librerías FFmpeg para $abi en $FFDIR" >&2
+    echo "       ejecuta ./build_ffmpeg_android.sh $abi" >&2
+    exit 1
+  }
+
   LIBC="$(mktemp)"
   trap 'rm -f "$LIBC"' EXIT
   cat > "$LIBC" <<EOF
@@ -69,9 +76,10 @@ EOF
   (
     cd "$CORE_DIR"
     "$ZIG" build-lib \
-      -cflags -std=c23 -O2 -- ./src/audio.c ./src/decode_miniaudio.c \
+      -cflags -std=c23 -O2 -- ./src/audio.c ./src/decode_ffmpeg.c \
       -Ofast -target "$ZT" --libc "$LIBC" -mcpu baseline \
-      -L "$LIBDIR" -I vendor -I src \
+      -L "$LIBDIR" -L "$FFDIR/lib" -I vendor -I src -I "$FFDIR/include" \
+      -lavformat -lavcodec -lavutil -lswresample -lm -ldl \
       -Mroot=src/root.zig -lc \
       --name cyberhex_core -dynamic \
       -femit-bin="$OUT_DIR/$abi/libcyberhex_core.so"

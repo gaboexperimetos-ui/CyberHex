@@ -10,11 +10,15 @@ carga la canción completa en RAM.
 cd core
 zig build -Drelease=true          # -> zig-out/lib/libcyberhex_core.so
 zig build test                    # tests unitarios del núcleo
+./build_ffmpeg_android.sh         # FFmpeg estático para las 3 ABIs (una vez)
 ./build_android.sh                # -> jniLibs/{arm64-v8a,armeabi-v7a,x86_64}
 ```
 
-Linux/PC enlaza FFmpeg (libavformat, libavcodec, libavutil, libswresample).
-Android usa miniaudio (sin FFmpeg en el APK por ahora).
+Linux/PC enlaza la FFmpeg del sistema (libavformat, libavcodec, libavutil,
+libswresample). Android enlaza FFmpeg estático desde
+`third_party/ffmpeg-android/<abi>` (generado por `build_ffmpeg_android.sh`, no
+versionado); si no existe, `build.zig` permite `-Dandroid-ffmpeg=false` para
+volver a miniaudio.
 
 ## Arquitectura
 
@@ -30,10 +34,11 @@ Android usa miniaudio (sin FFmpeg en el APK por ahora).
 | Backend | Formatos |
 |---|---|
 | Linux (FFmpeg) | FLAC, MP3, WAV, OGG/Vorbis, Opus, M4A/AAC, ALAC, AIFF, WMA, APE, WavPack, prácticamente todo lo que soporte FFmpeg |
-| Android (miniaudio) | WAV, FLAC, MP3, OGG/Vorbis |
+| Android (FFmpeg estático) | La misma cobertura que Linux |
+| Android (`-Dandroid-ffmpeg=false`) | WAV, FLAC, MP3, OGG/Vorbis (miniaudio) |
 
-M4A/AAC/ALAC/Opus/AIFF en Android requieren compilar FFmpeg con el NDK
-(pendiente).
+El `.so` Android enlaza FFmpeg de forma estática: solo depende de `libc`,
+`libm` y `libdl` del sistema.
 
 ## API
 
@@ -154,6 +159,4 @@ creación del motor, p. ej. sin dispositivo de audio).
 
 ## Aún no implementado
 
-Velocidad/tono, motor de conversión, descargador y funciones de IA. FFmpeg en
-Android (ya compilado en `third_party/ffmpeg-android`; falta enlazarlo en
-`build_android.sh`).
+Velocidad/tono, motor de conversión, descargador y funciones de IA.
