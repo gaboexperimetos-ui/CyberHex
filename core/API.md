@@ -10,9 +10,23 @@ carga la canción completa en RAM.
 cd core
 zig build -Drelease=true          # -> zig-out/lib/libcyberhex_core.so
 zig build test                    # tests unitarios del núcleo
-./build_ffmpeg_android.sh         # FFmpeg estático para las 3 ABIs (una vez)
-./build_android.sh                # -> jniLibs/{arm64-v8a,armeabi-v7a,x86_64}
+./build_ffmpeg_android.sh         # FFmpeg estático para arm64-v8a (una vez)
+./build_android.sh                # -> jniLibs/arm64-v8a/libcyberhex_core.so
 ```
+
+### Objetivo: Redmi Note 13 (Snapdragon 685)
+
+El build de Android compila **solo `arm64-v8a`**, optimizado para el SoC del
+Redmi Note 13 (4× Cortex-A73 @ 2.8 GHz + 4× Cortex-A53 @ 1.9 GHz, Adreno 610):
+
+- `-mcpu cortex_a73` (tuning de pipeline del núcleo grande; el código sigue
+  siendo ARMv8-A genérico y corre en cualquier Android 64-bit).
+- `-O3 -ffast-math -fno-math-errno` en el código C.
+- `abiFilters = arm64-v8a` en `android/app/build.gradle.kts`: el APK solo
+  empaqueta ese ABI (menos tamaño, sin librerías muertas).
+
+Para otros dispositivos, pasar los ABI como argumentos (`./build_android.sh
+arm64-v8a armeabi-v7a x86_64`) o quitar el `abiFilters`.
 
 Linux/PC enlaza la FFmpeg del sistema (libavformat, libavcodec, libavutil,
 libswresample). Android enlaza FFmpeg estático desde

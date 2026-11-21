@@ -27,6 +27,12 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Solo arm64-v8a (Redmi Note 13 / Snapdragon 685). Los demas ABI se
+        // pueden habilitar pasando argumentos a build_android.sh.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {

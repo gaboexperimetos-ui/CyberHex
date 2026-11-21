@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Compila el núcleo CyberHex (Zig + C23) para Android usando el NDK instalado.
 # Uso: ./build_android.sh [arm64-v8a] [armeabi-v7a] [x86_64] [x86]
-# Sin argumentos compila arm64-v8a, armeabi-v7a y x86_64.
+# Sin argumentos compila SOLO arm64-v8a (optimizado para Snapdragon 685 /
+# Cortex-A73 del Redmi Note 13). Otros ABI: pasarlos como argumentos.
 set -euo pipefail
 
 CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,15 +38,15 @@ OUT_DIR="$PROJECT_DIR/android/app/src/main/jniLibs"
 
 TARGETS=("$@")
 if [ ${#TARGETS[@]} -eq 0 ]; then
-  TARGETS=(arm64-v8a armeabi-v7a x86_64)
+  TARGETS=(arm64-v8a)
 fi
 
 for abi in "${TARGETS[@]}"; do
   case "$abi" in
-    arm64-v8a)   ZT=aarch64-linux-android;  NDKARCH=aarch64-linux-android ;;
-    armeabi-v7a) ZT=arm-linux-androideabi;  NDKARCH=arm-linux-androideabi ;;
-    x86_64)      ZT=x86_64-linux-android;   NDKARCH=x86_64-linux-android ;;
-    x86)         ZT=x86-linux-android;      NDKARCH=i686-linux-android ;;
+    arm64-v8a)   ZT=aarch64-linux-android;  NDKARCH=aarch64-linux-android; CPUFLAG=(-mcpu cortex_a73) ;;
+    armeabi-v7a) ZT=arm-linux-androideabi;  NDKARCH=arm-linux-androideabi; CPUFLAG=(-mcpu baseline) ;;
+    x86_64)      ZT=x86_64-linux-android;   NDKARCH=x86_64-linux-android; CPUFLAG=(-mcpu baseline) ;;
+    x86)         ZT=x86-linux-android;      NDKARCH=i686-linux-android; CPUFLAG=(-mcpu baseline) ;;
     *) echo "error: ABI desconocida '$abi'" >&2; exit 1 ;;
   esac
 
@@ -76,8 +77,8 @@ EOF
   (
     cd "$CORE_DIR"
     "$ZIG" build-lib \
-      -cflags -std=c23 -O2 -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c \
-      -Ofast -target "$ZT" --libc "$LIBC" -mcpu baseline \
+      -cflags -std=c23 -O3 -ffast-math -fno-math-errno -- ./src/audio.c ./src/decode_ffmpeg.c ./src/playlist.c \
+      -Ofast -target "$ZT" --libc "$LIBC" "${CPUFLAG[@]}" \
       -L "$LIBDIR" -L "$FFDIR/lib" -I vendor -I src -I "$FFDIR/include" \
       -lavformat -lavcodec -lavutil -lswresample -lm -ldl \
       -Mroot=src/root.zig -lc \

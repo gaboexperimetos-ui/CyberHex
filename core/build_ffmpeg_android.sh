@@ -28,13 +28,13 @@ if [ ! -d "$SRC" ]; then
 fi
 
 TARGETS=("$@")
-[ ${#TARGETS[@]} -gt 0 ] || TARGETS=(arm64-v8a armeabi-v7a x86_64)
+[ ${#TARGETS[@]} -gt 0 ] || TARGETS=(arm64-v8a)
 
 for abi in "${TARGETS[@]}"; do
   case "$abi" in
-    arm64-v8a)   ARCH=aarch64; CPU=armv8-a;  TRIPLE=aarch64-linux-android ;;
-    armeabi-v7a) ARCH=arm;     CPU=armv7-a;  TRIPLE=armv7a-linux-androideabi ;;
-    x86_64)      ARCH=x86_64;  CPU=x86-64;   TRIPLE=x86_64-linux-android ;;
+    arm64-v8a)   ARCH=aarch64; CPU=cortex-a73; TRIPLE=aarch64-linux-android ;;
+    armeabi-v7a) ARCH=arm;     CPU=armv7-a;    TRIPLE=armv7a-linux-androideabi ;;
+    x86_64)      ARCH=x86_64;  CPU=x86-64;     TRIPLE=x86_64-linux-android ;;
     *) echo "error: ABI '$abi'" >&2; exit 1 ;;
   esac
 
