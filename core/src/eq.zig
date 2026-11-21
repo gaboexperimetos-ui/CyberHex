@@ -6,7 +6,7 @@ pub const SAMPLE_RATE: f32 = 48000;
 pub const MAX_GAIN_DB: f32 = 18;
 
 // 20 Hz a 20 kHz, 36 bandas espaciadas logarítmicamente.
-const FREQS = [BAND_COUNT]f32{
+pub const FREQS = [BAND_COUNT]f32{
     20.0,    24.4,    29.7,    36.2,    44.0,    53.7,
     65.4,    79.6,    97.0,    118.2,   143.9,   175.3,
     213.6,   260.2,   317.0,   386.1,   470.4,   573.0,

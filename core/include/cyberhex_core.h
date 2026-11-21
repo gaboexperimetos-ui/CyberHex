@@ -99,7 +99,10 @@ float   ch_engine_pitch(ch_engine* engine);
 int32_t ch_engine_spectrum(ch_engine* engine, float* out, int32_t bands);
 
 int32_t ch_engine_eq_band_count(void);
+/* Frecuencia central (Hz) de la banda `index`; 0 si está fuera de rango. */
+float   ch_engine_eq_band_freq(int32_t index);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
+/* Cambia una sola banda (±18 dB) conservando el resto. */
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);
 
 const char* ch_engine_title(ch_engine* engine);
@@ -159,7 +162,7 @@ int32_t ch_engine_poll_event(ch_engine* engine, ch_event* out);
 
 const char* ch_engine_last_error(ch_engine* engine);
 
-/* Estadisticas de b\u00fafer para diagnostico. */
+/* Estadisticas de búfer para diagnostico. */
 double ch_engine_buffered_seconds(ch_engine* engine);
 uint64_t ch_engine_buffer_underflows(ch_engine* engine);
 

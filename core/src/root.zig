@@ -216,6 +216,9 @@ pub const Engine = struct {
     volume_bits: u32 = @bitCast(@as(f32, 1)),
     rg_enabled: bool = true,
     equalizer: eq.Equalizer = .{},
+    // Últimas ganancias aplicadas (dB), para que set_band_gain pueda cambiar
+    // una sola banda sin borrar las demás.
+    eq_gains: [eq.BAND_COUNT]f32 = @splat(0),
 
     segments: [MAX_SEGMENTS]Segment = undefined,
     seg_count: usize = 0,
@@ -2013,20 +2016,29 @@ export fn ch_engine_eq_band_count() i32 {
     return eq.BAND_COUNT;
 }
 
+export fn ch_engine_eq_band_freq(index: i32) f32 {
+    if (index < 0 or index >= eq.BAND_COUNT) return 0;
+    return eq.FREQS[@intCast(index)];
+}
+
 export fn ch_engine_set_eq_gains(self: ?*Engine, gains_db: [*c]const f32, count: i32) i32 {
     const e = self orelse return -1;
     if (gains_db == null or count <= 0) return e.fail("bandas de EQ inválidas", -2);
     const n: usize = @min(@as(usize, @intCast(count)), eq.BAND_COUNT);
-    e.equalizer.setGains(gains_db[0..n]);
+    var gains: [eq.BAND_COUNT]f32 = @splat(0);
+    for (0..n) |i| {
+        gains[i] = std.math.clamp(gains_db[i], -eq.MAX_GAIN_DB, eq.MAX_GAIN_DB);
+    }
+    e.eq_gains = gains;
+    e.equalizer.setGains(&gains);
     return 0;
 }
 
 export fn ch_engine_set_band_gain(self: ?*Engine, band: i32, db: f32) i32 {
     const e = self orelse return -1;
     if (band < 0 or band >= eq.BAND_COUNT) return e.fail("banda de EQ fuera de rango", -2);
-    var gains: [eq.BAND_COUNT]f32 = @splat(0);
-    gains[@intCast(band)] = db;
-    e.equalizer.setGains(&gains);
+    e.eq_gains[@intCast(band)] = std.math.clamp(db, -eq.MAX_GAIN_DB, eq.MAX_GAIN_DB);
+    e.equalizer.setGains(&e.eq_gains);
     return 0;
 }
 

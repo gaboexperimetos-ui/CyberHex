@@ -8,7 +8,8 @@ carga la canción completa en RAM.
 
 ```bash
 cd core
-zig build -Drelease=true          # -> zig-out/lib/libcyberhex_core.so
+zig build                         # ReleaseFast por defecto -> zig-out/lib/libcyberhex_core.so
+zig build -Doptimize=ReleaseSafe  # misma build con comprobaciones de seguridad
 zig build test                    # tests unitarios del núcleo
 ./build_ffmpeg_android.sh         # FFmpeg estático para arm64-v8a (una vez)
 ./build_android.sh                # -> jniLibs/arm64-v8a/libcyberhex_core.so
@@ -126,8 +127,11 @@ float   ch_engine_pitch(ch_engine* engine);
 /* Analizador de espectro: `bands` valores 0..1 de 20 Hz a 20 kHz (-80..0 dB). */
 int32_t ch_engine_spectrum(ch_engine* engine, float* out, int32_t bands);
 
-/* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB. */
+/* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB.
+ * `ch_engine_eq_band_freq` devuelve la frecuencia central de cada banda
+ * (útil para etiquetar la UI sin duplicar la tabla). */
 int32_t ch_engine_eq_band_count(void);
+float   ch_engine_eq_band_freq(int32_t index);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);
 
