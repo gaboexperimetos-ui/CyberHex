@@ -70,6 +70,19 @@ final class _ChEvent extends Struct {
 typedef _PollEventNative = Int32 Function(Pointer<Void>, Pointer<_ChEvent>);
 typedef _PollEventDart = int Function(Pointer<Void>, Pointer<_ChEvent>);
 
+typedef _LevelsNative = Int32 Function(Pointer<Void>, Pointer<Float>, Int32);
+typedef _LevelsDart = int Function(Pointer<Void>, Pointer<Float>, int);
+typedef _SetFloatNative = Int32 Function(Pointer<Void>, Float);
+typedef _SetFloatDart = int Function(Pointer<Void>, double);
+typedef _GetFloatNative = Float Function(Pointer<Void>);
+typedef _GetFloatDart = double Function(Pointer<Void>);
+typedef _SetIntNative = Int32 Function(Pointer<Void>, Int32);
+typedef _SetIntDart = int Function(Pointer<Void>, int);
+typedef _SetLoopNative = Int32 Function(Pointer<Void>, Double, Double);
+typedef _SetLoopDart = int Function(Pointer<Void>, double, double);
+typedef _U64Native = Uint64 Function(Pointer<Void>);
+typedef _U64Dart = int Function(Pointer<Void>);
+
 const String _libraryName = 'libcyberhex_core.so';
 
 /// Carga una pista en un isolate aparte: `ch_engine_load` abre el archivo,
@@ -98,6 +111,7 @@ class CyberHexException implements Exception {
 class NativePlayer implements PlayerApi {
   NativePlayer._(this._engine, this._bindings) {
     _eventBuf = calloc<_ChEvent>();
+    _levelBuf = calloc<Float>(4);
   }
 
   static NativePlayer? open() {
@@ -122,6 +136,7 @@ class NativePlayer implements PlayerApi {
   final Pointer<Void> _engine;
   final _Bindings _bindings;
   late final Pointer<_ChEvent> _eventBuf;
+  late final Pointer<Float> _levelBuf;
 
   @override
   final List<double> eqGains = List<double>.filled(_Bindings.instance.eqBandCount(), 0);
@@ -300,6 +315,47 @@ class NativePlayer implements PlayerApi {
     setBand(0, 0);
   }
 
+  /// Niveles de salida `[rms_l, rms_r, peak_l, peak_r]` (0..1). Lista vacía si
+  /// la librería cargada es antigua y no expone `ch_engine_levels`.
+  List<double> levels() {
+    if (_disposed) return const [];
+    final fn = _bindings.levels;
+    if (fn == null) return const [];
+    final count = fn(_engine, _levelBuf, 4);
+    if (count <= 0) return const [];
+    return List<double>.generate(count, (i) => _levelBuf[i]);
+  }
+
+  /// Fundido de pausa en segundos (0 = corte inmediato).
+  void setPauseFade(double seconds) =>
+      _bindings.setPauseFade?.call(_engine, seconds);
+
+  double get pauseFade => _bindings.pauseFade?.call(_engine) ?? 0.05;
+
+  /// Preamp del EQ en dB (0 a -24).
+  void setEqPreamp(double db) => _bindings.setEqPreamp?.call(_engine, db);
+
+  double get eqPreamp => _bindings.eqPreamp?.call(_engine) ?? 0;
+
+  /// ReplayGain por álbum (una ganancia para todo el disco) o por pista.
+  /// Solo afecta a las pistas que se abran después.
+  void setReplayGainAlbum(bool album) =>
+      _bindings.setReplayGainMode?.call(_engine, album ? 1 : 0);
+
+  bool get replayGainAlbum =>
+      (_bindings.replayGainMode?.call(_engine) ?? 0) == 1;
+
+  /// Loop A-B en segundos; `end <= start` lo desactiva.
+  void setLoop(double start, double end) =>
+      _bindings.setLoop?.call(_engine, start, end);
+
+  double get loopStart => _bindings.loopStart?.call(_engine) ?? -1;
+
+  double get loopEnd => _bindings.loopEnd?.call(_engine) ?? -1;
+
+  /// Pistas que el motor se saltó por no poder abrirlas.
+  int get skippedTracks => _bindings.skippedTracks?.call(_engine) ?? 0;
+
   @override
   PlayerEvent? pollEvent() {
     if (_disposed) return null;
@@ -337,6 +393,7 @@ class NativePlayer implements PlayerApi {
     }
     _disposed = true;
     calloc.free(_eventBuf);
+    calloc.free(_levelBuf);
     _bindings.destroy(_engine);
   }
 
@@ -366,6 +423,39 @@ class _Bindings {
         isPlaying = lib.lookupFunction<_IntNative, _IntDart>('ch_engine_is_playing'),
         pollEvent =
             lib.lookupFunction<_PollEventNative, _PollEventDart>('ch_engine_poll_event'),
+        levels = lib.providesSymbol('ch_engine_levels')
+            ? lib.lookupFunction<_LevelsNative, _LevelsDart>('ch_engine_levels')
+            : null,
+        setPauseFade = lib.providesSymbol('ch_engine_set_pause_fade')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_pause_fade')
+            : null,
+        pauseFade = lib.providesSymbol('ch_engine_pause_fade')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_pause_fade')
+            : null,
+        setEqPreamp = lib.providesSymbol('ch_engine_set_eq_preamp')
+            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_eq_preamp')
+            : null,
+        eqPreamp = lib.providesSymbol('ch_engine_eq_preamp')
+            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_eq_preamp')
+            : null,
+        setReplayGainMode = lib.providesSymbol('ch_engine_set_replaygain_mode')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_replaygain_mode')
+            : null,
+        replayGainMode = lib.providesSymbol('ch_engine_replaygain_mode')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_replaygain_mode')
+            : null,
+        setLoop = lib.providesSymbol('ch_engine_set_loop')
+            ? lib.lookupFunction<_SetLoopNative, _SetLoopDart>('ch_engine_set_loop')
+            : null,
+        loopStart = lib.providesSymbol('ch_engine_loop_start')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_loop_start')
+            : null,
+        loopEnd = lib.providesSymbol('ch_engine_loop_end')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_loop_end')
+            : null,
+        skippedTracks = lib.providesSymbol('ch_engine_skipped_tracks')
+            ? lib.lookupFunction<_U64Native, _U64Dart>('ch_engine_skipped_tracks')
+            : null,
         titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
         artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
         albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
@@ -391,6 +481,17 @@ class _Bindings {
   final _DoubleDart duration;
   final _IntDart isPlaying;
   final _PollEventDart pollEvent;
+  final _LevelsDart? levels;
+  final _SetFloatDart? setPauseFade;
+  final _GetFloatDart? pauseFade;
+  final _SetFloatDart? setEqPreamp;
+  final _GetFloatDart? eqPreamp;
+  final _SetIntDart? setReplayGainMode;
+  final _IntDart? replayGainMode;
+  final _SetLoopDart? setLoop;
+  final _DoubleDart? loopStart;
+  final _DoubleDart? loopEnd;
+  final _U64Dart? skippedTracks;
   final _TextDart titleFn;
   final _TextDart artistFn;
   final _TextDart albumFn;
