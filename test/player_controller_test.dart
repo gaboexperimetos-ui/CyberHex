@@ -252,6 +252,68 @@ void main() {
     expect(controller.bufferUnderflows, 2);
   });
 
+  test('biblioteca, marcadores, CUE y dispositivos', () {
+    final fake = FakePlayer()
+      ..libraryTracks = const ['/m/a.flac', '/m/b.mp3']
+      ..libraryRemoved = 1
+      ..cue = const CueSheet(
+        album: 'Live',
+        albumPerformer: 'X',
+        tracks: [
+          CueTrack(
+            number: 1,
+            title: 'Uno',
+            performer: 'X',
+            file: 'live.flac',
+            start: 0,
+            end: 180.5,
+          ),
+        ],
+      )
+      ..loudness = (lufs: -14.2, peakDb: -0.3, duration: 240);
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    final scan = controller.scanLibrary('/m');
+    expect(scan?.tracks, const ['/m/a.flac', '/m/b.mp3']);
+    expect(scan?.removed, 1);
+
+    expect(controller.loadMarkers('/m/marks.txt', '/m/a.flac'), isEmpty);
+    expect(
+      controller.saveMarkers('/m/marks.txt', '/m/a.flac', const [
+        TrackMarker(12.5, 'estribillo'),
+        TrackMarker(64.0, 'solo'),
+      ]),
+      isTrue,
+    );
+    expect(controller.loadMarkers('/m/marks.txt', '/m/a.flac'), const [
+      TrackMarker(12.5, 'estribillo'),
+      TrackMarker(64.0, 'solo'),
+    ]);
+
+    expect(controller.removeMarker('/m/marks.txt', '/m/a.flac', 0), isTrue);
+    expect(
+      controller.loadMarkers('/m/marks.txt', '/m/a.flac'),
+      const [TrackMarker(64.0, 'solo')],
+    );
+
+    expect(controller.clearMarkers('/m/marks.txt', '/m/a.flac'), isTrue);
+    expect(controller.loadMarkers('/m/marks.txt', '/m/a.flac'), isEmpty);
+
+    final cue = controller.readCue('/m/live.cue');
+    expect(cue?.album, 'Live');
+    expect(cue?.tracks.single.duration, 180.5);
+
+    expect(controller.outputDevices, const ['Altavoces', 'Auriculares']);
+    controller.outputDevice = 1;
+    expect(fake.outputDevice, 1);
+
+    expect(controller.scanLoudness('/m/a.flac')?.lufs, -14.2);
+    fake.waveformPeaksValue = const [0.1, 0.9, 0.4];
+    expect(controller.waveform('/m/a.flac', 3), const [0.1, 0.9, 0.4]);
+    expect(controller.coreVersion, 'test');
+  });
+
   test('etiquetas completas, letras y carátula llegan a la UI', () {
     final fake = FakePlayer()
       ..hasTrack = true

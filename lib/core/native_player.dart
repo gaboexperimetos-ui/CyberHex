@@ -67,6 +67,18 @@ final class _ChEvent extends Struct {
   external double value;
 }
 
+/// Espejo de `ch_loudness_result` (core/include/cyberhex_core.h).
+final class _ChLoudness extends Struct {
+  @Double()
+  external double integratedLufs;
+
+  @Double()
+  external double samplePeakDbfs;
+
+  @Double()
+  external double durationS;
+}
+
 typedef _PollEventNative = Int32 Function(Pointer<Void>, Pointer<_ChEvent>);
 typedef _PollEventDart = int Function(Pointer<Void>, Pointer<_ChEvent>);
 
@@ -116,6 +128,31 @@ typedef _DetectSilenceNative = Int32 Function(
     Pointer<Utf8>, Float, Pointer<Double>, Pointer<Double>);
 typedef _DetectSilenceDart = int Function(
     Pointer<Utf8>, double, Pointer<Double>, Pointer<Double>);
+typedef _TextAtNative = Pointer<Utf8> Function(Pointer<Void>, Int32);
+typedef _TextAtDart = Pointer<Utf8> Function(Pointer<Void>, int);
+typedef _DoubleAtNative = Double Function(Pointer<Void>, Int32);
+typedef _DoubleAtDart = double Function(Pointer<Void>, int);
+typedef _MarkerAddNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Double, Pointer<Utf8>);
+typedef _MarkerAddDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, double, Pointer<Utf8>);
+typedef _MarkerPosNative = Double Function(Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkerPosDart = double Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _MarkerNameNative = Pointer<Utf8> Function(
+    Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkerNameDart = Pointer<Utf8> Function(
+    Pointer<Void>, Pointer<Utf8>, int);
+typedef _MarkerRemoveNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkerRemoveDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _CueReadNative = Pointer<Void> Function(Pointer<Utf8>);
+typedef _CueReadDart = Pointer<Void> Function(Pointer<Utf8>);
+typedef _TextIndexNative = Pointer<Utf8> Function(Int32);
+typedef _TextIndexDart = Pointer<Utf8> Function(int);
+typedef _WaveformNative = Int32 Function(Pointer<Utf8>, Uint32, Pointer<Float>);
+typedef _WaveformDart = int Function(Pointer<Utf8>, int, Pointer<Float>);
+typedef _LoudnessNative = Int32 Function(Pointer<Utf8>, Pointer<_ChLoudness>);
+typedef _LoudnessDart = int Function(Pointer<Utf8>, Pointer<_ChLoudness>);
 
 const String _libraryName = 'libcyberhex_core.so';
 
@@ -730,6 +767,211 @@ class NativePlayer extends PlayerApi {
   }
 
   // ---------------------------------------------------------------------------
+  // Biblioteca, marcadores, CUE y utilidades de archivo
+  // ---------------------------------------------------------------------------
+
+  @override
+  ({List<String> tracks, int removed})? scanLibrary(String root) {
+    final b = _bindings;
+    final create = b.libraryCreate;
+    final destroy = b.libraryDestroy;
+    final scan = b.libraryScan;
+    final count = b.libraryCount;
+    final pathAt = b.libraryPath;
+    if (create == null || destroy == null || scan == null || count == null) {
+      return null;
+    }
+    final handle = create();
+    if (handle == nullptr) return null;
+    final utf8 = root.toNativeUtf8();
+    try {
+      if (scan(handle, utf8) < 0) return null;
+      final total = count(handle);
+      final tracks = <String>[];
+      if (pathAt != null) {
+        for (var i = 0; i < total; i++) {
+          final path = _text(pathAt(handle, i));
+          if (path.isNotEmpty) tracks.add(path);
+        }
+      }
+      return (tracks: tracks, removed: b.libraryRemoved?.call(handle) ?? 0);
+    } finally {
+      malloc.free(utf8);
+      destroy(handle);
+    }
+  }
+
+  @override
+  List<TrackMarker> loadMarkers(String path, String track) {
+    final b = _bindings;
+    final create = b.markersCreate;
+    final destroy = b.markersDestroy;
+    final load = b.markersLoad;
+    if (create == null || destroy == null || load == null) return const [];
+    final handle = create();
+    if (handle == nullptr) return const [];
+    final pathUtf8 = path.toNativeUtf8();
+    final trackUtf8 = track.toNativeUtf8();
+    try {
+      if (load(handle, pathUtf8) != 0) return const [];
+      final total = b.markersCount?.call(handle, trackUtf8) ?? 0;
+      final markers = <TrackMarker>[];
+      for (var i = 0; i < total; i++) {
+        final position = b.markersPosition?.call(handle, trackUtf8, i) ?? -1;
+        if (position < 0) continue;
+        markers.add(TrackMarker(
+          position,
+          _text(b.markersName?.call(handle, trackUtf8, i)),
+        ));
+      }
+      return markers;
+    } finally {
+      malloc.free(pathUtf8);
+      malloc.free(trackUtf8);
+      destroy(handle);
+    }
+  }
+
+  @override
+  bool saveMarkers(String path, String track, List<TrackMarker> markers) {
+    final b = _bindings;
+    final create = b.markersCreate;
+    final destroy = b.markersDestroy;
+    final add = b.markersAdd;
+    final save = b.markersSave;
+    if (create == null ||
+        destroy == null ||
+        add == null ||
+        save == null) {
+      return false;
+    }
+    final handle = create();
+    if (handle == nullptr) return false;
+    final pathUtf8 = path.toNativeUtf8();
+    final trackUtf8 = track.toNativeUtf8();
+    try {
+      for (final marker in markers) {
+        final nameUtf8 = marker.name.toNativeUtf8();
+        try {
+          if (add(handle, trackUtf8, marker.position, nameUtf8) < 0) {
+            return false;
+          }
+        } finally {
+          malloc.free(nameUtf8);
+        }
+      }
+      return save(handle, pathUtf8) == 0;
+    } finally {
+      malloc.free(pathUtf8);
+      malloc.free(trackUtf8);
+      destroy(handle);
+    }
+  }
+
+  @override
+  bool removeMarker(String path, String track, int index) {
+    final current = loadMarkers(path, track);
+    if (index < 0 || index >= current.length) return false;
+    final next = List<TrackMarker>.of(current)..removeAt(index);
+    return saveMarkers(path, track, next);
+  }
+
+  @override
+  bool clearMarkers(String path, String track) =>
+      saveMarkers(path, track, const []);
+
+  @override
+  CueSheet? readCue(String path) {
+    final b = _bindings;
+    final read = b.cueRead;
+    final free = b.cueFree;
+    if (read == null || free == null) return null;
+    final utf8 = path.toNativeUtf8();
+    Pointer<Void> cue;
+    try {
+      cue = read(utf8);
+    } finally {
+      malloc.free(utf8);
+    }
+    if (cue == nullptr) return null;
+    try {
+      final total = b.cueCount?.call(cue) ?? 0;
+      final tracks = <CueTrack>[];
+      for (var i = 0; i < total; i++) {
+        tracks.add(CueTrack(
+          number: b.cueNumber?.call(cue, i) ?? 0,
+          title: _text(b.cueTitle?.call(cue, i)),
+          performer: _text(b.cuePerformer?.call(cue, i)),
+          file: _text(b.cueFile?.call(cue, i)),
+          start: b.cueStart?.call(cue, i) ?? 0,
+          end: b.cueEnd?.call(cue, i) ?? 0,
+        ));
+      }
+      return CueSheet(
+        album: _text(b.cueAlbum?.call(cue)),
+        albumPerformer: _text(b.cueAlbumPerformer?.call(cue)),
+        tracks: tracks,
+      );
+    } finally {
+      free(cue);
+    }
+  }
+
+  @override
+  List<String> get outputDevices {
+    final total = _bindings.outputDeviceCount?.call() ?? 0;
+    final nameAt = _bindings.outputDeviceName;
+    if (total <= 0 || nameAt == null) return const [];
+    return List<String>.generate(total, (i) => _text(nameAt(i)));
+  }
+
+  @override
+  int get outputDevice => _bindings.outputDevice?.call(_engine) ?? -1;
+
+  @override
+  set outputDevice(int index) =>
+      _bindings.setOutputDevice?.call(_engine, index);
+
+  @override
+  ({double lufs, double peakDb, double duration})? scanLoudness(String path) {
+    final fn = _bindings.loudnessScan;
+    if (fn == null) return null;
+    final result = calloc<_ChLoudness>();
+    final utf8 = path.toNativeUtf8();
+    try {
+      if (fn(utf8, result) != 0) return null;
+      final value = result.ref;
+      return (
+        lufs: value.integratedLufs,
+        peakDb: value.samplePeakDbfs,
+        duration: value.durationS,
+      );
+    } finally {
+      malloc.free(utf8);
+      calloc.free(result);
+    }
+  }
+
+  @override
+  List<double> waveform(String path, int buckets) {
+    final fn = _bindings.waveformPeaks;
+    if (fn == null || buckets <= 0) return const [];
+    final out = calloc<Float>(buckets);
+    final utf8 = path.toNativeUtf8();
+    try {
+      final total = fn(utf8, buckets, out);
+      if (total <= 0) return const [];
+      return List<double>.generate(total, (i) => out[i]);
+    } finally {
+      malloc.free(utf8);
+      calloc.free(out);
+    }
+  }
+
+  @override
+  String get coreVersion => _text(_bindings.coreVersion?.call());
+
+  // ---------------------------------------------------------------------------
   // Metadatos completos, letras y carátulas
   // ---------------------------------------------------------------------------
 
@@ -1012,6 +1254,108 @@ class _Bindings {
         loadState = lib.providesSymbol('ch_engine_load_state')
             ? lib.lookupFunction<_LoadStateNative, _LoadStateDart>('ch_engine_load_state')
             : null,
+        libraryCreate = lib.providesSymbol('ch_library_create')
+            ? lib.lookupFunction<_CreateNative, _CreateDart>('ch_library_create')
+            : null,
+        libraryDestroy = lib.providesSymbol('ch_library_destroy')
+            ? lib.lookupFunction<_DestroyNative, _DestroyDart>('ch_library_destroy')
+            : null,
+        libraryScan = lib.providesSymbol('ch_library_scan')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_library_scan')
+            : null,
+        libraryCount = lib.providesSymbol('ch_library_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_library_count')
+            : null,
+        libraryPath = lib.providesSymbol('ch_library_path')
+            ? lib.lookupFunction<_TextAtNative, _TextAtDart>('ch_library_path')
+            : null,
+        libraryRemoved = lib.providesSymbol('ch_library_removed')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_library_removed')
+            : null,
+        markersCreate = lib.providesSymbol('ch_markers_create')
+            ? lib.lookupFunction<_CreateNative, _CreateDart>('ch_markers_create')
+            : null,
+        markersDestroy = lib.providesSymbol('ch_markers_destroy')
+            ? lib.lookupFunction<_DestroyNative, _DestroyDart>('ch_markers_destroy')
+            : null,
+        markersLoad = lib.providesSymbol('ch_markers_load')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_markers_load')
+            : null,
+        markersSave = lib.providesSymbol('ch_markers_save')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_markers_save')
+            : null,
+        markersAdd = lib.providesSymbol('ch_markers_add')
+            ? lib.lookupFunction<_MarkerAddNative, _MarkerAddDart>('ch_markers_add')
+            : null,
+        markersCount = lib.providesSymbol('ch_markers_count')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_markers_count')
+            : null,
+        markersPosition = lib.providesSymbol('ch_markers_position')
+            ? lib.lookupFunction<_MarkerPosNative, _MarkerPosDart>('ch_markers_position')
+            : null,
+        markersName = lib.providesSymbol('ch_markers_name')
+            ? lib.lookupFunction<_MarkerNameNative, _MarkerNameDart>('ch_markers_name')
+            : null,
+        markersRemove = lib.providesSymbol('ch_markers_remove')
+            ? lib.lookupFunction<_MarkerRemoveNative, _MarkerRemoveDart>('ch_markers_remove')
+            : null,
+        markersClear = lib.providesSymbol('ch_markers_clear')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_markers_clear')
+            : null,
+        cueRead = lib.providesSymbol('ch_cue_read')
+            ? lib.lookupFunction<_CueReadNative, _CueReadDart>('ch_cue_read')
+            : null,
+        cueFree = lib.providesSymbol('ch_cue_free')
+            ? lib.lookupFunction<_DestroyNative, _DestroyDart>('ch_cue_free')
+            : null,
+        cueCount = lib.providesSymbol('ch_cue_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_cue_count')
+            : null,
+        cueAlbum = lib.providesSymbol('ch_cue_album')
+            ? lib.lookupFunction<_TextNative, _TextDart>('ch_cue_album')
+            : null,
+        cueAlbumPerformer = lib.providesSymbol('ch_cue_album_performer')
+            ? lib.lookupFunction<_TextNative, _TextDart>('ch_cue_album_performer')
+            : null,
+        cueFile = lib.providesSymbol('ch_cue_file')
+            ? lib.lookupFunction<_TextAtNative, _TextAtDart>('ch_cue_file')
+            : null,
+        cueTitle = lib.providesSymbol('ch_cue_title')
+            ? lib.lookupFunction<_TextAtNative, _TextAtDart>('ch_cue_title')
+            : null,
+        cuePerformer = lib.providesSymbol('ch_cue_performer')
+            ? lib.lookupFunction<_TextAtNative, _TextAtDart>('ch_cue_performer')
+            : null,
+        cueStart = lib.providesSymbol('ch_cue_start')
+            ? lib.lookupFunction<_DoubleAtNative, _DoubleAtDart>('ch_cue_start')
+            : null,
+        cueEnd = lib.providesSymbol('ch_cue_end')
+            ? lib.lookupFunction<_DoubleAtNative, _DoubleAtDart>('ch_cue_end')
+            : null,
+        cueNumber = lib.providesSymbol('ch_cue_number')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_cue_number')
+            : null,
+        outputDeviceCount = lib.providesSymbol('ch_engine_output_device_count')
+            ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>('ch_engine_output_device_count')
+            : null,
+        outputDeviceName = lib.providesSymbol('ch_engine_output_device_name')
+            ? lib.lookupFunction<_TextIndexNative, _TextIndexDart>('ch_engine_output_device_name')
+            : null,
+        outputDevice = lib.providesSymbol('ch_engine_output_device')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_output_device')
+            : null,
+        setOutputDevice = lib.providesSymbol('ch_engine_set_output_device')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_output_device')
+            : null,
+        loudnessScan = lib.providesSymbol('ch_loudness_scan')
+            ? lib.lookupFunction<_LoudnessNative, _LoudnessDart>('ch_loudness_scan')
+            : null,
+        waveformPeaks = lib.providesSymbol('ch_waveform_peaks')
+            ? lib.lookupFunction<_WaveformNative, _WaveformDart>('ch_waveform_peaks')
+            : null,
+        coreVersion = lib.providesSymbol('ch_core_version')
+            ? lib.lookupFunction<_PlainTextNative, _PlainTextDart>('ch_core_version')
+            : null,
         meter = lib.providesSymbol('ch_engine_meter')
             ? lib.lookupFunction<_MeterNative, _MeterDart>('ch_engine_meter')
             : null,
@@ -1196,6 +1540,40 @@ class _Bindings {
   final _DoubleDart? sleepRemaining;
   final _LoadDart? saveState;
   final _LoadStateDart? loadState;
+  final _CreateDart? libraryCreate;
+  final _DestroyDart? libraryDestroy;
+  final _LoadDart? libraryScan;
+  final _IntDart? libraryCount;
+  final _TextAtDart? libraryPath;
+  final _IntDart? libraryRemoved;
+  final _CreateDart? markersCreate;
+  final _DestroyDart? markersDestroy;
+  final _LoadDart? markersLoad;
+  final _LoadDart? markersSave;
+  final _MarkerAddDart? markersAdd;
+  final _LoadDart? markersCount;
+  final _MarkerPosDart? markersPosition;
+  final _MarkerNameDart? markersName;
+  final _MarkerRemoveDart? markersRemove;
+  final _LoadDart? markersClear;
+  final _CueReadDart? cueRead;
+  final _DestroyDart? cueFree;
+  final _IntDart? cueCount;
+  final _TextDart? cueAlbum;
+  final _TextDart? cueAlbumPerformer;
+  final _TextAtDart? cueFile;
+  final _TextAtDart? cueTitle;
+  final _TextAtDart? cuePerformer;
+  final _DoubleAtDart? cueStart;
+  final _DoubleAtDart? cueEnd;
+  final _SetIntDart? cueNumber;
+  final _NoArgIntDart? outputDeviceCount;
+  final _TextIndexDart? outputDeviceName;
+  final _IntDart? outputDevice;
+  final _SetIntDart? setOutputDevice;
+  final _LoudnessDart? loudnessScan;
+  final _WaveformDart? waveformPeaks;
+  final _PlainTextDart? coreVersion;
   final _MeterDart? meter;
   final _LevelsDart? spectrum;
   final _IntFloatDart? setBandGain;

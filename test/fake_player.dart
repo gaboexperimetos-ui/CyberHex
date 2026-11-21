@@ -348,6 +348,67 @@ class FakePlayer extends PlayerApi {
     return true;
   }
 
+  // --- Biblioteca, marcadores, CUE y dispositivos ---------------------------
+
+  List<String> libraryTracks = const [];
+  int libraryRemoved = 0;
+
+  final Map<String, List<TrackMarker>> markersByTrack = {};
+
+  CueSheet? cue;
+
+  @override
+  List<String> outputDevices = const ['Altavoces', 'Auriculares'];
+
+  @override
+  int outputDevice = -1;
+
+  ({double lufs, double peakDb, double duration})? loudness;
+
+  List<double> waveformPeaksValue = const [];
+
+  @override
+  String coreVersion = 'test';
+
+  @override
+  ({List<String> tracks, int removed})? scanLibrary(String root) =>
+      (tracks: libraryTracks, removed: libraryRemoved);
+
+  @override
+  List<TrackMarker> loadMarkers(String path, String track) =>
+      markersByTrack['$path|$track'] ?? const [];
+
+  @override
+  bool saveMarkers(String path, String track, List<TrackMarker> markers) {
+    markersByTrack['$path|$track'] = List<TrackMarker>.of(markers);
+    return true;
+  }
+
+  @override
+  bool removeMarker(String path, String track, int index) {
+    final key = '$path|$track';
+    final current = markersByTrack[key] ?? const <TrackMarker>[];
+    if (index < 0 || index >= current.length) return false;
+    markersByTrack[key] = List<TrackMarker>.of(current)..removeAt(index);
+    return true;
+  }
+
+  @override
+  bool clearMarkers(String path, String track) {
+    markersByTrack.remove('$path|$track');
+    return true;
+  }
+
+  @override
+  CueSheet? readCue(String path) => cue;
+
+  @override
+  ({double lufs, double peakDb, double duration})? scanLoudness(String path) =>
+      loudness;
+
+  @override
+  List<double> waveform(String path, int buckets) => waveformPeaksValue;
+
   final List<PlayerEvent> _events = [];
 
   /// Encola un evento como si lo hubiera emitido el motor.

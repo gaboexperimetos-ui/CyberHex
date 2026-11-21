@@ -22,6 +22,58 @@ class PlayerEvent {
   String toString() => 'PlayerEvent($kind, a: $a, b: $b, value: $value)';
 }
 
+/// Marca de posición persistente de una pista.
+class TrackMarker {
+  const TrackMarker(this.position, this.name);
+
+  final double position;
+  final String name;
+
+  @override
+  bool operator ==(Object other) =>
+      other is TrackMarker && other.position == position && other.name == name;
+
+  @override
+  int get hashCode => Object.hash(position, name);
+
+  @override
+  String toString() => 'TrackMarker($position, $name)';
+}
+
+/// Una pista dentro de una hoja CUE.
+class CueTrack {
+  const CueTrack({
+    required this.number,
+    required this.title,
+    required this.performer,
+    required this.file,
+    required this.start,
+    required this.end,
+  });
+
+  final int number;
+  final String title;
+  final String performer;
+  final String file;
+  final double start;
+  final double end;
+
+  double get duration => end - start;
+}
+
+/// Hoja CUE leída de disco: una imagen de audio dividida en pistas.
+class CueSheet {
+  const CueSheet({
+    required this.album,
+    required this.albumPerformer,
+    required this.tracks,
+  });
+
+  final String album;
+  final String albumPerformer;
+  final List<CueTrack> tracks;
+}
+
 /// Estado visible del reproductor.
 ///
 /// Es inmutable a propósito: el controlador construye una instancia nueva tras
@@ -318,6 +370,45 @@ abstract class PlayerApi {
   ({double lead, double tail})? detectSilence(
           String path, {double thresholdDb = -60}) =>
       null;
+
+  // ---------------------------------------------------------------------------
+  // Biblioteca, marcadores, CUE y utilidades de archivo
+  // ---------------------------------------------------------------------------
+
+  /// Escanea `root` en busca de audio. Devuelve las rutas encontradas y cuántas
+  /// desaparecieron respecto al escaneo anterior, o `null` si falla.
+  ({List<String> tracks, int removed})? scanLibrary(String root) => null;
+
+  /// Marcas guardadas para `track` en el archivo `path`.
+  List<TrackMarker> loadMarkers(String path, String track) => const [];
+
+  /// Reemplaza las marcas de `track` y guarda el archivo.
+  bool saveMarkers(String path, String track, List<TrackMarker> markers) =>
+      false;
+
+  bool removeMarker(String path, String track, int index) => false;
+
+  bool clearMarkers(String path, String track) => false;
+
+  /// Lee una hoja CUE (una imagen dividida en pistas).
+  CueSheet? readCue(String path) => null;
+
+  /// Nombres de los dispositivos de salida del sistema.
+  List<String> get outputDevices => const [];
+
+  /// Dispositivo en uso (-1 = predeterminado del sistema).
+  int get outputDevice => -1;
+  set outputDevice(int index) {}
+
+  /// Sonoridad integrada (LUFS), pico de muestra y duración de un archivo.
+  ({double lufs, double peakDb, double duration})? scanLoudness(String path) =>
+      null;
+
+  /// Picos normalizados para dibujar la forma de onda (`buckets` valores).
+  List<double> waveform(String path, int buckets) => const [];
+
+  /// Versión del núcleo cargado.
+  String get coreVersion => '';
 
   /// Siguiente evento del motor, o `null` si no hay ninguno pendiente.
   PlayerEvent? pollEvent();

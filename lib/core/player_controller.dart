@@ -408,6 +408,44 @@ class PlayerController extends ChangeNotifier {
 
   int get bufferUnderflows => _player.bufferUnderflows;
 
+  // ---------------------------------------------------------------------------
+  // Biblioteca, marcadores, CUE y utilidades de archivo
+  // ---------------------------------------------------------------------------
+
+  ({List<String> tracks, int removed})? scanLibrary(String root) =>
+      _disposed ? null : _player.scanLibrary(root);
+
+  List<TrackMarker> loadMarkers(String path, String track) =>
+      _disposed ? const [] : _player.loadMarkers(path, track);
+
+  bool saveMarkers(String path, String track, List<TrackMarker> markers) =>
+      _disposed ? false : _player.saveMarkers(path, track, markers);
+
+  bool removeMarker(String path, String track, int index) =>
+      _disposed ? false : _player.removeMarker(path, track, index);
+
+  bool clearMarkers(String path, String track) =>
+      _disposed ? false : _player.clearMarkers(path, track);
+
+  CueSheet? readCue(String path) => _disposed ? null : _player.readCue(path);
+
+  List<String> get outputDevices => _player.outputDevices;
+
+  int get outputDevice => _player.outputDevice;
+
+  set outputDevice(int index) {
+    if (_disposed) return;
+    _player.outputDevice = index;
+  }
+
+  ({double lufs, double peakDb, double duration})? scanLoudness(String path) =>
+      _disposed ? null : _player.scanLoudness(path);
+
+  List<double> waveform(String path, int buckets) =>
+      _disposed ? const [] : _player.waveform(path, buckets);
+
+  String get coreVersion => _player.coreVersion;
+
   ({double lead, double tail})? detectSilence(String path,
           {double thresholdDb = -60}) =>
       _disposed ? null : _player.detectSilence(path, thresholdDb: thresholdDb);
