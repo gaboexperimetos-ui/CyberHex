@@ -75,6 +75,10 @@ int32_t ch_engine_previous(ch_engine* engine);
 int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_gapless(ch_engine* engine);
 
+/* Crossfade equal-power entre pistas (0 = desactivado, máximo 12 s). */
+int32_t ch_engine_set_crossfade(ch_engine* engine, float seconds);
+float   ch_engine_crossfade(ch_engine* engine);
+
 /* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB. */
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
@@ -120,6 +124,11 @@ ch_engine_destroy(e);
 - **Gapless** (activado por defecto): al terminar una pista el decodificador
   abre la siguiente sin silencio. `ch_engine_next/previous` saltan de pista;
   `queue_index` refleja la pista que **suena**, no la que se está precargando.
+- **Crossfade**: con `set_crossfade(segundos)` las pistas se solapan con curva
+  equal-power (coseno/seno). Requiere gapless; el último tramo de A se mezcla
+  con el inicio de B en el ring, así que no hay silencio ni salto. La duración
+  reportada de A se acorta en el solape, y la posición avanza de forma continua
+  hacia B.
 - **Play desde el final**: rebobina a 0 automáticamente.
 - **Seek**: relativo al inicio de la pista audible, acotado a su duración. La
   posición se actualiza al instante aunque el audio tarde un bloque.
@@ -145,6 +154,6 @@ creación del motor, p. ej. sin dispositivo de audio).
 
 ## Aún no implementado
 
-Crossfade, velocidad/tono, motor de conversión, descargador y funciones de IA.
-FFmpeg en Android (miniaudio cubre WAV/FLAC/MP3/Vorbis; el resto requiere el
-build con NDK).
+Velocidad/tono, motor de conversión, descargador y funciones de IA. FFmpeg en
+Android (ya compilado en `third_party/ffmpeg-android`; falta enlazarlo en
+`build_android.sh`).

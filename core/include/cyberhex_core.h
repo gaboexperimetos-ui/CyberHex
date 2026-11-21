@@ -41,6 +41,10 @@ int32_t ch_engine_previous(ch_engine* engine);
 int32_t ch_engine_set_gapless(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_gapless(ch_engine* engine);
 
+/* Crossfade entre pistas al pasar de una a otra (0 = desactivado). */
+int32_t ch_engine_set_crossfade(ch_engine* engine, float seconds);
+float   ch_engine_crossfade(ch_engine* engine);
+
 int32_t ch_engine_eq_band_count(void);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);

@@ -11,6 +11,7 @@ const RING_FRAMES: usize = SAMPLE_RATE * 4; // 4 segundos de margen
 const SCRATCH_FRAMES: usize = 4096;
 const NO_SEEK: usize = std.math.maxInt(usize);
 const MAX_SEGMENTS: usize = 256;
+const MAX_XFADE_FRAMES: usize = SAMPLE_RATE * 12;
 
 const ch_decoder = opaque {};
 
@@ -148,6 +149,7 @@ pub const Engine = struct {
     queue_index: usize = 0,
     list_mutex: SpinLock = .{},
     gapless: bool = true,
+    xfade_bits: u32 = @bitCast(@as(f32, 0)),
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
 
     err: [256]u8 = @splat(0),
@@ -200,7 +202,15 @@ pub const Engine = struct {
         self.seg_lock.unlock();
     }
 
-    fn addSegment(self: *Engine, index: usize, d: *ch_decoder) bool {
+    fn crossfadeFrames(self: *Engine) usize {
+        const secs = @as(f32, @bitCast(@atomicLoad(u32, &self.xfade_bits, .monotonic)));
+        if (!(secs > 0)) return 0;
+        const f = secs * @as(f32, @floatFromInt(SAMPLE_RATE));
+        if (f >= @as(f32, @floatFromInt(MAX_XFADE_FRAMES))) return MAX_XFADE_FRAMES;
+        return @intFromFloat(f);
+    }
+
+    fn addSegment(self: *Engine, index: usize, d: *ch_decoder, overlap: usize) bool {
         if (self.seg_count >= MAX_SEGMENTS) return false;
 
         var seg = Segment{};
@@ -234,7 +244,14 @@ pub const Engine = struct {
         }
 
         self.seg_lock.lock();
-        seg.start = self.running_end;
+        if (overlap > 0 and self.seg_count > 0) {
+            const prev = &self.segments[self.seg_count - 1];
+            const real = @min(overlap, prev.end - prev.start);
+            prev.end -= real;
+            seg.start = prev.end;
+        } else {
+            seg.start = self.running_end;
+        }
         seg.end = seg.start + frames;
         self.segments[self.seg_count] = seg;
         self.seg_count += 1;
@@ -385,7 +402,7 @@ pub const Engine = struct {
             return self.fail(if (msg.len == 0) "no se pudo decodificar el archivo" else msg, -2);
         }
         const d = self.decoder.?;
-        _ = self.addSegment(index, d);
+        _ = self.addSegment(index, d, 0);
         @atomicStore(usize, &self.played, 0, .release);
         @atomicStore(bool, &self.eof, false, .release);
         return 0;
@@ -409,7 +426,113 @@ pub const Engine = struct {
         self.list_mutex.unlock();
 
         if (old) |o| ch_decode_close(o);
-        _ = self.addSegment(next, d);
+        _ = self.addSegment(next, d, 0);
+        @atomicStore(bool, &self.eof, false, .release);
+        @atomicStore(bool, &self.playing, true, .release);
+        return true;
+    }
+
+    fn mixCrossfadeIntoRing(self: *Engine, abs_start: usize, head: []const f32, frames: usize) void {
+        var off: usize = 0;
+        while (off < frames) {
+            const chunk = @min(frames - off, self.scratch_frames);
+            const tmp = self.scratch[0 .. chunk * CHANNELS];
+            self.readRingAt(abs_start + off, tmp);
+            var i: usize = 0;
+            while (i < chunk) : (i += 1) {
+                const t = @as(f32, @floatFromInt(off + i)) / @as(f32, @floatFromInt(frames));
+                const angle = t * (std.math.pi / 2.0);
+                const fade_out = @cos(angle);
+                const fade_in = @sin(angle);
+                const src = head[(off + i) * CHANNELS ..][0..CHANNELS];
+                var c: usize = 0;
+                while (c < CHANNELS) : (c += 1) {
+                    tmp[i * CHANNELS + c] = tmp[i * CHANNELS + c] * fade_out + src[c] * fade_in;
+                }
+            }
+            self.writeRingAt(abs_start + off, tmp);
+            off += chunk;
+        }
+    }
+
+    fn crossfadeIntoNext(self: *Engine) bool {
+        const want = self.crossfadeFrames();
+        if (want == 0) return false;
+
+        var prev_end: usize = 0;
+        var a_frames: usize = 0;
+        self.seg_lock.lock();
+        if (self.seg_count == 0) {
+            self.seg_lock.unlock();
+            return false;
+        }
+        prev_end = self.segments[self.seg_count - 1].end;
+        a_frames = prev_end - self.segments[self.seg_count - 1].start;
+        self.seg_lock.unlock();
+
+        self.list_mutex.lock();
+        const next = self.queue_index + 1;
+        if (next >= self.playlist.items.len) {
+            self.list_mutex.unlock();
+            return false;
+        }
+        const path = self.playlist.items[next];
+        const d = ch_decode_open(path.ptr, SAMPLE_RATE, CHANNELS) orelse {
+            self.list_mutex.unlock();
+            return false;
+        };
+        self.list_mutex.unlock();
+
+        const b_seconds = ch_decode_duration(d);
+        var b_frames: usize = if (b_seconds > 0) @intFromFloat(b_seconds * SAMPLE_RATE) else 0;
+        if (b_frames == 0) b_frames = SAMPLE_RATE;
+
+        const w = @atomicLoad(usize, &self.ring.write, .acquire);
+        const r = @atomicLoad(usize, &self.ring.read, .acquire);
+        var avail = w -% r;
+        if (avail > self.ring.cap) avail = 0;
+
+        var overlap = @min(want, @min(a_frames, b_frames));
+        const margin: usize = SAMPLE_RATE / 2;
+        if (avail > margin) {
+            overlap = @min(overlap, avail - margin);
+        } else {
+            overlap = 0;
+        }
+        const min_overlap: usize = SAMPLE_RATE / 50;
+        if (overlap < min_overlap) {
+            ch_decode_close(d);
+            return false;
+        }
+
+        const head = self.allocator.alloc(f32, overlap * CHANNELS) catch {
+            ch_decode_close(d);
+            return false;
+        };
+        defer self.allocator.free(head);
+
+        var got: usize = 0;
+        while (got < overlap) {
+            const n = ch_decode_read(d, head.ptr + got * CHANNELS, overlap - got);
+            if (n == 0) break;
+            got += @intCast(n);
+        }
+        if (got < min_overlap) {
+            ch_decode_close(d);
+            return false;
+        }
+        overlap = got;
+
+        const old = self.decoder;
+        self.decoder = d;
+        self.list_mutex.lock();
+        self.queue_index = next;
+        self.list_mutex.unlock();
+
+        self.mixCrossfadeIntoRing(w - overlap, head, overlap);
+        _ = self.addSegment(next, d, overlap);
+
+        if (old) |o| ch_decode_close(o);
         @atomicStore(bool, &self.eof, false, .release);
         @atomicStore(bool, &self.playing, true, .release);
         return true;
@@ -556,8 +679,9 @@ fn decoderLoop(self: *Engine) void {
 
         const got = ch_decode_read(d, self.scratch.ptr, self.scratch_frames);
         if (got == 0) {
-            if (@atomicLoad(bool, &self.gapless, .acquire) and self.openNextAuto()) {
-                continue;
+            if (@atomicLoad(bool, &self.gapless, .acquire)) {
+                if (self.crossfadeIntoNext()) continue;
+                if (self.openNextAuto()) continue;
             }
             @atomicStore(bool, &self.eof, true, .release);
             continue;
@@ -795,6 +919,18 @@ export fn ch_engine_set_gapless(self: ?*Engine, enabled: i32) i32 {
 export fn ch_engine_gapless(self: ?*Engine) i32 {
     const e = self orelse return 0;
     return if (@atomicLoad(bool, &e.gapless, .acquire)) 1 else 0;
+}
+
+export fn ch_engine_set_crossfade(self: ?*Engine, seconds: f32) i32 {
+    const e = self orelse return -1;
+    const secs = std.math.clamp(seconds, 0, 12);
+    @atomicStore(u32, &e.xfade_bits, @bitCast(@as(f32, secs)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_crossfade(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return @bitCast(@atomicLoad(u32, &e.xfade_bits, .monotonic));
 }
 
 export fn ch_engine_seek(self: ?*Engine, seconds: f64) i32 {
