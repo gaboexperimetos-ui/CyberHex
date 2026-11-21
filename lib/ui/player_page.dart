@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
@@ -24,6 +25,8 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
   final _position = ValueNotifier<double>(0);
   double _dragPosition = 0;
   bool _dragging = false;
+  bool _busy = false;
+  Future<bool>? _loading;
   double _volume = 1;
 
   late final AnimationController _spin = AnimationController(
@@ -58,26 +61,39 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
     if (!_dragging) {
       _position.value = player.position;
     }
-    if (player.isPlaying && !_spin.isAnimating) {
+    // Si la pista trae carátula, el disco se queda quieto y no gastamos frames.
+    final shouldSpin = player.isPlaying && player.cover == null && !_busy;
+    if (shouldSpin && !_spin.isAnimating) {
       _spin.repeat();
-    } else if (!player.isPlaying && _spin.isAnimating) {
+    } else if (!shouldSpin && _spin.isAnimating) {
       _spin.stop();
     }
     setState(() {});
   }
 
   Future<void> _openFile() async {
+    if (_busy) {
+      return;
+    }
     const group = XTypeGroup(
       label: 'Audio',
       extensions: ['mp3', 'flac', 'wav', 'ogg', 'opus', 'm4a', 'aac', 'aiff'],
     );
     final file = await openFile(acceptedTypeGroups: const [group]);
     final player = _player;
-    if (file == null || player == null) {
+    if (file == null || player == null || !mounted) {
       return;
     }
-    final ok = player.load(file.path);
-    if (!ok && mounted) {
+    setState(() => _busy = true);
+    final loading = player.loadAsync(file.path);
+    _loading = loading;
+    final ok = await loading;
+    _loading = null;
+    if (!mounted) {
+      return;
+    }
+    setState(() => _busy = false);
+    if (!ok) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(player.lastError)),
       );
@@ -92,7 +108,15 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
     _poll?.cancel();
     _spin.dispose();
     _position.dispose();
-    _player?.dispose();
+    final player = _player;
+    final pending = _loading;
+    if (pending != null) {
+      // La carga corre en otro isolate: liberar el motor antes de que termine
+      // dejaría un puntero colgado.
+      pending.whenComplete(() => player?.dispose());
+    } else {
+      player?.dispose();
+    }
     super.dispose();
   }
 
@@ -110,6 +134,7 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
         actions: {
           _ToggleIntent: CallbackAction<_ToggleIntent>(
             onInvoke: (_) {
+              if (_busy) return null;
               player.toggle();
               setState(() {});
               return null;
@@ -141,6 +166,8 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
                           spin: _spin,
                           playing: player.isPlaying,
                           hasTrack: player.hasTrack,
+                          cover: player.cover,
+                          busy: _busy,
                         ),
                         const SizedBox(height: 28),
                         _TrackInfo(player: player, onOpen: _openFile),
@@ -164,6 +191,7 @@ class _PlayerPageState extends State<PlayerPage> with SingleTickerProviderStateM
                         const SizedBox(height: 8),
                         _Controls(
                           player: player,
+                          busy: _busy,
                           onToggle: () {
                             player.toggle();
                             setState(() {});
@@ -231,15 +259,24 @@ class _Header extends StatelessWidget {
 }
 
 class _Disc extends StatelessWidget {
-  const _Disc({required this.spin, required this.playing, required this.hasTrack});
+  const _Disc({
+    required this.spin,
+    required this.playing,
+    required this.hasTrack,
+    this.cover,
+    this.busy = false,
+  });
 
   final AnimationController spin;
   final bool playing;
   final bool hasTrack;
+  final Uint8List? cover;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final image = cover;
     return Center(
       child: SizedBox(
         width: 260,
@@ -259,44 +296,77 @@ class _Disc extends StatelessWidget {
                 ],
               ),
             ),
-            RotationTransition(
-              turns: reduceMotion ? const AlwaysStoppedAnimation(0.1) : spin,
-              child: Container(
+            if (image != null)
+              ClipOval(
+                child: Image.memory(
+                  image,
+                  width: 236,
+                  height: 236,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  cacheWidth: 472,
+                  errorBuilder: (_, __, ___) => _vinyl(reduceMotion, hasTrack),
+                ),
+              )
+            else
+              _vinyl(reduceMotion, hasTrack),
+            if (busy)
+              Container(
                 width: 236,
                 height: 236,
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: const SweepGradient(
-                    colors: [
-                      Color(0xFF312E81),
-                      Color(0xFF0F0F23),
-                      Color(0xFF22C55E),
-                      Color(0xFF0F0F23),
-                      Color(0xFF312E81),
-                    ],
-                    stops: [0, 0.3, 0.5, 0.7, 1],
-                  ),
-                  border: Border.all(color: chBorder, width: 1),
+                  color: Color(0xAA0F0F23),
                 ),
-                child: Center(
-                  child: Container(
-                    width: 78,
-                    height: 78,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: chBackground,
-                      border: Border.all(color: chBorder),
-                    ),
-                    child: Icon(
-                      hasTrack ? Icons.graphic_eq_rounded : Icons.music_note_rounded,
-                      size: 34,
-                      color: hasTrack ? chAccent : chMuted,
-                    ),
+                child: const Center(
+                  child: SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: CircularProgressIndicator(strokeWidth: 3),
                   ),
                 ),
               ),
-            ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _vinyl(bool reduceMotion, bool hasTrack) {
+    return RotationTransition(
+      turns: reduceMotion ? const AlwaysStoppedAnimation(0.1) : spin,
+      child: Container(
+        width: 236,
+        height: 236,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const SweepGradient(
+            colors: [
+              Color(0xFF312E81),
+              Color(0xFF0F0F23),
+              Color(0xFF22C55E),
+              Color(0xFF0F0F23),
+              Color(0xFF312E81),
+            ],
+            stops: [0, 0.3, 0.5, 0.7, 1],
+          ),
+          border: Border.all(color: chBorder, width: 1),
+        ),
+        child: Center(
+          child: Container(
+            width: 78,
+            height: 78,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: chBackground,
+              border: Border.all(color: chBorder),
+            ),
+            child: Icon(
+              hasTrack ? Icons.graphic_eq_rounded : Icons.music_note_rounded,
+              size: 34,
+              color: hasTrack ? chAccent : chMuted,
+            ),
+          ),
         ),
       ),
     );
@@ -340,6 +410,9 @@ class _TrackInfo extends StatelessWidget {
       );
     }
 
+    final artist = player.artist;
+    final album = player.album;
+    final subtitle = [artist, album].where((s) => s.isNotEmpty).join(' · ');
     return Column(
       children: [
         Text(
@@ -349,9 +422,19 @@ class _TrackInfo extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
         ),
+        if (subtitle.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: chForeground, fontSize: 13),
+          ),
+        ],
         const SizedBox(height: 6),
         Text(
-          '${player.duration.toStringAsFixed(0)} s · motor nativo 48 kHz',
+          '${_clock(player.duration)} · motor nativo 48 kHz',
           style: const TextStyle(color: chMuted, fontSize: 12, letterSpacing: 0.4),
         ),
       ],
@@ -421,15 +504,21 @@ class _SeekBar extends StatelessWidget {
 }
 
 class _Controls extends StatelessWidget {
-  const _Controls({required this.player, required this.onToggle, required this.onSeek});
+  const _Controls({
+    required this.player,
+    required this.onToggle,
+    required this.onSeek,
+    this.busy = false,
+  });
 
   final NativePlayer player;
   final VoidCallback onToggle;
   final ValueChanged<double> onSeek;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
-    final enabled = player.hasTrack;
+    final enabled = player.hasTrack && !busy;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
