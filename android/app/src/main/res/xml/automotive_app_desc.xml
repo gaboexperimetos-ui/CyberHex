@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declaración para Android Auto / Automotive: CyberHex es una app de MEDIA que
+  publica un MediaBrowserService. Sin este archivo el sistema de automóvil no
+  muestra la app en la lista de fuentes de audio.
+-->
+<automotiveApp xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses name="media" />
+</automotiveApp>

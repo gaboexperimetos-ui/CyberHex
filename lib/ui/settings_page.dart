@@ -3,10 +3,13 @@ import 'package:material_ui/material_ui.dart';
 import '../core/theme_controller.dart';
 import '../theme.dart';
 
-/// Ajustes de aspecto y gestos.
+/// Ajustes de aspecto, gestos y capa Android.
 ///
 /// Todo lo que hay aquí lo aplica [ThemeController] en caliente: no hay botón de
 /// guardar porque no hay nada que confirmar (se guarda solo, con antirrebote).
+/// La sección «Notificación y auriculares» viaja además a Kotlin con el método
+/// `configure` del canal `cyberhex/media`, porque la leen el servicio, el widget
+/// y el azulejo rápido sin la app abierta.
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.theme});
 
@@ -107,6 +110,40 @@ class SettingsPage extends StatelessWidget {
                         'de ${PlayerAction.values.length} botones.',
                 style: TextStyle(fontSize: 11, color: palette.muted),
               ),
+              const _Section('Notificación y auriculares'),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: theme.autoPlayOnConnect,
+                onChanged: theme.setAutoPlayOnConnect,
+                title: const Text(
+                  'Auto-play al conectar',
+                  style: TextStyle(fontSize: 14),
+                ),
+                subtitle: Text(
+                  'Si había una pista en pausa, arranca al enchufar auriculares '
+                  'o conectar Bluetooth (Android).',
+                  style: TextStyle(fontSize: 11, color: palette.muted),
+                ),
+              ),
+              for (final action in MediaAction.values)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: action == MediaAction.toggle ||
+                      theme.mediaActions.contains(action),
+                  onChanged: action == MediaAction.toggle
+                      ? null
+                      : (_) => theme.toggleMediaAction(action),
+                  title: Text(action.label, style: const TextStyle(fontSize: 14)),
+                  subtitle: action == MediaAction.toggle
+                      ? Text(
+                          'Siempre presente.',
+                          style: TextStyle(fontSize: 11, color: palette.muted),
+                        )
+                      : null,
+                  controlAffinity: ListTileControlAffinity.trailing,
+                ),
               const _Section('Acerca de'),
               Text(
                 'CyberHex · motor propio (Zig + C23) · Flutter\n'

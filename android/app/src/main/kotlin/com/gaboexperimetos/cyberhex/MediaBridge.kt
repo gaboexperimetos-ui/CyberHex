@@ -35,8 +35,9 @@ class TrackMetadata(
  * pinta la notificación/MediaSession y reenvía botones.
  *
  * Direcciones:
- *  * Dart → Kotlin: `updateMetadata`, `updateState` (+ reservados `setQueue`,
- *    `start`, `stop` de la v1.1; hoy se ignoran con `notImplemented`).
+ *  * Dart → Kotlin: `updateMetadata`, `updateState`, `configure` (auto-play al
+ *    conectar y acciones de la notificación; se guardan en `SharedPreferences`
+ *    porque también los leen el widget y el azulejo).
  *  * Kotlin → Dart: `play`, `pause`, `toggle`, `next`, `previous`, `seek`
  *    (segundos, double), `setVolume` (0..1, double), `duck` (bool).
  *
@@ -68,6 +69,19 @@ object MediaBridge {
     val isServiceAlive: Boolean
         get() = serviceRef?.get() != null
 
+    /**
+     * ¿Dart ya montó su lado del canal?
+     *
+     * Se pone en `true` al recibir la primera llamada (`updateMetadata` sale
+     * nada más construir `MediaSessionChannel`) y vuelve a `false` en
+     * [disconnect]. El servicio lo consulta antes de mandar un comando que
+     * viene de fuera (widget, azulejo, notificación): si nadie escucha, abre la
+     * app en vez de perder el botón.
+     */
+    @Volatile
+    var dartReady: Boolean = false
+        private set
+
     // -------------------------------------------------------------------------
     // Ciclo de vida del canal
     // -------------------------------------------------------------------------
@@ -85,6 +99,7 @@ object MediaBridge {
 
         val methodChannel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
         methodChannel.setMethodCallHandler { call, result ->
+            dartReady = true
             when (call.method) {
                 "updateMetadata" -> {
                     val parsed = parseMetadata(call.arguments)
@@ -107,6 +122,14 @@ object MediaBridge {
                     result.success(true)
                 }
 
+                "configure" -> {
+                    // Ajustes que el usuario cambió en SettingsPage: auto-play
+                    // al conectar y qué botones lleva la notificación.
+                    val changed = MediaSettings.apply(appContext ?: context, call.arguments)
+                    if (changed) serviceRef?.get()?.onSettingsChanged()
+                    result.success(true)
+                }
+
                 else -> result.notImplemented()
             }
         }
@@ -118,6 +141,7 @@ object MediaBridge {
     fun disconnect() {
         channel?.setMethodCallHandler(null)
         channel = null
+        dartReady = false
     }
 
     // -------------------------------------------------------------------------

@@ -14,7 +14,10 @@ import '../core/player_controller.dart';
 ///  * **Dart → Kotlin**: `updateMetadata` cuando cambia la pista o sus
 ///    etiquetas/carátula, `updateState` cuando cambia play/pausa/buffering o
 ///    cambia el **segundo entero** de la posición (throttle de 1 s: la posición
-///    va a 12,5 Hz y no tiene sentido cruzar el canal a ese ritmo).
+///    va a 12,5 Hz y no tiene sentido cruzar el canal a ese ritmo) y
+///    `configure` cuando el usuario cambia el auto-play al conectar o los
+///    botones de la notificación (el lado Kotlin los guarda en
+///    `SharedPreferences` porque también los leen el widget y el azulejo).
 ///  * **Kotlin → Dart**: `play`, `pause`, `toggle`, `next`, `previous`, `seek`
 ///    (segundos), `setVolume` (0..1) y `duck` (bool).
 ///
@@ -134,6 +137,20 @@ class MediaSessionChannel {
       'positionMs': positionMs,
       'durationMs': durationMs,
       'buffering': buffering,
+    });
+  }
+
+  /// Manda los ajustes que la capa Android usa sin la app abierta.
+  ///
+  /// Idempotente: repetirlo con los mismos valores no molesta (Kotlin solo
+  /// repinta si cambió algo).
+  void updateMediaSettings({
+    required bool autoPlayOnConnect,
+    required Iterable<String> notificationActions,
+  }) {
+    _send('configure', <String, Object?>{
+      'autoPlayOnConnect': autoPlayOnConnect,
+      'notificationActions': notificationActions.toList(growable: false),
     });
   }
 

@@ -31,8 +31,31 @@ enum PlayerAction {
   }
 }
 
-/// Ajustes visuales de la app: tema, color dinámico, estilo de carátula, modo
-/// bolsillo y qué botones van en la barra rápida.
+/// Acciones que pueden ir en la notificación de Android.
+///
+/// `toggle` está siempre: una notificación de reproducción sin play/pausa no
+/// sirve, así que [ThemeController.toggleMediaAction] no deja quitarla.
+enum MediaAction {
+  previous('Anterior'),
+  toggle('Reproducir / pausa'),
+  next('Siguiente'),
+  stop('Cerrar');
+
+  const MediaAction(this.label);
+
+  final String label;
+
+  static MediaAction? fromName(String? name) {
+    for (final action in MediaAction.values) {
+      if (action.name == name) return action;
+    }
+    return null;
+  }
+}
+
+/// Ajustes de la app: tema, color dinámico, estilo de carátula, modo bolsillo,
+/// barra rápida y lo que la capa Android hace sin abrir la app (auto-play al
+/// conectar auriculares y botones de la notificación).
 ///
 /// Se guardan en `theme.json` (mismo patrón que la sesión: `.tmp` + `rename`) y
 /// se avisa a quien escuche con [ChangeNotifier]: `main.dart` reconstruye el
@@ -53,6 +76,13 @@ class ThemeController extends ChangeNotifier {
   CoverStyle _coverStyle = CoverStyle.spinningDisc;
   final Set<PlayerAction> _actions = <PlayerAction>{...PlayerAction.values};
 
+  bool _autoPlayOnConnect = false;
+  final Set<MediaAction> _mediaActions = <MediaAction>{
+    MediaAction.previous,
+    MediaAction.toggle,
+    MediaAction.next,
+  };
+
   /// Acento sacado de la carátula (solo si [dynamicColor]).
   Color? _coverAccent;
   String _coverFingerprint = '';
@@ -70,6 +100,15 @@ class ThemeController extends ChangeNotifier {
   CoverStyle get coverStyle => _coverStyle;
 
   Set<PlayerAction> get actions => Set<PlayerAction>.unmodifiable(_actions);
+
+  /// ¿Arrancar la reproducción al enchufar auriculares o conectar Bluetooth?
+  bool get autoPlayOnConnect => _autoPlayOnConnect;
+
+  /// Botones de la notificación, en el orden canónico del enum.
+  List<MediaAction> get mediaActions => <MediaAction>[
+        for (final action in MediaAction.values)
+          if (_mediaActions.contains(action)) action,
+      ];
 
   Color? get coverAccent => _coverAccent;
 
@@ -129,6 +168,27 @@ class ThemeController extends ChangeNotifier {
     _actions
       ..clear()
       ..addAll(actions);
+    _touch();
+  }
+
+  void setAutoPlayOnConnect(bool value) {
+    if (value == _autoPlayOnConnect) return;
+    _autoPlayOnConnect = value;
+    _touch();
+  }
+
+  /// Enciende o apaga un botón de la notificación. `toggle` no se puede quitar.
+  void toggleMediaAction(MediaAction action) {
+    if (action == MediaAction.toggle) return;
+    if (!_mediaActions.remove(action)) _mediaActions.add(action);
+    _touch();
+  }
+
+  void setMediaActions(Iterable<MediaAction> actions) {
+    _mediaActions
+      ..clear()
+      ..addAll(actions)
+      ..add(MediaAction.toggle);
     _touch();
   }
 
@@ -242,6 +302,18 @@ class ThemeController extends ChangeNotifier {
       _dynamicColor = decoded['dynamicColor'] == true;
       _pocketMode = decoded['pocket'] == true;
       _coverStyle = CoverStyle.fromName(decoded['coverStyle'] as String?);
+      _autoPlayOnConnect = decoded['autoPlayOnConnect'] == true;
+      final mediaActions = decoded['mediaActions'];
+      if (mediaActions is List) {
+        final parsed = <MediaAction>{
+          for (final name in mediaActions)
+            if (MediaAction.fromName(name is String ? name : null) != null)
+              MediaAction.fromName(name as String)!,
+        }..add(MediaAction.toggle);
+        _mediaActions
+          ..clear()
+          ..addAll(parsed);
+      }
       final actions = decoded['actions'];
       if (actions is List) {
         final parsed = <PlayerAction>{
@@ -289,6 +361,8 @@ class ThemeController extends ChangeNotifier {
         'pocket': _pocketMode,
         'coverStyle': _coverStyle.name,
         'actions': <String>[for (final action in _actions) action.name],
+        'autoPlayOnConnect': _autoPlayOnConnect,
+        'mediaActions': <String>[for (final action in mediaActions) action.name],
       };
       final temp = File('${target.path}.tmp');
       await temp.writeAsString(jsonEncode(payload), flush: true);

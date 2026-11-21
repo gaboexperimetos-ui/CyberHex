@@ -36,7 +36,7 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **16 176 líneas Dart** + **4 468 de tests** (181 casos). Estado
+- App: **16 321 líneas Dart** + **4 619 de tests** (187 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
@@ -71,7 +71,7 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                 16 176 líneas
+lib/                        app Flutter                                 16 321 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
@@ -99,7 +99,7 @@ lib/                        app Flutter                                 16 176 l
   ui/hearing_test_sheet.dart  prueba de audición por bandas → compensación
   ui/{player_page,eq_sheet,queue_sheet,library_page,core_error_screen}.dart
   main.dart                 crea motor + controlador (o recibe uno inyectado)
-test/                       181 tests Dart                             4 468 líneas
+test/                       187 tests Dart                             4 619 líneas
 android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MainActivity.kt         52 líneas, canal + permisos
   app/src/main/kotlin/…/MediaBridge.kt         205 líneas, canal y cola de comandos
@@ -551,6 +551,48 @@ lleva su propio *action* y *requestCode* para no colisionar.
 > de audio. Se extiende `android.app.Application` y no `FlutterApplication`
 > (deprecada desde Flutter 3.29; era una subclase vacía de `Application`).
 
+#### Fase 6B (pedido 7): widget, azulejo, coche y botones del casco
+
+Todo esto vive en `android/` y **no añade ni un paquete**: solo API del sistema.
+Ninguna de estas piezas reproduce audio; mandan comandos al
+`MediaSessionService`, que es el único que habla con Dart.
+
+| Pieza | Qué hace |
+|---|---|
+| `MediaSettings.kt` (234) | Preferencias que Android lee **sin la app abierta**: auto-play al conectar y botones de la notificación. `SharedPreferences` (`cyberhex_media`), porque las leen servicio, widget y azulejo. `MediaAction` (anterior / play-pausa / siguiente / cerrar) con orden canónico y `toggle` obligatorio. Método `apply` para el `configure` que manda Dart. |
+| `PlaybackCache` (mismo archivo) | Última pista conocida (título, artista, álbum, sonando, posición, duración) + carátula en `filesDir/widget_art.png`. El servicio la vuelca al cambiar play/pausa o cada 5 s de posición, no en cada latido. |
+| `CyberHexWidgetProvider.kt` (186) | Widget **4x1**: carátula, título, anterior / play-pausa / siguiente y progreso. `RemoteViews` con widgets del sistema. `PendingIntent` a `MediaSessionService` con `FLAG_IMMUTABLE` desde M. `CyberHexWidgetLargeProvider` = 4x2 (carátula 72 dp y barra). |
+| `CyberHexTileService.kt` (72) | Azulejo de ajustes rápidos, `@RequiresApi(N)`; icono e estado desde `PlaybackCache`, toque → `toggle`/`play`. |
+| `CyberHexBrowserService.kt` (109) | `android.service.media.MediaBrowserService` **del sistema** (API 21+, sin AndroidX) para Android Auto: raíz `cyberhex_root` → `cyberhex_now` con la pista actual. El transporte lo pone el token de la `MediaSession`. |
+| `res/xml/automotive_app_desc.xml` | `<automotiveApp><uses name="media"/></automotiveApp>` en el manifiesto (`com.google.android.gms.car.application`): sin esto el coche no lista la app. |
+
+Cambios en `MediaSessionService` (779) y `MediaBridge` (232):
+
+- **Doble y triple pulsación** del botón del casco
+  (`onMediaButtonEvent`): 1 → play/pausa, 2 → siguiente, 3 → anterior, con
+  ventana de 420 ms. Un clic tarda ese margen en actuar: es el precio de
+  distinguir 1 de 2.
+- **Auto-play al conectar** (`ACTION_HEADSET_PLUG` y
+  `BluetoothDevice.ACTION_ACL_CONNECTED`, receptor dinámico
+  `RECEIVER_NOT_EXPORTED`): solo si el usuario lo activó, hay pista en pausa y
+  nada sonando ya. La clavija no se usa para pausar: de eso se encarga
+  `ACTION_AUDIO_BECOMING_NOISY`.
+- **Acciones de la notificación elegibles**: se pintan en el orden canónico y la
+  vista compacta usa las tres primeras; «Cerrar» manda `stop` → `pause` a Dart y
+  `stopSelf()`.
+- **`configure`** en el canal `cyberhex/media`: Dart empuja auto-play y botones
+  al arrancar y en cada cambio de `ThemeController`; Kotlin solo repinta si algo
+  cambió.
+- **`dartReady`**: el servicio sabe si Dart tiene manejador. Si un toque del
+  widget o del azulejo llega sin nadie escuchando, **abre la app** en vez de
+  perder el comando (el motor arranca, `MainActivity` monta el canal y la sesión
+  se restaura).
+
+Límites conocidos (R30–R32): sin SDK de Android no se compilan ni se ejecutan
+estas piezas aquí; el `MediaBrowserService` solo publica la pista actual (no hay
+catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesita
+`BLUETOOTH_CONNECT` concedido a mano (el de la clavija no).
+
 ---
 
 ## 7. Verificación
@@ -564,7 +606,7 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | `.so` aarch64 | `zig build-lib … -target aarch64-linux-gnu -mcpu cortex_a73` | 3,9 MB |
 | Humo con audio real | `cd core && zig build smoke` | 0 fallos (RMS 0.4997, pausa 0.4000→0.4000, loop 10/10) |
 | Sintaxis C | `gcc -fsyntax-only -std=c2x -Wall -Wextra` | limpio |
-| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 46/46 sin errores |
+| Sintaxis Dart | tree-sitter-dart sobre `lib/` y `test/` | 47/47 sin errores |
 | Firmas de `PlayerApi` | comprobador propio: 112 miembros en `NativePlayer` y `FakePlayer` | 112/112 en ambos |
 | Tests del núcleo | `cd core && zig build test -Ddecoder=miniaudio` | 31/31 |
 | Prueba de humo | `cd core && zig build smoke -Dsmoke-dir=/tmp` | 0 fallos |
@@ -692,6 +734,9 @@ lleva su propio *action* y *requestCode* para no colisionar.
 | R22 | UI sin verificación visual | no hay SDK de Flutter aquí: la sintaxis se parsea con tree-sitter (27/27), las firmas que usa la UI se comprueban contra `PlayerController`/`PlayerSnapshot` por regex y los 14 tests de widget se escriben pero **no se ejecutan**. Alturas, desbordes y contraste los tiene que ver el usuario | `test/audio_lab_test.dart` |
 | R28 | Paleta solo en parte de la app | el reproductor, el mini-reproductor y los ajustes leen `paletteOf(context)`; el resto de pantallas siguen con las constantes neón, así que el tema Claro se ve a medias fuera del reproductor | `lib/ui/` |
 | R29 | Gestos sin probar en pantalla táctil | doble toque, arrastres y modo bolsillo están probados simulados en `flutter test`; falta verlos con el dedo (zonas, umbrales de velocidad y pulsación larga) | `player_page.dart` |
+| R30 | Widget, azulejo y `MediaBrowserService` sin compilar ni ejecutar | escritos contra la API del sistema (sin AndroidX ni paquetes nuevos), pero aquí no hay JDK/Gradle/emulador: faltan por verificar el aspecto real de los `RemoteViews`, que el lanzador acepte los dos `<receiver>` y que Android Auto liste la app | `android/app/src/main/` |
+| R31 | El navegador de medios solo publica la pista actual | `onLoadChildren` devuelve `cyberhex_now` (título, artista, álbum) desde `PlaybackCache`; no hay catálogo ni carpetas porque la biblioteca vive en Dart y no se puede consultar de forma síncrona desde Kotlin | `CyberHexBrowserService.kt` |
+| R32 | Auto-play por Bluetooth condicionado a un permiso | `ACTION_ACL_CONNECTED` solo se entrega con `BLUETOOTH_CONNECT` (Android 12+), que se declara pero no se pide en runtime: si el usuario no lo concede, ese auto-play no ocurre (el de la clavija sí) | `MediaSessionService.kt` |
 | R26 | Descargas sin verificar en red real | el descargador se prueba contra un `HttpServer` local y contra los parsers del JSON de Archive; falta comprobar la API real (límites, ítems enormes, redirecciones) y que el archivo descargado suene | `audio_downloader.dart` |
 | R27 | Automix sin audio real | el plan y la máquina de estados están probados con un `BpmProbe` inyectado; falta oír una mezcla de verdad y decidir si ±8 % es el límite bueno | `automix_engine.dart` |
 | R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
@@ -754,9 +799,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (42 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (43 commits + fusión de `main` desde `eca1490`)
 
 ```
+FASE 6B → android: widget 4x1/4x2, azulejo, coche, doble clic del casco y auto-play
 FASE 6A → app(ui): cuatro temas, color de carátula, gestos, mini-reproductor y bolsillo
 FASE 5 → app(ui): listas .m3u, cinco colas, automix, estadísticas y descargas
 FASE 4 → app(ui): letras sincronizadas, estudio .lrc, etiquetas y tarjetas compartibles

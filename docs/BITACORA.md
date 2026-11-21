@@ -18,6 +18,61 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 20 · FASE 6B, pedido 7 de 10: widget, azulejo, coche y botones del casco
+
+- **PEDIDO:** widgets 4x1/4x2 desde el `MediaSessionService` con `PendingIntent`
+  `FLAG_IMMUTABLE` según SDK; `CyberHexTileService` con `@RequiresApi(N)`;
+  `ACTION_MEDIA_BUTTON` con doble clic → siguiente y triple → anterior;
+  auto-play configurable al conectar clavija/Bluetooth; acciones de la
+  notificación elegibles; `CyberHexBrowserService` + `automotive_app_desc.xml`.
+  PROHIBIDO `build.gradle.kts`, `settings.gradle.kts` y Maven nuevo.
+  RIESGO ACEPTABLE (sí).
+- **HECHO:**
+  - `android/…/MediaSettings.kt` (234, nuevo): `MediaAction` con orden canónico y
+    `toggle` obligatorio, `SharedPreferences` `cyberhex_media` (auto-play y
+    botones), `apply` para el `configure` de Dart y `PlaybackCache` (última pista
+    en preferencias + carátula en `filesDir/widget_art.png`).
+  - `CyberHexWidgetProvider.kt` (186, nuevo): 4x1 con carátula, título,
+    anterior/play-pausa/siguiente y progreso; `CyberHexWidgetLargeProvider` 4x2;
+    `PendingIntent`s con `FLAG_IMMUTABLE` desde M; `refreshAll` repinta las dos
+    variantes.
+  - `CyberHexTileService.kt` (72, nuevo): `@RequiresApi(N)`, icono y estado desde
+    `PlaybackCache`, toque → `toggle`/`play`, `refresh` con
+    `requestListeningState`.
+  - `CyberHexBrowserService.kt` (109, nuevo): `MediaBrowserService` del sistema,
+    raíz `cyberhex_root` → `cyberhex_now`, token de la `MediaSession`.
+  - `MediaSessionService.kt` (779): doble/triple clic del casco con ventana de
+    420 ms, auto-play por `ACTION_HEADSET_PLUG`/`ACTION_ACL_CONNECTED`, acciones
+    de notificación elegibles (compacta = tres primeras), «Cerrar» → `stop`,
+    token publicado para el coche, caché del widget cada 5 s, `dartReady` para
+    abrir la app si nadie escucha y `openApp()`.
+  - `MediaBridge.kt` (232): `configure` + `dartReady`; `ThemeController` gana
+    `autoPlayOnConnect` y `mediaActions` (JSON v1, sin migración: campos
+    ausentes = valores por defecto); `MediaSessionChannel.updateMediaSettings`;
+    `main.dart` empuja los ajustes al arrancar y en cada cambio; `SettingsPage`
+    con la sección «Notificación y auriculares».
+  - `res/`: `layout/widget_small.xml`, `layout/widget_large.xml`,
+    `xml/widget_{small,large}_info.xml`, `xml/automotive_app_desc.xml`,
+    `drawable/widget_background.xml`, `drawable/ic_tile_{play,pause}.xml`,
+    `values/strings.xml`. Manifiesto: dos `<receiver>` de widget, azulejo con
+    `BIND_QUICK_SETTINGS_TILE`, navegador con `BIND_MEDIA_BROWSER_SERVICE`,
+    `meta-data` de Android Auto y `BLUETOOTH_CONNECT`.
+  - `test/media_settings_test.dart` (143): **6 casos** (ajustes, JSON viejo,
+    `configure`, `SettingsPage`).
+- **VERIFICADO:** tree-sitter **47/47 sin errores**; paridad `PlayerApi` 112/112;
+  los 8 Kotlin con llaves y paréntesis balanceados; los 9 XML nuevos parsean.
+  Cifras: `lib` 16 321, `test` 4 619, **187 casos**.
+- **NO VERIFICABLE AQUÍ:** sin JDK, Gradle ni emulador no se compila nada de
+  `android/`: `RemoteViews`, el par de `<receiver>`, el azulejo en API 24+ y
+  Android Auto quedan para el usuario (**R30**); el navegador solo publica la
+  pista actual (**R31**); el auto-play por Bluetooth necesita
+  `BLUETOOTH_CONNECT` concedido (**R32**); `androidx.annotation.RequiresApi` se
+  da por disponible vía `flutter_embedding`.
+- **COMMITS:** este turno, un commit en `android/`, `lib/`, `test/` y `docs/`.
+- **ABIERTO / RIESGOS:** R30, R31, R32. Pendientes los pedidos 8–10.
+
+---
+
 ## 2026-11-21 · turno 19 · FASE 6A, pedido 6 de 10: temas, carátula, gestos, mini-reproductor y bolsillo
 
 - **PEDIDO:** cuatro temas + color dinámico de carátula, cuatro estilos de

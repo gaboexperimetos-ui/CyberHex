@@ -90,7 +90,23 @@ class _CyberHexAppState extends State<CyberHexApp> {
   /// los botones de la pantalla de bloqueo al controlador.
   void _attachMediaSession(PlayerController controller) {
     if (!Platform.isAndroid) return;
-    _mediaSession = MediaSessionChannel(controller);
+    final channel = MediaSessionChannel(controller);
+    _mediaSession = channel;
+    // Los ajustes que Android lee sin la app abierta (auto-play al conectar y
+    // botones de la notificación) se empujan al arrancar y en cada cambio.
+    _theme.addListener(_pushMediaSettings);
+    _pushMediaSettings();
+  }
+
+  void _pushMediaSettings() {
+    final channel = _mediaSession;
+    if (channel == null) return;
+    channel.updateMediaSettings(
+      autoPlayOnConnect: _theme.autoPlayOnConnect,
+      notificationActions: <String>[
+        for (final action in _theme.mediaActions) action.name,
+      ],
+    );
   }
 
   /// Archivos abiertos desde el sistema (explorador, WhatsApp...). En Android
@@ -111,6 +127,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
     if (session != null) unawaited(session.dispose());
     _externalFiles?.dispose();
     _externalFiles = null;
+    _theme.removeListener(_pushMediaSettings);
     _mediaSession?.dispose();
     _mediaSession = null;
     if (_ownsController) {
