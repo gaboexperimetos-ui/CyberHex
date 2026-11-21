@@ -6,7 +6,7 @@ pub const SAMPLE_RATE: f32 = 48000;
 pub const MAX_GAIN_DB: f32 = 18;
 
 // 20 Hz a 20 kHz, 36 bandas espaciadas logarítmicamente.
-const FREQS = [BAND_COUNT]f32{
+pub const FREQS = [BAND_COUNT]f32{
     20.0,    24.4,    29.7,    36.2,    44.0,    53.7,
     65.4,    79.6,    97.0,    118.2,   143.9,   175.3,
     213.6,   260.2,   317.0,   386.1,   470.4,   573.0,
@@ -16,6 +16,9 @@ const FREQS = [BAND_COUNT]f32{
 };
 
 const Q: f32 = 4.0;
+
+/// Preamp minimo admitido (dB).
+pub const MIN_PREAMP_DB: f32 = -24;
 
 const Coeffs = struct {
     b0: f32 = 1,
@@ -28,6 +31,8 @@ const Coeffs = struct {
 const Config = struct {
     coeffs: [BAND_COUNT]Coeffs = @splat(.{}),
     mask: u64 = 0,
+    /// Ganancia lineal aplicada antes del banco (preamp anti-clipping).
+    preamp: f32 = 1,
 };
 
 const State = struct {
@@ -59,22 +64,48 @@ fn band(freq: f32, gain_db: f32) Coeffs {
 
 pub const Equalizer = struct {
     config: Config = .{},
+    // Ultima copia consistente leida por el hilo de audio: si el escritor se
+    // queda a medias, se reutiliza en lugar de girar dentro del callback.
+    last_config: Config = .{},
     seq: u32 = 0,
     generation: u32 = 0,
     last_generation: u32 = 0,
+    // Ganancias vigentes (para saber que bandas cambiaron de verdad).
+    gains: [BAND_COUNT]f32 = @splat(0),
+    // Preamp en dB (0..-24): baja la señal antes del banco para que un refuerzo
+    // no haga recortar al limitador.
+    preamp_db: f32 = 0,
+    // Bandas cuyo estado hay que reiniciar; se acumula entre cambios.
+    pending_reset: u64 = 0,
     state: [CHANNELS][BAND_COUNT]State = std.mem.zeroes([CHANNELS][BAND_COUNT]State),
 
+    /// Preamp en dB, de 0 a [MIN_PREAMP_DB] (nunca amplifica).
+    pub fn setPreamp(self: *Equalizer, db: f32) void {
+        self.preamp_db = std.math.clamp(db, MIN_PREAMP_DB, 0);
+        self.setGains(&self.gains);
+    }
+
     pub fn setGains(self: *Equalizer, gains_db: []const f32) void {
-        var next: Config = .{};
+        var next: Config = .{ .preamp = std.math.pow(f32, 10, self.preamp_db / 20) };
+        var gains: [BAND_COUNT]f32 = @splat(0);
+        var reset_mask: u64 = 0;
         for (0..BAND_COUNT) |i| {
             const g = if (i < gains_db.len)
                 std.math.clamp(gains_db[i], -MAX_GAIN_DB, MAX_GAIN_DB)
             else
                 0;
             next.coeffs[i] = band(FREQS[i], g);
+            gains[i] = g;
             if (g != 0) {
                 next.mask |= (@as(u64, 1) << @intCast(i));
             }
+            if (g != self.gains[i]) {
+                reset_mask |= (@as(u64, 1) << @intCast(i));
+            }
+        }
+        self.gains = gains;
+        if (reset_mask != 0) {
+            _ = @atomicRmw(u64, &self.pending_reset, .Or, reset_mask, .monotonic);
         }
 
         const s = @atomicLoad(u32, &self.seq, .acquire);
@@ -84,29 +115,44 @@ pub const Equalizer = struct {
         _ = @atomicRmw(u32, &self.generation, .Add, 1, .monotonic);
     }
 
-    fn resetState(self: *Equalizer) void {
-        self.state = std.mem.zeroes([CHANNELS][BAND_COUNT]State);
+    /// Reinicia solo las bandas cuya ganancia cambio: reiniciar las 36 en cada
+    /// movimiento del slider metia un transitorio audible en todo el espectro.
+    fn resetMask(self: *Equalizer, mask: u64) void {
+        for (0..CHANNELS) |ch| {
+            for (0..BAND_COUNT) |b| {
+                if (mask & (@as(u64, 1) << @intCast(b)) != 0) {
+                    self.state[ch][b] = .{};
+                }
+            }
+        }
     }
 
-    fn snapshot(self: *const Equalizer) Config {
-        while (true) {
+    fn snapshot(self: *Equalizer) Config {
+        var attempt: usize = 0;
+        while (attempt < 8) : (attempt += 1) {
             const s1 = @atomicLoad(u32, &self.seq, .acquire);
-            if (s1 & 1 != 0) continue;
-            const set = self.config;
-            const s2 = @atomicLoad(u32, &self.seq, .acquire);
-            if (s1 == s2) return set;
+            if (s1 & 1 == 0) {
+                const set = self.config;
+                const s2 = @atomicLoad(u32, &self.seq, .acquire);
+                if (s1 == s2) {
+                    self.last_config = set;
+                    return set;
+                }
+            }
         }
+        return self.last_config;
     }
 
     pub fn process(self: *Equalizer, buf: []f32, frames: usize) void {
         const gen = @atomicLoad(u32, &self.generation, .acquire);
         if (gen != self.last_generation) {
-            self.resetState();
+            const mask = @atomicRmw(u64, &self.pending_reset, .Xchg, 0, .acq_rel);
+            self.resetMask(mask);
             self.last_generation = gen;
         }
 
         const set = self.snapshot();
-        if (set.mask == 0) {
+        if (set.mask == 0 and set.preamp == 1) {
             return;
         }
 
@@ -114,7 +160,7 @@ pub const Equalizer = struct {
         while (f < frames) : (f += 1) {
             for (0..CHANNELS) |ch| {
                 const idx = f * CHANNELS + ch;
-                var x = buf[idx];
+                var x = buf[idx] * set.preamp;
                 for (0..BAND_COUNT) |b| {
                     if (set.mask & (@as(u64, 1) << @intCast(b)) == 0) continue;
                     const c = &set.coeffs[b];
@@ -144,6 +190,26 @@ test "0 dB es identidad" {
     }
 }
 
+test "el preamp atenua sin tocar el tono" {
+    var e: Equalizer = .{};
+    var gains: [BAND_COUNT]f32 = @splat(0);
+    e.setPreamp(-6);
+    e.setGains(&gains);
+
+    var buf = [_]f32{ 0.5, -0.5, 0.25, -0.25 };
+    const original = buf;
+    e.process(&buf, buf.len / CHANNELS);
+
+    const expected = std.math.pow(f32, 10, @as(f32, -6.0) / 20);
+    for (buf, original) |got, want| {
+        try std.testing.expectApproxEqAbs(want * expected, got, 1e-6);
+    }
+    try std.testing.expectApproxEqAbs(-6, e.preamp_db, 1e-6);
+    // Se acota: no puede amplificar por encima de 0 dB.
+    e.setPreamp(6);
+    try std.testing.expectApproxEqAbs(0, e.preamp_db, 1e-6);
+}
+
 test "un refuerzo cambia la señal" {
     var e: Equalizer = .{};
     var gains: [BAND_COUNT]f32 = @splat(0);
@@ -162,4 +228,25 @@ test "un refuerzo cambia la señal" {
         if (@abs(got - want) > 1e-6) changed += 1;
     }
     try std.testing.expect(changed > 0);
+}
+
+test "solo se reinicia el estado de la banda que cambia" {
+    var e: Equalizer = .{};
+    var gains: [BAND_COUNT]f32 = @splat(0);
+
+    gains[3] = 6;
+    e.setGains(&gains);
+    try std.testing.expectEqual(@as(u64, 1) << 3, e.pending_reset);
+
+    // Misma ganancia: no hay nada que reiniciar.
+    e.setGains(&gains);
+    try std.testing.expectEqual(@as(u64, 1) << 3, e.pending_reset);
+
+    gains[7] = -3;
+    e.setGains(&gains);
+    try std.testing.expectEqual((@as(u64, 1) << 3) | (@as(u64, 1) << 7), e.pending_reset);
+
+    var buf = [_]f32{ 0.1, 0.1, 0.1, 0.1 };
+    e.process(&buf, 2);
+    try std.testing.expectEqual(@as(u64, 0), e.pending_reset);
 }

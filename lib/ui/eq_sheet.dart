@@ -1,25 +1,38 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../core/native_player.dart';
+import '../core/player_controller.dart';
 import '../theme.dart';
 
+/// Ecualizador real del núcleo: 36 bandas logarítmicas de 20 Hz a 20 kHz,
+/// con ±18 dB de recorrido. Las etiquetas salen de `ch_engine_eq_band_freq`,
+/// no de una tabla fija, para que no vuelvan a desincronizarse.
 class EqualizerSheet extends StatefulWidget {
-  const EqualizerSheet({super.key, required this.player});
+  const EqualizerSheet({super.key, required this.controller});
 
-  final NativePlayer player;
+  final PlayerController controller;
 
   @override
   State<EqualizerSheet> createState() => _EqualizerSheetState();
 }
 
 class _EqualizerSheetState extends State<EqualizerSheet> {
-  static const _labels = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
+  static const double _bandWidth = 36;
+
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final gains = widget.controller.eqGains;
+    final frequencies = widget.controller.eqBandFrequencies;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -33,38 +46,62 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => setState(widget.player.resetEq),
+                  onPressed: () => setState(widget.controller.resetEq),
                   child: const Text('Plano'),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            Text(
+              '${gains.length} bandas · 20 Hz – 20 kHz · ±18 dB',
+              style: const TextStyle(fontSize: 12, color: chMuted),
+            ),
+            const SizedBox(height: 10),
             SizedBox(
-              height: 220,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  for (var i = 0; i < _labels.length; i++)
-                    Expanded(
-                      child: _Band(
-                        label: _labels[i],
-                        value: widget.player.eqGains[i],
-                        onChanged: (value) => setState(() => widget.player.setBand(i, value)),
-                      ),
-                    ),
-                ],
+              height: 236,
+              child: Scrollbar(
+                controller: _scroll,
+                child: SingleChildScrollView(
+                  controller: _scroll,
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      for (var i = 0; i < gains.length; i++)
+                        SizedBox(
+                          width: _bandWidth,
+                          child: _Band(
+                            label: _formatHz(frequencies[i]),
+                            value: gains[i],
+                            onChanged: (value) =>
+                                setState(() => widget.controller.setBand(i, value)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
-              'Rango ±12 dB · 10 bandas',
-              style: TextStyle(fontSize: 12, color: chMuted),
+              'Desliza en horizontal para recorrer todo el espectro.',
+              style: const TextStyle(fontSize: 11, color: chMuted),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+String _formatHz(double hz) {
+  if (!hz.isFinite || hz <= 0) return '';
+  if (hz >= 1000) {
+    final k = hz / 1000;
+    final digits = k >= 10 ? 0 : 1;
+    final text = k.toStringAsFixed(digits);
+    return '${text.endsWith('.0') ? text.substring(0, text.length - 2) : text}k';
+  }
+  return hz.round().toString();
 }
 
 class _Band extends StatelessWidget {
@@ -79,23 +116,38 @@ class _Band extends StatelessWidget {
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Text(
-          value.abs() < 0.05 ? '' : value.toStringAsFixed(0),
-          style: const TextStyle(fontSize: 10, color: chMuted),
+        SizedBox(
+          height: 14,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value.abs() < 0.05 ? '' : value.toStringAsFixed(0),
+              style: const TextStyle(fontSize: 10, color: chMuted),
+            ),
+          ),
         ),
         SizedBox(
-          height: 160,
+          height: 168,
           child: RotatedBox(
             quarterTurns: 3,
             child: Slider(
-              value: value.clamp(-12, 12),
-              min: -12,
-              max: 12,
+              value: value.clamp(-18, 18).toDouble(),
+              min: -18,
+              max: 18,
               onChanged: onChanged,
             ),
           ),
         ),
-        Text(label, style: const TextStyle(fontSize: 10, color: chMuted)),
+        SizedBox(
+          height: 14,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 9, color: chMuted),
+            ),
+          ),
+        ),
       ],
     );
   }

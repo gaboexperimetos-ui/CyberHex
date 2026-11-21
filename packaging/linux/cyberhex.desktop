@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=CyberHex
+GenericName=Reproductor de audio
+Comment=Reproductor con motor nativo en Zig y C23
+Exec=cyberhex
+Icon=cyberhex
+Terminal=false
+Categories=AudioVideo;Audio;Player;GTK;
+Keywords=audio;musica;player;flac;mp3;
+StartupNotify=true
+StartupWMClass=cyberhex

@@ -112,19 +112,35 @@ if(NOT ZIG_EXECUTABLE)
   message(FATAL_ERROR "zig no está en PATH. Instala Zig 0.17+ o expórtalo antes de compilar.")
 endif()
 
+# Opcional: -DCYBERHEX_DECODER=miniaudio para no depender de FFmpeg en el PC.
+set(CYBERHEX_DECODER "auto" CACHE STRING "Decodificador del núcleo: auto, ffmpeg o miniaudio")
+
 set(CYBERHEX_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../core")
 set(CYBERHEX_CORE_PREFIX "${CMAKE_BINARY_DIR}/cyberhex_core")
 set(CYBERHEX_CORE_LIB "${CYBERHEX_CORE_PREFIX}/lib/libcyberhex_core.so")
 
+# Se vigilan también las cabeceras y el C del núcleo: si cambia
+# include/cyberhex_core.h y no se recompilase, la app cargaría un .so con el ABI
+# antiguo (y las funciones nuevas saldrían como nulas).
 file(GLOB_RECURSE CYBERHEX_CORE_SOURCES CONFIGURE_DEPENDS
   "${CYBERHEX_CORE_DIR}/src/*.zig"
   "${CYBERHEX_CORE_DIR}/src/*.c"
   "${CYBERHEX_CORE_DIR}/src/*.h"
-  "${CYBERHEX_CORE_DIR}/build.zig")
+  "${CYBERHEX_CORE_DIR}/include/*.h"
+  "${CYBERHEX_CORE_DIR}/vendor/*.h"
+  "${CYBERHEX_CORE_DIR}/build.zig"
+  "${CYBERHEX_CORE_DIR}/build.zig.zon")
 
 add_custom_command(
   OUTPUT "${CYBERHEX_CORE_LIB}"
-  COMMAND "${ZIG_EXECUTABLE}" build -Drelease=true --prefix "${CYBERHEX_CORE_PREFIX}"
+  # -Drelease=true => ReleaseFast (preferred_optimize_mode del build.zig).
+  COMMAND "${ZIG_EXECUTABLE}" build
+    -Drelease=true
+    -Ddecoder=${CYBERHEX_DECODER}
+    --prefix "${CYBERHEX_CORE_PREFIX}"
+  # zig conserva la fecha original al instalar: sin este touch el .so siempre
+  # parecería más viejo que las fuentes y el núcleo se recompilaría en cada build.
+  COMMAND ${CMAKE_COMMAND} -E touch "${CYBERHEX_CORE_LIB}"
   WORKING_DIRECTORY "${CYBERHEX_CORE_DIR}"
   DEPENDS ${CYBERHEX_CORE_SOURCES}
   COMMENT "Compilando el núcleo CyberHex con Zig"

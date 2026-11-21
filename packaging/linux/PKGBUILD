@@ -1,0 +1,44 @@
+# PKGBUILD para Arch Linux.
+#
+#   makepkg -si                  # desde este directorio, con la fuente ya publicada
+#   makepkg -si --skipinteg      # probando una etiqueta local
+#
+# Necesita: zig (repos oficiales) y flutter (AUR: flutter). El núcleo se compila
+# solo, desde core/, con FFmpeg del sistema si está instalado (pacman -S ffmpeg).
+
+pkgname=cyberhex
+pkgver=0.8.0
+pkgrel=1
+pkgdesc="Reproductor de audio con motor nativo en Zig/C23 y UI Flutter"
+arch=('x86_64')
+url="https://github.com/gaboexperimetos-ui/CyberHex"
+license=('MIT')
+depends=('gtk3' 'alsa-lib' 'libpulse' 'ffmpeg' 'fontconfig' 'libxkbcommon' 'libglvnd')
+makedepends=('zig' 'flutter' 'cmake' 'ninja' 'clang' 'pkgconf' 'git')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  # --release => AOT y .so ReleaseFast (core/build.zig usa ReleaseFast por defecto)
+  flutter build linux --release
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  local bundle="build/linux/x64/release/bundle"
+
+  install -Dm755 "$bundle/cyberhex" "$pkgdir/usr/lib/cyberhex/cyberhex"
+  cp -r "$bundle/lib" "$pkgdir/usr/lib/cyberhex/lib"
+  cp -r "$bundle/data" "$pkgdir/usr/lib/cyberhex/data"
+
+  install -Dm644 packaging/linux/cyberhex.desktop \
+    "$pkgdir/usr/share/applications/cyberhex.desktop"
+  install -Dm644 packaging/linux/cyberhex.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/cyberhex.svg"
+
+  install -d "$pkgdir/usr/bin"
+  ln -s /usr/lib/cyberhex/cyberhex "$pkgdir/usr/bin/cyberhex"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

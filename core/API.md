@@ -8,13 +8,18 @@ carga la canción completa en RAM.
 
 ```bash
 cd core
-zig build -Drelease=true          # -> zig-out/lib/libcyberhex_core.so
+zig build                         # ReleaseFast por defecto -> zig-out/lib/libcyberhex_core.so
+zig build --release=safe          # misma build con comprobaciones de seguridad
+zig build -Drelease=false         # Debug, para depurar
+zig build -Ddecoder=miniaudio     # sin FFmpeg (WAV/FLAC/MP3/Vorbis), cero dependencias
+zig build -Ddecoder=ffmpeg        # exige FFmpeg; falla con un mensaje claro si falta
 zig build test                    # tests unitarios del núcleo
+zig build smoke                   # prueba de humo con audio real (ver más abajo)
 ./build_ffmpeg_android.sh         # FFmpeg estático para arm64-v8a (una vez)
 ./build_android.sh                # -> jniLibs/arm64-v8a/libcyberhex_core.so
 ```
 
-### Android: `arm64-v8a` portable
+### Android: `arm64-v8a` portable (objetivo: Redmi Note 13, Snapdragon 685)
 
 El build de Android compila **solo `arm64-v8a`** para cualquier móvil 64-bit
 (ARMv8-A + NEON, obligatorio en AArch64). No asume un SoC concreto: sirve igual
@@ -72,7 +77,9 @@ const char* ch_core_last_error(void);   /* error de creación global */
 ch_engine* ch_engine_create(void);
 void       ch_engine_destroy(ch_engine* engine);
 
-int32_t ch_engine_load(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_load(ch_engine* engine, const char* utf8_path);      /* deja la cola con 1 pista */
+int32_t ch_engine_play_index(ch_engine* engine, int32_t index);         /* reproduce sin vaciar la cola */
+int32_t ch_engine_load_add(ch_engine* engine, const char* utf8_path);   /* añade al final y reproduce */
 int32_t ch_engine_play(ch_engine* engine);
 int32_t ch_engine_pause(ch_engine* engine);
 int32_t ch_engine_seek(ch_engine* engine, double seconds);
@@ -127,6 +134,11 @@ double  ch_engine_sleep_remaining(ch_engine* engine);
 int32_t ch_engine_set_replaygain(ch_engine* engine, int32_t enabled);
 float   ch_engine_replaygain_gain_db(ch_engine* engine);
 float   ch_engine_replaygain_peak(ch_engine* engine);
+/* 0 = por pista (def.), 1 = por album: una sola ganancia para todo el disco.
+ * Si no hay tags REPLAYGAIN_* se usa R128_TRACK_GAIN/R128_ALBUM_GAIN (Q7.8).
+ * Solo afecta a las pistas que se abran después. */
+int32_t ch_engine_set_replaygain_mode(ch_engine* engine, int32_t mode);
+int32_t ch_engine_replaygain_mode(ch_engine* engine);
 
 /* Dispositivos de salida. index -1 = predeterminado del sistema. */
 int32_t     ch_engine_output_device_count(void);
@@ -171,10 +183,17 @@ float   ch_engine_pitch(ch_engine* engine);
 /* Analizador de espectro: `bands` valores 0..1 de 20 Hz a 20 kHz (-80..0 dB). */
 int32_t ch_engine_spectrum(ch_engine* engine, float* out, int32_t bands);
 
-/* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB. */
+/* Ecualizador: 36 bandas logarítmicas de 20 Hz a 20 kHz, ganancia ±18 dB.
+ * `ch_engine_eq_band_freq` devuelve la frecuencia central de cada banda
+ * (útil para etiquetar la UI sin duplicar la tabla). */
 int32_t ch_engine_eq_band_count(void);
+float   ch_engine_eq_band_freq(int32_t index);
 int32_t ch_engine_set_eq_gains(ch_engine* engine, const float* gains_db, int32_t count);
 int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);
+/* Preamp del EQ en dB (0 a -24, nunca amplifica): baja la señal antes del banco
+ * de filtros para que un refuerzo no haga recortar al limitador. */
+int32_t ch_engine_set_eq_preamp(ch_engine* engine, float db);
+float   ch_engine_eq_preamp(ch_engine* engine);
 
 /* Metadatos y carátula embebida (JPEG/PNG). */
 const char*    ch_engine_title(ch_engine* engine);
@@ -185,6 +204,22 @@ const uint8_t* ch_engine_cover(ch_engine* engine, uint64_t* size);
 /* Letra sincronizada (LRC): se busca un .lrc junto al audio. */
 int32_t ch_engine_lyrics_count(ch_engine* engine);
 int32_t ch_engine_lyric_line(ch_engine* engine, char* out, uint32_t out_size);
+
+/* Niveles de salida para vúmetros: escribe rms_l, rms_r, peak_l, peak_r
+ * (0..1, medidos después de EQ/ganancia/limitador, caída ~200 ms, bajan a cero
+ * al pausar). Devuelve cuántos valores escribió. Seguro desde el hilo de UI. */
+int32_t ch_engine_levels(ch_engine* engine, float* out, int32_t count);
+
+/* Fundido al pausar y reanudar, en segundos (0 = corte inmediato, def. 0.05). */
+int32_t ch_engine_set_pause_fade(ch_engine* engine, float seconds);
+float   ch_engine_pause_fade(ch_engine* engine);
+
+/* Loop A-B de la pista actual, en segundos. Al llegar a B se vuelve a A por el
+ * mismo camino que un seek (respeta crossfade y estiramiento); `end <= start`
+ * lo desactiva y también se cancela solo al cambiar de pista. */
+int32_t ch_engine_set_loop(ch_engine* engine, double start, double end);
+double  ch_engine_loop_start(ch_engine* engine);   /* -1 si inactivo */
+double  ch_engine_loop_end(ch_engine* engine);     /* -1 si inactivo */
 
 double  ch_engine_position(ch_engine* engine);   /* segundos */
 double  ch_engine_duration(ch_engine* engine);   /* segundos, 0 si se desconoce */
@@ -211,11 +246,24 @@ const char* ch_engine_composer(ch_engine* engine);
 int32_t     ch_engine_track_number(ch_engine* engine);
 int32_t     ch_engine_disc_number(ch_engine* engine);
 
+/* Balance (-1 izq .. +1 der, acotado) y modo de canales (0 estereo, 1 mono,
+ * 2 cambiados). Se aplican tras el EQ y antes del limitador. */
+int32_t ch_engine_set_balance(ch_engine* engine, float balance);
+float   ch_engine_balance(ch_engine* engine);
+int32_t ch_engine_set_channel_mode(ch_engine* engine, int32_t mode);
+int32_t ch_engine_channel_mode(ch_engine* engine);
+
+/* Version del ABI (hoy 3). Sube ante cambios incompatibles. */
+int32_t ch_engine_abi_version(void);
+
 /* Limitador de picos (dBFS) y estadisticas de búfer. */
 int32_t  ch_engine_set_limiter(ch_engine* engine, int32_t enabled, float ceiling_db);
 int32_t  ch_engine_limiter(ch_engine* engine);
 double   ch_engine_buffered_seconds(ch_engine* engine);
 uint64_t ch_engine_buffer_underflows(ch_engine* engine);
+/* Pistas que se saltaron solas por no poder abrirse (archivo roto/incompatible).
+ * El avance automático ya no se detiene en una pista ilegible. */
+uint64_t ch_engine_skipped_tracks(ch_engine* engine);
 
 /* Detecta silencio al principio/fin de un archivo (dBFS). */
 int32_t  ch_engine_detect_silence(const char* utf8_path, float threshold_db,
@@ -414,6 +462,16 @@ ch_engine_destroy(e);
 
 El detalle está en `ch_engine_last_error` (o `ch_core_last_error` si falla la
 creación del motor, p. ej. sin dispositivo de audio).
+
+## Notas de mezcla (preamp, pausa, vúmetro)
+
+- El preamp del EQ se aplica antes del banco y se compensa con el limitador:
+  `ch_engine_set_eq_preamp(-3)` evita el recorte cuando se suben varias bandas.
+- El fundido de pausa es configurable; a `0` el corte es inmediato. La posición
+  cuenta el audio que suena durante el fundido, así que no se pierden ~50 ms por
+  cada pausa.
+- `ch_engine_levels` y `ch_engine_spectrum` no bloquean: se pueden llamar a
+  10-30 Hz desde el hilo de UI. El vúmetro cae a cero al pausar.
 
 ## Aún no implementado
 
