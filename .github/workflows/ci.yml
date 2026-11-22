@@ -186,12 +186,13 @@ jobs:
           if [ $code -ne 0 ]; then
             while IFS= read -r line; do
               printf '::error::%s\n' "${line//::/:}"
-            done < <(grep -E '\[E\]|overflowed|Exception|Expected:|Actual:' tests.log | head -20)
-            # El desbordamiento explica qué widget se queda sin sitio: sin las
-            # líneas siguientes solo se sabe que "no cabe".
+            done < <(grep -E '\[E\]|overflowed|Exception|Expected:|Actual:' tests.log | head -24)
+            # El desbordamiento explica qué widget se queda sin sitio: el
+            # nombre sale en las líneas siguientes al aviso.
             while IFS= read -r line; do
               printf '::warning::%s\n' "${line//::/:}"
-            done < <(grep -A10 'overflowed by' tests.log | head -40)
+            done < <(grep -A30 'overflowed by' tests.log |
+              grep -E 'overflowed|error-causing|player_page|library_page|queue_sheet|Row|Column|padding|constraints' | head -30)
           fi
           exit $code
 
