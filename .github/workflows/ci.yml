@@ -208,13 +208,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set +e
-          for log in analyze.log tests.log; do
-            if [ -f "$log" ]; then
-              printf '### %s\n\n' "$log" >> diagnostico.txt
-              tail -120 "$log" >> diagnostico.txt
-              printf '\n\n' >> diagnostico.txt
-            fi
-          done
+          if [ -f analyze.log ]; then
+            printf '### analyze.log (avisos)\n\n' >> diagnostico.txt
+            tail -40 analyze.log >> diagnostico.txt
+            printf '\n\n' >> diagnostico.txt
+          fi
+          if [ -f tests.log ]; then
+            printf '### tests.log: fallos\n\n' >> diagnostico.txt
+            grep -A3 '\[E\]' tests.log | head -400 >> diagnostico.txt
+            printf '\n\n' >> diagnostico.txt
+          fi
           gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
             -F body=@diagnostico.txt >/dev/null 2>&1 || echo 'aviso: no pude publicar el diagnostico'
 

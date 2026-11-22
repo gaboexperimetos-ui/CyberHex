@@ -87,6 +87,8 @@ class _TestServer {
     }
 
     if (path.startsWith('/dav')) {
+      // El cliente manda un cuerpo XML: hay que consumirlo antes de responder.
+      await request.drain<void>();
       request.response.statusCode = 207;
       request.response.headers.contentType =
           ContentType('application', 'xml', charset: 'utf-8');
@@ -625,7 +627,9 @@ void main() {
   group('Exportador', () {
     testWidgets('muestra el rango y las dos salidas', (tester) async {
       final fake = FakePlayer(hasTrack: true, title: 'Tema', artist: 'Grupo')
-        ..duration = 200;
+        ..duration = 200
+        ..queuePaths.add('/tmp/tema-de-prueba.mp3')
+        ..queueIndexValue = 0;
       final controller = PlayerController(fake);
       addTearDown(controller.dispose);
       controller.pump();

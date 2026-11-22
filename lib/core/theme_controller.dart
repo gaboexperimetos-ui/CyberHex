@@ -303,17 +303,20 @@ class ThemeController extends ChangeNotifier {
       _pocketMode = decoded['pocket'] == true;
       _coverStyle = CoverStyle.fromName(decoded['coverStyle'] as String?);
       _autoPlayOnConnect = decoded['autoPlayOnConnect'] == true;
+      // El archivo manda: play/pausa siempre está y lo demás, solo si el JSON
+      // lo pide. Un `theme.json` de antes de esta función no trae la clave, así
+      // que se queda en play/pausa en vez de heredar los tres botones.
+      final parsed = <MediaAction>{MediaAction.toggle};
       final mediaActions = decoded['mediaActions'];
       if (mediaActions is List) {
-        final parsed = <MediaAction>{
-          for (final name in mediaActions)
-            if (MediaAction.fromName(name is String ? name : null) != null)
-              MediaAction.fromName(name as String)!,
-        }..add(MediaAction.toggle);
-        _mediaActions
-          ..clear()
-          ..addAll(parsed);
+        for (final raw in mediaActions) {
+          final action = MediaAction.fromName(raw is String ? raw : null);
+          if (action != null) parsed.add(action);
+        }
       }
+      _mediaActions
+        ..clear()
+        ..addAll(parsed);
       final actions = decoded['actions'];
       if (actions is List) {
         final parsed = <PlayerAction>{

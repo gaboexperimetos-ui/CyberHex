@@ -177,10 +177,14 @@ class WebDavClient {
     request.headers.contentType =
         ContentType('application', 'xml', charset: 'utf-8');
     _authHeaders(server).forEach(request.headers.set);
-    request.write('<?xml version="1.0" encoding="utf-8"?>'
+    final body = utf8.encode('<?xml version="1.0" encoding="utf-8"?>'
         '<d:propfind xmlns:d="DAV:"><d:prop>'
         '<d:displayname/><d:getcontentlength/><d:resourcetype/>'
         '</d:prop></d:propfind>');
+    // Longitud explícita: con `write` el cuerpo va troceado (chunked) y algunos
+    // servidores (y el propio `HttpServer` de los tests) contestan 400.
+    request.contentLength = body.length;
+    request.add(body);
 
     final response = await request.close();
     if (response.statusCode == 401) {
@@ -228,9 +232,19 @@ class WebDavClient {
       final isCollection = block.contains(':collection') ||
           RegExp(r'<collection\b').hasMatch(block);
       final segments = url.pathSegments.where((segment) => segment.isNotEmpty);
-      final name = segments.isEmpty
-          ? '/'
-          : Uri.decodeComponent(segments.last);
+      String name = '/';
+      if (segments.isNotEmpty) {
+        final raw = segments.last;
+        // `pathSegments` puede venir ya decodificado; si el servidor manda un
+        // `%` suelto, decodificar otra vez lanzaría: se queda el texto tal cual.
+        try {
+          name = Uri.decodeComponent(raw);
+        } on ArgumentError {
+          name = raw;
+        } on FormatException {
+          name = raw;
+        }
+      }
       final lengthMatch = RegExp(
         r'<(?:[A-Za-z0-9]+:)?getcontentlength\b[^>]*>(\d+)<',
       ).firstMatch(block);
