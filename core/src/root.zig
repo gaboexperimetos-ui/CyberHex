@@ -95,6 +95,8 @@ extern fn ch_waveform_peaks(path: [*c]const u8, buckets: u32, out_max: [*c]f32) 
 extern fn ch_bpm_detect(path: [*c]const u8, out_bpm: [*c]f64) i32;
 extern fn ch_dr_measure(path: [*c]const u8, out_dr: [*c]f64, out_blocks: [*c]u32) i32;
 extern fn ch_key_detect(path: [*c]const u8, out: [*c]u8, out_size: usize, confidence: [*c]f64) i32;
+extern fn ch_silence_segments(path: [*c]const u8, threshold_db: f64, min_s: f64, out: [*c]f64, max_segments: i32) i32;
+extern fn ch_strip_silence(src: [*c]const u8, dst: [*c]const u8, threshold_db: f64, min_s: f64, gap_s: f64, rate: i32) i32;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -4667,6 +4669,26 @@ export fn ch_engine_bpm(self: ?*Engine) f64 {
     var bpm: f64 = 0;
     if (ch_bpm_detect(p.ptr, &bpm) != 0) return 0;
     return bpm;
+}
+
+/// Cuenta los tramos de silencio de `path` (pico < threshold_db, >= min_s).
+/// Si `out` no es null se rellenan hasta `max_segments` pares (inicio, fin).
+export fn ch_engine_count_silences(self: ?*Engine, path: [*c]const u8, threshold_db: f32, min_s: f64, out: [*c]f64, max_segments: i32) i32 {
+    _ = self;
+    if (path == null) return -1;
+    if (out == null or max_segments <= 0) {
+        // Sin buffer solo se puede contar si cabe en uno pequeno.
+        var tmp: [256]f64 = undefined;
+        return ch_silence_segments(path, threshold_db, min_s, &tmp, 256);
+    }
+    return ch_silence_segments(path, threshold_db, min_s, out, max_segments);
+}
+
+/// Elimina los silencios largos de `src` y escribe `dst` como WAV mono.
+export fn ch_engine_strip_silence(self: ?*Engine, src: [*c]const u8, dst: [*c]const u8, threshold_db: f32, min_s: f64, gap_s: f64, rate: i32) i32 {
+    _ = self;
+    if (src == null or dst == null) return -1;
+    return ch_strip_silence(src, dst, threshold_db, min_s, gap_s, rate);
 }
 
 /// Escribe ReplayGain en todos los FLAC/MP3/Ogg/Opus de un directorio.

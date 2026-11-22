@@ -4,6 +4,7 @@
 #include "analysis.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "decode.h"
 
@@ -483,5 +484,164 @@ int32_t ch_key_detect(const char* path, char* out, size_t out_size, double* conf
     if (confidence) *confidence = best_corr;
     snprintf(out, out_size, "%s %s", NAMES[best_tonic], best_minor ? "minor" : "major");
     (void)total;
+    return 0;
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* Segmentos de silencio                                                     */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Recorre el archivo y marca los tramos por debajo de `threshold_db`
+ * (pico de muestra) que duren al menos `min_s` segundos. Devuelve en `out`
+ * pares (inicio, fin) en segundos. `max_segments` limita el buffer.
+ */
+int32_t ch_silence_segments(const char* path, double threshold_db, double min_s,
+                            double* out, int32_t max_segments) {
+    if (path == NULL || out == NULL || max_segments <= 0) return -1;
+    const uint32_t rate = 22050;
+    ch_decoder* d = ch_decode_open(path, rate, 1);
+    if (d == NULL) return -1;
+
+    const float thr = powf(10.0f, (float)(threshold_db / 20.0));
+    const uint64_t min_frames = (uint64_t)(min_s * (double)rate);
+
+    float buf[4096];
+    uint64_t pos = 0;
+    int32_t count = 0;
+    int in_silence = 0;
+    uint64_t sil_start = 0;
+
+    for (;;) {
+        const uint64_t got = ch_decode_read(d, buf, 4096);
+        if (got == 0) break;
+        for (uint64_t i = 0; i < got; i++) {
+            const float v = fabsf(buf[i]);
+            const int loud = v >= thr;
+            if (!loud && !in_silence) {
+                in_silence = 1;
+                sil_start = pos + i;
+            } else if (loud && in_silence) {
+                in_silence = 0;
+                const uint64_t len = (pos + i) - sil_start;
+                if (len >= min_frames && count < max_segments) {
+                    out[count * 2] = (double)sil_start / (double)rate;
+                    out[count * 2 + 1] = (double)(pos + i) / (double)rate;
+                    count++;
+                }
+            }
+        }
+        pos += got;
+    }
+    /* Silencio final. */
+    if (in_silence) {
+        const uint64_t len = pos - sil_start;
+        if (len >= min_frames && count < max_segments) {
+            out[count * 2] = (double)sil_start / (double)rate;
+            out[count * 2 + 1] = (double)pos / (double)rate;
+            count++;
+        }
+    }
+    ch_decode_close(d);
+    return count;
+}
+
+/*
+ * Elimina los silencios largos y deja `gap` segundos de aire entre tramos.
+ * Escribe WAV PCM16 mono a `rate`.
+ *
+ * Se hace en dos pasadas: la primera localiza los tramos silenciosos y la
+ * segunda copia el audio descartando esos tramos. Asi los silencios cortos
+ * conservan sus muestras originales en vez de reemplazarse por ceros.
+ */
+int32_t ch_strip_silence(const char* src, const char* dst, double threshold_db,
+                         double min_s, double gap_s, int32_t rate) {
+    if (src == NULL || dst == NULL) return -1;
+    if (rate < 8000 || rate > 192000) return -1;
+    if (min_s < 0) min_s = 0;
+    if (gap_s < 0) gap_s = 0;
+
+    /* Pasada 1: segmentos de silencio a eliminar. */
+    int max_seg = 4096;
+    double* segs = malloc((size_t)max_seg * 2 * sizeof(double));
+    if (!segs) return -2;
+    int nseg = ch_silence_segments(src, threshold_db, min_s, segs, max_seg);
+    if (nseg < 0) { free(segs); return -3; }
+
+    ch_decoder* d = ch_decode_open(src, rate, 1);
+    if (!d) { free(segs); return -2; }
+
+    FILE* f = fopen(dst, "wb");
+    if (!f) { ch_decode_close(d); free(segs); return -2; }
+
+    unsigned char hdr[44];
+    memset(hdr, 0, sizeof hdr);
+    memcpy(hdr, "RIFF", 4);
+    memcpy(hdr + 8, "WAVEfmt ", 8);
+    hdr[16] = 16;
+    hdr[20] = 1; /* PCM */
+    hdr[22] = 1; /* mono */
+    uint32_t rate32 = (uint32_t)rate;
+    memcpy(hdr + 24, &rate32, 4);
+    uint32_t byte_rate = rate32 * 2;
+    memcpy(hdr + 28, &byte_rate, 4);
+    hdr[32] = 2; /* block align */
+    hdr[34] = 16;
+    memcpy(hdr + 36, "data", 4);
+    fwrite(hdr, 1, 44, f);
+
+    const uint64_t gap_frames = (uint64_t)(gap_s * (double)rate);
+    float buf[4096];
+    uint64_t pos = 0;
+    uint64_t written = 0;
+    int seg_idx = 0;
+    int started = 0;
+
+    for (;;) {
+        const uint64_t got = ch_decode_read(d, buf, 4096);
+        if (got == 0) break;
+        for (uint64_t i = 0; i < got; i++) {
+            const uint64_t at = pos + i;
+            const double t = (double)at / (double)rate;
+
+            /* Saltar los tramos silenciosos largos. */
+            int skip = 0;
+            while (seg_idx < nseg && t >= segs[seg_idx * 2 + 1]) seg_idx++;
+            if (seg_idx < nseg && t >= segs[seg_idx * 2] && t < segs[seg_idx * 2 + 1]) skip = 1;
+
+            if (skip) {
+                /* El aire se escribe al entrar en el tramo, no en cada buffer:
+                 * basta comparar con la muestra anterior. */
+                const int entering = at > 0 && (double)(at - 1) / (double)rate < segs[seg_idx * 2];
+                if (entering && started) {
+                    for (uint64_t k = 0; k < gap_frames; k++) {
+                        fputc(0, f); fputc(0, f); written++;
+                    }
+                }
+                continue;
+            }
+
+            const float v = buf[i];
+            const float clamped = v < -1.0f ? -1.0f : (v > 1.0f ? 1.0f : v);
+            const short sc = (short)(clamped * 32767.0f);
+            fputc((sc >> 0) & 0xFF, f);
+            fputc((sc >> 8) & 0xFF, f);
+            written++;
+            if (fabsf(v) > 0.0f) started = 1;
+        }
+        pos += got;
+    }
+
+    ch_decode_close(d);
+    free(segs);
+
+    uint32_t data_bytes = (uint32_t)(written * 2);
+    uint32_t riff = 36 + data_bytes;
+    fseek(f, 4, SEEK_SET);
+    fwrite(&riff, 4, 1, f);
+    fseek(f, 40, SEEK_SET);
+    fwrite(&data_bytes, 4, 1, f);
+    fclose(f);
     return 0;
 }
