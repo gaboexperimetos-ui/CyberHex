@@ -310,7 +310,20 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
     size_t plen = strlen(path);
     if (plen < 4 || strcasecmp(path + plen - 4, ".mp3") != 0) return -1;
     const char* frame = id3_frame_for(key);
-    if (!frame) return -2;
+    /* Claves que no tienen frame propio (ReplayGain, BPM...) van en TXXX con
+     * la clave como descripcion y el valor como contenido. */
+    const int is_txxx = (frame == NULL);
+    char txxx_key[128];
+    if (is_txxx) {
+        const size_t klen = strlen(key);
+        if (klen == 0 || klen >= sizeof txxx_key) return -2;
+        for (size_t i = 0; i < klen; i++) {
+            const char c = key[i];
+            txxx_key[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+        }
+        txxx_key[klen] = 0;
+        frame = "TXXX";
+    }
 
     uint64_t fsize = 0;
     char* raw = ch_file_read_all(path, &fsize);
@@ -325,9 +338,11 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
         if (audio_start > (size_t)fsize) audio_start = (size_t)fsize;
     }
 
-    /* Frame de texto nuevo: encoding 0x00 (ISO-8859-1) + texto. */
+    /* Frame nuevo: encoding 0x00 (ISO-8859-1) + texto. En TXXX el cuerpo es
+     * encoding + descripcion + 0x00 + valor. */
     size_t text_len = value ? strlen(value) : 0;
-    size_t frame_size = 1 + text_len;
+    size_t key_len = is_txxx ? strlen(txxx_key) : 0;
+    size_t frame_size = 1 + key_len + (is_txxx ? 1 : 0) + text_len;
     size_t total_frame = 10 + frame_size;
     unsigned char* frame_buf = malloc(total_frame);
     if (!frame_buf) {
@@ -339,7 +354,13 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
     frame_buf[8] = 0;
     frame_buf[9] = 0;
     frame_buf[10] = 0x00;
-    if (text_len > 0) memcpy(frame_buf + 11, value, text_len);
+    size_t at = 11;
+    if (is_txxx) {
+        memcpy(frame_buf + at, txxx_key, key_len);
+        at += key_len;
+        frame_buf[at++] = 0x00;
+    }
+    if (text_len > 0) memcpy(frame_buf + at, value, text_len);
 
     /* Copiar los frames existentes salvo el que se va a sustituir. */
     buf frames = {0};
@@ -357,7 +378,20 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
             uint32_t fsz = rd_syncsafe(d + pos + 4);
             size_t ftotal = 10 + (size_t)fsz;
             if (pos + ftotal > limit) break;
-            if (memcmp(d + pos, frame, 4) != 0) {
+            int drop = 0;
+            if (memcmp(d + pos, frame, 4) == 0) {
+                drop = 1;
+                /* En TXXX solo se sustituye el que tiene la misma descripcion. */
+                if (is_txxx && fsz >= 1) {
+                    const unsigned char* body = d + pos + 10;
+                    const unsigned char enc = body[0];
+                    size_t kl = 0;
+                    while (kl + 1 < fsz && !(body[1 + kl] == 0 && enc == 0)) kl++;
+                    const size_t want = strlen(txxx_key);
+                    if (kl != want || memcmp(body + 1, txxx_key, want) != 0) drop = 0;
+                }
+            }
+            if (!drop) {
                 if (buf_append(&frames, d + pos, ftotal) != 0) {
                     free(frames.data);
                     free(frame_buf);

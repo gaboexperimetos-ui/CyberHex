@@ -4669,6 +4669,63 @@ export fn ch_engine_bpm(self: ?*Engine) f64 {
     return bpm;
 }
 
+/// Escribe ReplayGain en todos los FLAC/MP3/Ogg/Opus de un directorio.
+/// `dir` puede ser una ruta o "" para el directorio de la pista actual.
+/// Devuelve el numero de archivos actualizados, o negativo si error.
+export fn ch_engine_write_replaygain_dir(self: ?*Engine, dir: [*c]const u8) i32 {
+    const e = self orelse return -1;
+
+    var target: []const u8 = "";
+    if (dir != null) target = std.mem.span(dir);
+    if (target.len == 0) {
+        e.list_mutex.lock();
+        if (e.queue_index >= e.playlist.items.len) {
+            e.list_mutex.unlock();
+            return -2;
+        }
+        const cur: []const u8 = e.playlist.items[e.queue_index];
+        const slash = std.mem.lastIndexOfScalar(u8, cur, '/');
+        target = if (slash) |i| cur[0 .. i + 1] else cur[0..0];
+        e.list_mutex.unlock();
+    }
+    if (target.len == 0) return -2;
+
+    const exts = [_]?[*:0]const u8{ ".flac", ".mp3", ".ogg", ".opus", null };
+    var count: i32 = 0;
+    const raw = ch_dir_list_audio(target.ptr, @ptrCast(&exts), &count) orelse return -3;
+    defer ch_file_free(raw);
+
+    var updated: i32 = 0;
+    var fail_count: i32 = 0;
+    var it = std.mem.splitScalar(u8, raw[0..@intCast(std.mem.len(raw))], '\n');
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+        // Cada linea necesita su propio terminador: el buffer trae todas las
+        // rutas juntas y span() leeria hasta el final del buffer.
+        const z = e.allocator.dupeSentinel(u8, line, 0) catch continue;
+        defer e.allocator.free(z);
+        if (ch_engine_write_replaygain(e, z.ptr) == 0) {
+            updated += 1;
+        } else {
+            fail_count += 1;
+        }
+    }
+    if (updated == 0 and fail_count > 0) return -4;
+    return updated;
+}
+
+/// Escribe ReplayGain en toda la cola (devuelve cuantos se actualizaron).
+export fn ch_engine_write_replaygain_queue(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    var updated: i32 = 0;
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    for (e.playlist.items) |item| {
+        if (ch_engine_write_replaygain(e, item.ptr) == 0) updated += 1;
+    }
+    return updated;
+}
+
 /// Tonalidad de `path` ("C major", "A minor"...). `confidence` recibe la
 /// correlacion [-1,1] si no es null. Devuelve 0 si ok.
 export fn ch_engine_detect_key(self: ?*Engine, path: [*c]const u8, out: [*c]u8, out_size: u32, confidence: [*c]f64) i32 {

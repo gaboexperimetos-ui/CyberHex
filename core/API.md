@@ -236,6 +236,8 @@ int32_t ch_engine_key_current(ch_engine* engine, char* out, uint32_t out_size, d
 int32_t ch_engine_seek_relative(ch_engine* engine, double delta_s);
 int32_t ch_engine_toggle_play(ch_engine* engine);
 int32_t ch_engine_queue_export_m3u_relative(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_write_replaygain_dir(ch_engine* engine, const char* utf8_dir);
+int32_t ch_engine_write_replaygain_queue(ch_engine* engine);
 double  ch_bpm_detect_path(const char* utf8_path);
 double  ch_engine_bpm(ch_engine* engine);
 double  ch_dr_measure_path(const char* utf8_path, uint32_t* out_blocks);
