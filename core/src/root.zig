@@ -75,6 +75,7 @@ extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
 extern fn ch_file_free(data: [*c]u8) void;
 extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
 extern fn ch_tags_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_dir_list_audio(dir: [*c]const u8, extensions: [*c]const [*c]const u8, count_out: *i32) [*c]u8;
 
 const ChLoudness = extern struct {
     integrated_lufs: f64,
@@ -2151,6 +2152,41 @@ export fn ch_engine_load_add(self: ?*Engine, path: [*c]const u8) i32 {
     const index = added orelse return e.fail("sin memoria para la lista de reproducción", -2);
     e.pushEvent(EV_QUEUE, count, 0, 0);
     return ch_engine_play_index(e, @intCast(index));
+}
+
+/// Añade a la cola todos los audios de un directorio (no recursivo).
+/// Devuelve el numero de archivos añadidos, o negativo si error.
+export fn ch_engine_load_dir(self: ?*Engine, dir: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (dir == null) return -1;
+
+    // Lista de extensiones soportadas (terminada en null).
+    const exts = [_]?[*:0]const u8{ ".flac", ".mp3", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".aiff", ".alac", null };
+    var count: i32 = 0;
+    const raw = ch_dir_list_audio(dir, @ptrCast(&exts), &count);
+    if (raw == null) return 0;
+    defer ch_file_free(raw);
+
+    var added: i32 = 0;
+    var it = std.mem.splitScalar(u8, raw[0..@intCast(std.mem.len(raw))], '\n');
+    e.list_mutex.lock();
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+        const z = e.allocator.dupeSentinel(u8, line, 0) catch continue;
+        e.playlist.append(e.allocator, z) catch {
+            e.allocator.free(z);
+            continue;
+        };
+        added += 1;
+    }
+    e.list_mutex.unlock();
+
+    if (added > 0) {
+        e.pushEvent(EV_QUEUE, added, 0, 0);
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return added;
 }
 
 export fn ch_engine_play(self: ?*Engine) i32 {

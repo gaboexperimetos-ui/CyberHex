@@ -579,3 +579,8 @@ limitan a 4 por pista en memoria.
 ### Exportar biblioteca
 
 - `ch_library_export_csv(path)` exporta a CSV (path;filename).
+
+### Cargar carpeta
+
+- `ch_engine_load_dir(dir)` añade a la cola todos los audios del directorio
+  (no recursivo). Devuelve el numero añadido.
