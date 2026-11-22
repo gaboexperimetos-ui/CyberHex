@@ -79,6 +79,8 @@ int32_t ch_engine_recent_clear(ch_engine* engine);
 int32_t ch_engine_set_pause_at_dir_end(ch_engine* engine, int32_t enabled);
 int32_t ch_engine_pause_at_dir_end(ch_engine* engine);
 int32_t ch_engine_load_dir(ch_engine* engine, const char* dir);
+int32_t ch_engine_set_auto_gain(ch_engine* engine, int32_t enabled, double target_lufs);
+int32_t ch_engine_auto_gain(ch_engine* engine, double* target_lufs);
 int32_t ch_engine_queue_prune(ch_engine* engine);
 int32_t ch_engine_queue_dedup(ch_engine* engine);
 int32_t ch_engine_favorites_add(ch_engine* engine, const char* path);

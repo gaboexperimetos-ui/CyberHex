@@ -584,3 +584,8 @@ limitan a 4 por pista en memoria.
 
 - `ch_engine_load_dir(dir)` añade a la cola todos los audios del directorio
   (no recursivo). Devuelve el numero añadido.
+
+### Ganancia automatica
+
+- `ch_engine_set_auto_gain(1, -14)` mide LUFS al abrir cada pista y ajusta la
+  ganancia manual para alcanzar el objetivo (por defecto -14 LUFS).

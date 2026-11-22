@@ -404,6 +404,8 @@ pub const Engine = struct {
     recent_cap: usize = 50,
     avoid_recent: bool = false,
     pause_at_dir_end: bool = false,
+    auto_gain: bool = false,
+    auto_gain_target: f64 = -14.0,
     sleep_end_ms: u64 = 0,
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
@@ -1065,7 +1067,17 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         // Fundido de entrada suave (evita el clic al abrir una pista nueva).
         self.fade_gain = 0;
         if (self.trim_enabled) self.applyTrim(index);
+        if (self.auto_gain) self.applyAutoGain(index);
         return 0;
+    }
+
+    /// Ajusta la ganancia manual para que la pista suene a `auto_gain_target`.
+    fn applyAutoGain(self: *Engine, index: usize) void {
+        if (index >= self.playlist.items.len) return;
+        var result: ChLoudness = undefined;
+        if (ch_loudness_scan(self.playlist.items[index].ptr, &result) != 0) return;
+        const gain = std.math.clamp(self.auto_gain_target - result.integrated_lufs, -24, 24);
+        _ = ch_engine_set_gain_db(self, @floatCast(gain));
     }
 
     /// Recorta el silencio inicial/final de la pista recién añadida.
@@ -3810,6 +3822,21 @@ export fn ch_engine_set_pause_at_dir_end(self: ?*Engine, enabled: i32) i32 {
 export fn ch_engine_pause_at_dir_end(self: ?*Engine) i32 {
     const e = self orelse return 0;
     return if (e.pause_at_dir_end) 1 else 0;
+}
+
+/// Ganancia automatica al abrir cada pista: mide LUFS y ajusta la ganancia
+/// manual para alcanzar `target_lufs` (por defecto -14).
+export fn ch_engine_set_auto_gain(self: ?*Engine, enabled: i32, target_lufs: f64) i32 {
+    const e = self orelse return -1;
+    e.auto_gain = enabled != 0;
+    e.auto_gain_target = std.math.clamp(target_lufs, -30, -5);
+    return 0;
+}
+
+export fn ch_engine_auto_gain(self: ?*Engine, target_lufs: ?*f64) i32 {
+    const e = self orelse return 0;
+    if (target_lufs) |p| p.* = e.auto_gain_target;
+    return if (e.auto_gain) 1 else 0;
 }
 
 
