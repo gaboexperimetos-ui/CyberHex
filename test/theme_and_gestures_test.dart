@@ -249,7 +249,11 @@ void main() {
     testWidgets('el modo bolsillo bloquea y se sale con pulsación larga',
         (tester) async {
       final (fake, _, theme) = await pumpPlayer(tester);
-      await tester.tap(find.byIcon(Icons.lock_outline_rounded));
+      await tester.tap(find.byTooltip('Modo bolsillo'));
+      // La página entera escucha el doble toque, así que el toque simple se
+      // resuelve cuando vence esa ventana: hay que dejar pasar el reloj.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       // El bloqueo es un ajuste del tema: si no se enciende, el botón no llegó.
       expect(theme.pocketMode, isTrue, reason: 'el botón no llegó a encenderlo');
