@@ -68,6 +68,11 @@ pub const Canvas = struct {
         self.pixels[i + 2] = b;
     }
 
+    pub fn destroy(self: *Canvas, allocator: std.mem.Allocator) void {
+        allocator.free(self.pixels);
+        self.* = .{ .width = 0, .height = 0, .pixels = &.{} };
+    }
+
     /// Rellena el rectangulo [x0,x1) x [y0,y1) con recorte al lienzo.
     pub fn fillRect(self: *Canvas, x0: usize, x1: usize, y0: usize, y1: usize, r: u8, g: u8, b: u8) void {
         const xa = @min(x0, self.width);

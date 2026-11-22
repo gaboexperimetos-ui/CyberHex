@@ -3,6 +3,7 @@ const eq = @import("eq.zig");
 const fft = @import("fft.zig");
 const Stretch = @import("stretch.zig").Stretch;
 const png = @import("png.zig");
+const Canvas = png.Canvas;
 
 pub const SAMPLE_RATE: u32 = 48000;
 const SAMPLE_RATE_F: f32 = 48000.0;
@@ -4689,6 +4690,206 @@ export fn ch_engine_strip_silence(self: ?*Engine, src: [*c]const u8, dst: [*c]co
     _ = self;
     if (src == null or dst == null) return -1;
     return ch_strip_silence(src, dst, threshold_db, min_s, gap_s, rate);
+}
+
+/// Une `srcs` (lista de rutas) en un solo WAV PCM16 mono a `rate`.
+/// `count` es el numero de rutas de `srcs`. Devuelve 0 si ok.
+export fn ch_engine_concat_wav(self: ?*Engine, srcs: [*c]const [*c]const u8, count: i32, dst: [*c]const u8, rate: i32) i32 {
+    const e = self orelse return -1;
+    if (srcs == null or dst == null or count <= 0) return -1;
+    if (rate < 8000 or rate > 192000) return -1;
+    const n: usize = @intCast(count);
+
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(e.allocator);
+    out.appendSlice(e.allocator, &std.mem.zeroes([44]u8)) catch return -2;
+
+    var buf: [8192]f32 = undefined;
+    var total: u64 = 0;
+    var opened: i32 = 0;
+    var failed: i32 = 0;
+
+    for (srcs[0..n]) |sp| {
+        if (sp == null) {
+            failed += 1;
+            continue;
+        }
+        const d = ch_decode_open(sp, @intCast(rate), 1) orelse {
+            failed += 1;
+            continue;
+        };
+        opened += 1;
+        while (true) {
+            const got = ch_decode_read(d, &buf, 4096);
+            if (got == 0) break;
+            var i: u64 = 0;
+            while (i < got) : (i += 1) {
+                const v = std.math.clamp(buf[i], -1.0, 1.0);
+                const sc: i16 = @intFromFloat(v * 32767.0);
+                const bytes: [2]u8 = .{ @truncate(@as(u16, @bitCast(sc))), @truncate(@as(u16, @bitCast(sc)) >> 8) };
+                out.appendSlice(e.allocator, &bytes) catch {
+                    ch_decode_close(d);
+                    out.deinit(e.allocator);
+                    return -2;
+                };
+            }
+            total += got;
+        }
+        ch_decode_close(d);
+    }
+
+    if (opened == 0) {
+        out.deinit(e.allocator);
+        return e.fail("no se pudo abrir ningun archivo", -3);
+    }
+
+    const data_len: u32 = @intCast(out.items.len - 44);
+    const rate32: u32 = @intCast(rate);
+    wr32(out.items[16..20], 16);
+    wr16(out.items[20..22], 1);
+    wr16(out.items[22..24], 1);
+    wr32(out.items[24..28], rate32);
+    wr32(out.items[28..32], rate32 * 2);
+    wr16(out.items[32..34], 2);
+    wr16(out.items[34..36], 16);
+    wr32(out.items[4..8], 36 + data_len);
+    wr32(out.items[40..44], data_len);
+    @memcpy(out.items[0..4], "RIFF");
+    @memcpy(out.items[8..12], "WAVE");
+    @memcpy(out.items[12..16], "fmt ");
+    @memcpy(out.items[36..40], "data");
+
+    const rc = ch_file_write_atomic(dst, out.items.ptr, out.items.len);
+    if (failed > 0 and opened == 0) return -4;
+    return rc;
+}
+
+/// Divide `src` en un WAV por cada tramo de silencio (los silencios se
+/// descartan). `prefix` es el prefijo de salida y se anade _01, _02...
+/// Devuelve el numero de pistas escritas, o negativo si error.
+export fn ch_engine_split_by_silence(self: ?*Engine, src: [*c]const u8, prefix: [*c]const u8, threshold_db: f32, min_s: f64, rate: i32) i32 {
+    const e = self orelse return -1;
+    if (src == null or prefix == null) return -1;
+    if (rate < 8000 or rate > 192000) return -1;
+
+    var segs_storage: [512]f64 = undefined;
+    const nseg = ch_silence_segments(src, threshold_db, min_s, &segs_storage, 512);
+    if (nseg < 0) return -2;
+
+    // Los tramos de audio son el complemento de los silencios.
+    const d = ch_decode_open(src, @intCast(rate), 1) orelse return -3;
+    const total_dur = ch_decode_duration(d);
+    ch_decode_close(d);
+    if (total_dur <= 0) return -4;
+
+    var ranges: std.ArrayListUnmanaged(struct { a: f64, b: f64 }) = .empty;
+    defer ranges.deinit(e.allocator);
+    var cursor: f64 = 0;
+    for (0..@intCast(nseg)) |i| {
+        const a = segs_storage[i * 2];
+        const b = segs_storage[i * 2 + 1];
+        if (a > cursor + 0.05) {
+            ranges.append(e.allocator, .{ .a = cursor, .b = a }) catch return -2;
+        }
+        cursor = @max(cursor, b);
+    }
+    if (total_dur > cursor + 0.05) {
+        ranges.append(e.allocator, .{ .a = cursor, .b = total_dur }) catch return -2;
+    }
+    if (ranges.items.len == 0) return 0;
+
+    var written: i32 = 0;
+    for (ranges.items, 0..) |r, i| {
+        var path_buf: [1024]u8 = undefined;
+        const path = std.fmt.bufPrintSentinel(&path_buf, "{s}_{d:0>2}.wav", .{ std.mem.span(prefix), i + 1 }, 0) catch continue;
+        const rc = ch_engine_export_wav(e, src, path.ptr, r.a, r.b - r.a, rate, 1);
+        if (rc == 0) written += 1;
+    }
+    return written;
+}
+
+/// Espectrograma de `src` como PNG: eje X = tiempo, eje Y = frecuencia
+/// (escala logaritmica de 20 Hz a 20 kHz), color = energia.
+///
+/// `width`/`height` son el tamano de la imagen; `buckets` no se usa y se deja
+/// por compatibilidad. Se decodifica a mono 22050 Hz para abaratar el calculo.
+export fn ch_engine_spectrogram_png(self: ?*Engine, src: [*c]const u8, dst: [*c]const u8, width: i32, height: i32) i32 {
+    const e = self orelse return -1;
+    if (src == null or dst == null or width < 16 or height < 16) return -1;
+    const w: usize = @min(@as(usize, @intCast(width)), 4096);
+    const h: usize = @min(@as(usize, @intCast(height)), 2048);
+
+    const rate: u32 = 22050;
+    const N: usize = 1024;
+    const d = ch_decode_open(src, rate, 1) orelse return -2;
+    defer ch_decode_close(d);
+
+    // Columnas de la imagen: una ventana de N muestras por columna.
+    var re: [N]f32 = undefined;
+    var im: [N]f32 = undefined;
+    var canvas = png.Canvas.create(e.allocator, w, h) catch return -3;
+    defer e.allocator.free(canvas.pixels);
+    canvas.fillRect(0, w, 0, h, 0, 0, 0);
+
+    // Frecuencias de las filas (log) y bins FFT correspondientes.
+    const max_bin: usize = N / 2;
+    var row_bin: [2048]usize = undefined;
+    const rows: usize = @min(h, row_bin.len);
+    for (0..rows) |y| {
+        // y=0 abajo (20 Hz), y=rows-1 arriba (20 kHz).
+        const t = 1.0 - @as(f32, @floatFromInt(y)) / @as(f32, @floatFromInt(rows - 1));
+        const f = 20.0 * std.math.pow(f32, 1000.0, @as(f32, @floatCast(t * 3.0)));
+        const bin = @as(usize, @intFromFloat(f * @as(f32, @floatFromInt(N)) / @as(f32, @floatFromInt(rate))));
+        row_bin[y] = @min(@max(bin, 1), max_bin - 1);
+    }
+
+    var col: usize = 0;
+    var wrote_any = false;
+    while (col < w) {
+        var got: usize = 0;
+        while (got < N) {
+            const g = ch_decode_read(d, re[got..].ptr, N - got);
+            if (g == 0) break;
+            got += @intCast(g);
+        }
+        if (got == 0) break;
+        // Rellenar con ceros si la ultima ventana es corta.
+        for (got..N) |i| re[i] = 0;
+        for (0..N) |i| {
+            const phase = 2.0 * std.math.pi * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(N));
+            im[i] = 0;
+            re[i] *= 0.5 - 0.5 * @cos(phase);
+        }
+        fft.fft(&re, &im);
+
+        for (0..rows) |y| {
+            const bin = row_bin[y];
+            const power = re[bin] * re[bin] + im[bin] * im[bin];
+            const db = 10.0 * std.math.log10(power + 1e-20);
+            // -90..-10 dB -> 0..1
+            const v = std.math.clamp((db + 90.0) / 80.0, 0.0, 1.0);
+            // Mapa de calor simple: azul -> cian -> amarillo -> rojo.
+            const chan = struct {
+                fn f(x: f32) u8 {
+                    const c = std.math.clamp(x, 0.0, 1.0) * 255.0;
+                    return @intFromFloat(c);
+                }
+            }.f;
+            const r: u8 = chan(v * 3.0 - 1.0);
+            const g: u8 = chan((v * 3.0 - 2.0) * 0.5 + v);
+            const b: u8 = chan(1.0 - v * 2.0);
+            canvas.set(col, y, r, @min(@as(u8, 255), g), b);
+        }
+        col += 1;
+        wrote_any = true;
+        if (got < N) break;
+    }
+    if (!wrote_any) {
+        canvas.destroy(e.allocator);
+        return e.fail("no se pudo leer el audio", -4);
+    }
+    _ = png.write(e.allocator, std.mem.span(dst), canvas);
+    return 0;
 }
 
 /// Escribe ReplayGain en todos los FLAC/MP3/Ogg/Opus de un directorio.
