@@ -130,6 +130,13 @@ void main() {
       ));
       await tester.pump();
 
+      // La página es un `ListView`: la sección no existe hasta bajar.
+      await tester.scrollUntilVisible(
+        find.text('NOTIFICACIÓN Y AURICULARES'),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pump();
       expect(find.text('NOTIFICACIÓN Y AURICULARES'), findsOneWidget);
 
       await tester.tap(find.text('Auto-play al conectar'));

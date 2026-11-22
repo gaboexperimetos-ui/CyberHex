@@ -240,7 +240,8 @@ void main() {
     controller.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('Dos'), findsNothing);
+    // El título también lo pinta el mini reproductor, así que se mira la lista.
+    expect(find.widgetWithText(ListTile, 'Dos'), findsNothing);
     expect(find.textContaining('3 de 4'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());

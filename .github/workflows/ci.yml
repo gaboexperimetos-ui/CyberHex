@@ -219,8 +219,9 @@ jobs:
               { buf[NR] = $0 }
               / \[E\]/ {
                 print "=== " $0
-                for (i = NR - 24; i <= NR; i++) {
-                  if (i > 0 && buf[i] ~ /\[E\]|error-causing|overflowed by|Expected|Actual|Which|Exception|respondi|Error/) {
+                for (i = NR - 60; i <= NR; i++) {
+                  # Sin líneas en blanco ni separadores: el bloque útil es corto.
+                  if (i > 0 && buf[i]) {
                     print buf[i]
                   }
                 }

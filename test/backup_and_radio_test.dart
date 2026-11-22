@@ -656,7 +656,7 @@ void main() {
       expect(find.text('Exportar audio'), findsOneWidget);
       expect(find.text('Tema'), findsOneWidget);
       expect(find.byType(RangeSlider), findsOneWidget);
-      expect(find.text('Tema masterizada'), findsOneWidget);
+      expect(find.text('Pista masterizada'), findsOneWidget);
       expect(find.text('Tono de llamada'), findsOneWidget);
       expect(find.textContaining('Aplicar EQ, 9D y ancho estéreo'), findsOneWidget);
       expect(find.text('Exportar'), findsOneWidget);
