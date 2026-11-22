@@ -215,9 +215,18 @@ jobs:
           fi
           if [ -f tests.log ]; then
             printf '### tests.log: fallos\n\n' >> diagnostico.txt
-            grep -B20 '\[E\]' tests.log |
-              grep -E '\[E\]|error-causing|overflowed by|Expected:|Actual:|Which:|Exception|respondio|respondió' |
-              head -400 >> diagnostico.txt
+            awk '
+              { buf[NR] = $0 }
+              / \[E\]/ {
+                print "=== " $0
+                for (i = NR - 24; i <= NR; i++) {
+                  if (i > 0 && buf[i] ~ /\[E\]|error-causing|overflowed by|Expected|Actual|Which|Exception|respondi|Error/) {
+                    print buf[i]
+                  }
+                }
+                print "---"
+              }
+            ' tests.log | head -400 >> diagnostico.txt
             printf '\n\n' >> diagnostico.txt
           fi
           gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
