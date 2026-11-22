@@ -472,14 +472,16 @@ Deuxième ligne
       await tester.runAsync(() async {
         await tester.tap(find.text('Guardar'));
         await tester.pump();
-        await Future<void>.delayed(const Duration(milliseconds: 120));
+        await Future<void>.delayed(const Duration(milliseconds: 400));
       });
       await tester.pump();
 
+      // Primero lo que cuenta el panel: si falló, el mensaje sale aquí y no
+      // hay que adivinar por qué el archivo sigue igual.
+      expect(find.textContaining('actualizados'), findsOneWidget);
       final read = TagEditor.read(audio);
       expect(read.title, 'Nuevo título');
       expect(read.artist, 'Viejo artista');
-      expect(find.textContaining('actualizados'), findsOneWidget);
 
       await tester.pumpWidget(const SizedBox());
       dir.deleteSync(recursive: true);

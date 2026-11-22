@@ -202,8 +202,13 @@ void main() {
       await tester.pumpWidget(_app(AudioLabSheet(controller: controller)));
       await tester.pump();
 
-      // `ensureVisible` basta: el panel es un `SingleChildScrollView`, así que
-      // el botón ya existe en el árbol y solo hay que llevarlo a la ventana.
+      // La sección está plegada: primero se abre y luego se baja hasta el
+      // botón (el panel es un `SingleChildScrollView`, así que existe en el
+      // árbol en cuanto la sección se despliega).
+      await tester.ensureVisible(find.text('Herramientas'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Herramientas'));
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Detectar BPM'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Detectar BPM'));

@@ -223,7 +223,9 @@ jobs:
               # Toques que no llegan al widget: explican los "no encuentro el texto".
               grep -A3 'would not hit test\|Warning: A call to' tests.log
               grep -E '\[E\]' tests.log
-            } | head -700 >> diagnostico.txt
+              # En los `test()` sin widgets el mensaje va detrás de la línea [E].
+              grep -A6 '\[E\]$' tests.log
+            } | head -800 >> diagnostico.txt
             printf '\n### cola del registro\n\n' >> diagnostico.txt
             tail -40 tests.log >> diagnostico.txt
             printf '\n\n' >> diagnostico.txt
