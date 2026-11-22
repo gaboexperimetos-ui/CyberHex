@@ -649,10 +649,19 @@ class MultiQueueStore extends ChangeNotifier {
     _dirty = true;
     notifyListeners();
     if (file == null) return;
-    unawaited(save());
+    // Antirrebote: arrastrar una cola dispara decenas de cambios y no hace
+    // falta escribir el archivo en cada uno.
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 250), () => unawaited(save()));
   }
 
+  Timer? _saveTimer;
+
+  /// Escribe las cinco colas. La llama el antirrebote, la UI al cerrar y
+  /// [dispose]; siempre deja el archivo escrito antes de devolver.
   Future<void> save() async {
+    _saveTimer?.cancel();
+    _saveTimer = null;
     final target = file;
     if (target == null) {
       _dirty = false;
@@ -664,13 +673,24 @@ class MultiQueueStore extends ChangeNotifier {
         'active': _active,
         'slots': <Map<String, Object?>>[for (final slot in _slots) slot.toJson()],
       };
-      final temp = File('${target.path}.tmp');
+      // Nombre único: dos guardados seguidos compartían el `.tmp` y el segundo
+      // `rename` podía encontrárselo ya movido.
+      final stamp = DateTime.now().microsecondsSinceEpoch;
+      final temp = File('${target.path}.$stamp.tmp');
       await temp.writeAsString(jsonEncode(payload), flush: true);
       await temp.rename(target.path);
       _dirty = false;
     } catch (_) {
       // Sin disco no pasa nada: las colas viven en memoria.
     }
+  }
+
+  @override
+  void dispose() {
+    _saveTimer?.cancel();
+    _saveTimer = null;
+    if (_dirty) unawaited(save());
+    super.dispose();
   }
 }
 
