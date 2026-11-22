@@ -97,7 +97,12 @@ enum CyberHexThemeId {
 /// por defecto: cuando una pantalla no pide la paleta del contexto, se ve igual
 /// que antes. Las pantallas que ya la piden (reproductor, mini-reproductor y
 /// ajustes) cambian con el tema.
-class CyberHexPalette {
+/// Paleta de un tema.
+///
+/// Extiende [ThemeExtension] para poder viajar dentro del `ThemeData` y
+/// recuperarse con `Theme.of(context).extension<CyberHexPalette>()`: sin eso,
+/// `paletteOf` no encontraría nada y devolvería siempre la neón.
+class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
   const CyberHexPalette({
     required this.id,
     required this.background,
@@ -227,6 +232,15 @@ class CyberHexPalette {
 
   @override
   String toString() => 'CyberHexPalette($label)';
+
+  /// Las paletas no se interpolan: cambiar de tema es instantáneo, así que
+  /// `lerp` devuelve una u otra según el lado del ecuador de la animación.
+  @override
+  CyberHexPalette copyWith() => this;
+
+  @override
+  CyberHexPalette lerp(covariant CyberHexPalette? other, double t) =>
+      t < 0.5 ? this : (other ?? this);
 }
 
 /// Cómo se pinta la carátula en el reproductor.

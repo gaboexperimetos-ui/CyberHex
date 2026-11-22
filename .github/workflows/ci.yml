@@ -83,8 +83,10 @@ jobs:
           exit $code
 
       - name: La biblioteca dinámica se produce
+        # `zig build test` no instala artefactos: hay que pedir el install.
         run: |
           set -euo pipefail
+          zig build -Ddecoder=miniaudio
           test -f zig-out/lib/libcyberhex_core.so
           nm -D zig-out/lib/libcyberhex_core.so | grep -q ' T ch_'
 

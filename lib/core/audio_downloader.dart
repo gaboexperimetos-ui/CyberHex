@@ -88,7 +88,10 @@ class AudioDownloader {
         directory = directory ?? StorageDirectory.current.path;
 
   /// Dónde se guardan las descargas por defecto.
-  final String directory;
+  ///
+  /// Es mutable a propósito: la página lo reapunta al disco de la biblioteca
+  /// (la carpeta de la pista que suena) nada más abrirse.
+  String directory;
 
   final HttpClient _client;
 

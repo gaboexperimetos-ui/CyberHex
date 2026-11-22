@@ -114,7 +114,7 @@ class _QueueSheetState extends State<QueueSheet> {
       setState(() {
         _message = target.isEmpty
             ? 'Cola ${slot + 1} vacía y lista para llenar.'
-            : 'Cola «${target.label}» cargada (${target.length} pistas).';
+            : 'Cola «${target.label}» cargada (${target.paths.length} pistas).';
       });
     }
   }
@@ -285,7 +285,7 @@ class _QueueSheetState extends State<QueueSheet> {
           final active = index == _queues.active;
           return ChoiceChip(
             label: Text(
-              '${index + 1} · ${slot.length}',
+              '${index + 1} · ${slot.paths.length}',
               style: TextStyle(
                 fontSize: 11,
                 color: active ? chOnAccent : chMuted,
