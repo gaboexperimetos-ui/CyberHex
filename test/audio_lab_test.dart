@@ -197,10 +197,8 @@ void main() {
       await tester.pumpWidget(_app(AudioLabSheet(controller: controller)));
       await tester.pump();
 
-      await tester.scrollUntilVisible(find.text('Detectar BPM'), 250,
-          scrollable: find.byType(Scrollable).first);
-      // Deja el botón dentro de la ventana antes de tocarlo: si queda al borde,
-      // el toque no llega.
+      // `ensureVisible` basta: el panel es un `SingleChildScrollView`, así que
+      // el botón ya existe en el árbol y solo hay que llevarlo a la ventana.
       await tester.ensureVisible(find.text('Detectar BPM'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Detectar BPM'));
