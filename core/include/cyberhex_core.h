@@ -54,6 +54,10 @@ int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float thr
 int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
 int32_t ch_engine_set_fade_out(ch_engine* engine, float seconds); /* 0 .. 30 */
 float   ch_engine_fade_out(ch_engine* engine);
+int32_t ch_engine_set_8d(ch_engine* engine, int32_t enabled, float speed, float depth);
+int32_t ch_engine_8d(ch_engine* engine, float* speed, float* depth);
+int32_t ch_engine_set_reverb(ch_engine* engine, int32_t enabled, float mix);
+int32_t ch_engine_reverb(ch_engine* engine, float* mix);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
 int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);

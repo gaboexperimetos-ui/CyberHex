@@ -276,6 +276,17 @@ pub const Engine = struct {
     // Fundido de salida al llegar al final de la pista (segundos, 0 = corte).
     fade_out_s: f32 = 0,
 
+    // Efecto 8D/espacial: auto-paneo giratorio + reverb.
+    spatial_enabled: bool = false,
+    spatial_speed_bits: u32 = @bitCast(@as(f32, 0.25)), // vueltas/seg
+    spatial_depth_bits: u32 = @bitCast(@as(f32, 0.7)),   // 0..1
+    spatial_phase: f32 = 0,
+    reverb_enabled: bool = false,
+    reverb_mix_bits: u32 = @bitCast(@as(f32, 0.25)),
+    reverb_buf: ?[]f32 = null,
+    reverb_len: usize = 0,
+    reverb_pos: usize = 0,
+
     // Mezcla: mono y balance (-1 izquierda .. +1 derecha).
     balance_bits: u32 = @bitCast(@as(f32, 0)),
     gain_db_bits: u32 = @bitCast(@as(f32, 0)),
@@ -1305,6 +1316,12 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             var lg = self.limit_gain;
             const crossfeeding = self.cf_enabled;
             const width = @as(f32, @bitCast(@atomicLoad(u32, &self.width_bits, .monotonic)));
+            const spatial = self.spatial_enabled;
+            const spatial_speed = @as(f32, @bitCast(@atomicLoad(u32, &self.spatial_speed_bits, .monotonic)));
+            const spatial_depth = @as(f32, @bitCast(@atomicLoad(u32, &self.spatial_depth_bits, .monotonic)));
+            const reverb_on = self.reverb_enabled;
+            const reverb_mix = @as(f32, @bitCast(@atomicLoad(u32, &self.reverb_mix_bits, .monotonic)));
+            var spatial_phase = self.spatial_phase;
             const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &self.cf_strength_bits, .monotonic)));
             const cf_wet = 0.6 * std.math.clamp(cf_strength, 0.0, 1.0);
             const cf_alpha = 1.0 - @exp(-2.0 * std.math.pi * 700.0 / @as(f32, @floatFromInt(SAMPLE_RATE)));
@@ -1353,9 +1370,38 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                     s = mid + side;
                     s2 = mid - side;
                 }
+                if (spatial) {
+                    // Auto-paneo giratorio (efecto 8D): rota la imagen estereo.
+                    const angle = spatial_phase;
+                    const pan = @sin(angle) * spatial_depth;
+                    // Ganancias de paneo (ley seno/coseno).
+                    const gl = std.math.cos((pan + 1.0) * std.math.pi * 0.25);
+                    const gr = std.math.sin((pan + 1.0) * std.math.pi * 0.25);
+                    const mid = (s + s2) * 0.5;
+                    s = mid * gl * 1.4142;
+                    s2 = mid * gr * 1.4142;
+                    spatial_phase += spatial_speed * 2.0 * std.math.pi / @as(f32, @floatFromInt(SAMPLE_RATE));
+                    if (spatial_phase > 2.0 * std.math.pi) spatial_phase -= 2.0 * std.math.pi;
+                }
                 if (balance != 0) {
                     s *= gain_l;
                     s2 *= gain_r;
+                }
+                if (reverb_on) {
+                    // Reverb estéreo simple (delay con feedback cruzado).
+                    if (self.reverb_buf) |rbuf| {
+                        const dly = 1557; // ~32 ms @ 48k
+                        const fb: f32 = 0.35;
+                        const wet = reverb_mix;
+                        const dry = 1.0 - wet * 0.5;
+                        const rev_l = rbuf[self.reverb_pos];
+                        const rev_r = rbuf[(self.reverb_pos + dly) % self.reverb_len];
+                        rbuf[self.reverb_pos] = s * fb + rev_r * fb;
+                        rbuf[(self.reverb_pos + dly) % self.reverb_len] = s2 * fb + rev_l * fb;
+                        s = s * dry + rev_l * wet;
+                        s2 = s2 * dry + rev_r * wet;
+                        self.reverb_pos = (self.reverb_pos + 1) % self.reverb_len;
+                    }
                 }
                 if (limiting) {
                     const peak = @max(@abs(s), @abs(s2));
@@ -1381,6 +1427,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             self.limit_gain = lg;
             self.cf_lp_l = lp_l;
             self.cf_lp_r = lp_r;
+            self.spatial_phase = spatial_phase;
             self.fade_gain = if (!playing and g < 0.001) 0 else g;
 
             self.meter_lock.lock();
@@ -1605,6 +1652,7 @@ fn destroyEngine(e: *Engine) void {
     e.allocator.free(e.sp_re);
     e.allocator.free(e.sp_buf);
     e.allocator.free(e.scratch);
+    if (e.reverb_buf) |b| e.allocator.free(b);
     e.allocator.free(e.ring.buf);
     e.allocator.destroy(e);
 }
@@ -1631,6 +1679,11 @@ export fn ch_engine_create() ?*Engine {
         return null;
     };
     self.ring.cap = RING_FRAMES;
+
+    // Buffer de reverb estereo (~50 ms x 2 canales).
+    self.reverb_len = 4096;
+    self.reverb_buf = alloc.alloc(f32, self.reverb_len) catch null;
+    self.reverb_pos = 0;
 
     self.scratch = alloc.alloc(f32, SCRATCH_FRAMES * CHANNELS) catch {
         setGlobalError("no se pudo reservar el búfer de decodificación");
@@ -2346,6 +2399,37 @@ export fn ch_engine_set_fade_out(self: ?*Engine, seconds: f32) i32 {
 export fn ch_engine_fade_out(self: ?*Engine) f32 {
     const e = self orelse return 0;
     return e.fade_out_s;
+}
+
+/// Efecto 8D/espacial: auto-paneo giratorio. `speed` en vueltas/seg (0.05..2),
+/// `depth` 0..1. `enabled != 0` lo activa.
+export fn ch_engine_set_8d(self: ?*Engine, enabled: i32, speed: f32, depth: f32) i32 {
+    const e = self orelse return -1;
+    e.spatial_enabled = enabled != 0;
+    @atomicStore(u32, &e.spatial_speed_bits, @bitCast(std.math.clamp(speed, 0.05, 2)), .monotonic);
+    @atomicStore(u32, &e.spatial_depth_bits, @bitCast(std.math.clamp(depth, 0, 1)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_8d(self: ?*Engine, speed: ?*f32, depth: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (speed) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.spatial_speed_bits, .monotonic)));
+    if (depth) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.spatial_depth_bits, .monotonic)));
+    return if (e.spatial_enabled) 1 else 0;
+}
+
+/// Reverberacion esterea. `mix` 0..1 (0 = seco).
+export fn ch_engine_set_reverb(self: ?*Engine, enabled: i32, mix: f32) i32 {
+    const e = self orelse return -1;
+    e.reverb_enabled = enabled != 0;
+    @atomicStore(u32, &e.reverb_mix_bits, @bitCast(std.math.clamp(mix, 0, 1)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_reverb(self: ?*Engine, mix: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (mix) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.reverb_mix_bits, .monotonic)));
+    return if (e.reverb_enabled) 1 else 0;
 }
 
 /// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).

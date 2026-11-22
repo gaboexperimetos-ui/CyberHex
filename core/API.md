@@ -520,3 +520,11 @@ limitan a 4 por pista en memoria.
 - `ch_engine_export_json(path)` escribe cola, pista actual, posición y todos los
   ajustes en un JSON legible, ideal para copias de seguridad o migrar a otro
   dispositivo.
+
+### Efecto 8D y reverberación
+
+- `ch_engine_set_8d(engine, enabled, speed, depth)`: auto-paneo giratorio
+  (efecto "8D"). `speed` en vueltas/seg (0.05..2), `depth` 0..1. La imagen
+  estereofónica rota suavemente entre los dos canales.
+- `ch_engine_set_reverb(engine, enabled, mix)`: reverberación estérea
+  (delay con feedback cruzado), `mix` 0..1.
