@@ -74,6 +74,7 @@ extern fn c_lib_search(lib: ?*const ch_library, needle: [*c]const u8, count_out:
 extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
 extern fn ch_file_free(data: [*c]u8) void;
 extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
+extern fn ch_tags_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 
 const ChLoudness = extern struct {
     integrated_lufs: f64,
@@ -386,6 +387,10 @@ pub const Engine = struct {
     meter_peak_r: f32 = 0,
     meter_sum: f64 = 0,
     meter_frames: usize = 0,
+    // Estadisticas de escucha.
+    stats_lock: SpinLock = .{},
+    play_count: u64 = 0,
+    listen_frames: u64 = 0,
     sleep_end_ms: u64 = 0,
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
@@ -601,6 +606,33 @@ pub const Engine = struct {
         }
     }
 
+    /// Busca cover.jpg / cover.png junto al audio y lo carga si existe.
+    fn loadCoverFromFile(self: *Engine, index: usize, seg: *Segment) void {
+        if (index >= self.playlist.items.len) return;
+        const path = self.playlist.items[index];
+        const dir_end = std.mem.lastIndexOfScalar(u8, path, '/') orelse return;
+        const dir = path[0 .. dir_end + 1];
+        const names = [_][]const u8{ "cover.jpg", "cover.png", "Cover.jpg", "Cover.png", "folder.jpg", "front.jpg" };
+        for (names) |name| {
+            const full = std.fmt.allocPrint(self.allocator, "{s}{s}", .{ dir, name }) catch continue;
+            defer self.allocator.free(full);
+            var sz: u64 = 0;
+            const raw = ch_file_read_all(full.ptr, &sz) orelse continue;
+            const len: usize = @intCast(sz);
+            if (len == 0) {
+                ch_file_free(raw);
+                continue;
+            }
+            if (self.allocator.alloc(u8, len)) |copy| {
+                @memcpy(copy, raw[0..len]);
+                seg.covers[seg.cover_count] = copy;
+                seg.cover_count = 1;
+            } else |_| {}
+            ch_file_free(raw);
+            return;
+        }
+    }
+
     fn addSegment(self: *Engine, index: usize, d: *ch_decoder, overlap: usize) bool {
         if (self.seg_count >= MAX_SEGMENTS) {
             self.seg_lock.lock();
@@ -667,6 +699,10 @@ pub const Engine = struct {
                 seg.covers[seg.cover_count] = copy;
                 seg.cover_count += 1;
             } else |_| {}
+        }
+        // Caratula desde archivo: si el audio no traia, buscar cover.jpg/png.
+        if (seg.cover_count == 0) {
+            self.loadCoverFromFile(index, &seg);
         }
 
         // Letra sincronizada: se busca un .lrc junto al audio (mismo nombre).
@@ -988,6 +1024,10 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         _ = self.addSegment(index, d, 0);
         @atomicStore(usize, &self.played, 0, .release);
         @atomicStore(bool, &self.eof, false, .release);
+        // Estadistica: cuenta una reproduccion.
+        self.stats_lock.lock();
+        self.play_count += 1;
+        self.stats_lock.unlock();
         // Fundido de entrada suave (evita el clic al abrir una pista nueva).
         self.fade_gain = 0;
         if (self.trim_enabled) self.applyTrim(index);
@@ -1345,6 +1385,10 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                     adv = @intFromFloat(@round(f));
                 }
                 _ = @atomicRmw(usize, &self.played, .Add, adv, .monotonic);
+                // Estadistica: tiempo escuchado (frames reproducidos).
+                self.stats_lock.lock();
+                self.listen_frames += adv;
+                self.stats_lock.unlock();
             }
         }
 
@@ -2687,6 +2731,31 @@ export fn ch_engine_hrtf(self: ?*Engine, angle: ?*f32) i32 {
     const e = self orelse return 0;
     if (angle) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.hrtf_angle_bits, .monotonic)));
     return if (e.hrtf_enabled) 1 else 0;
+}
+
+/// Estadisticas de escucha: numero de reproducciones y segundos totales.
+export fn ch_engine_stats(self: ?*Engine, play_count: ?*u64, listen_seconds: ?*f64) i32 {
+    const e = self orelse return -1;
+    e.stats_lock.lock();
+    const pc = e.play_count;
+    const frames = e.listen_frames;
+    e.stats_lock.unlock();
+    if (play_count) |p| p.* = pc;
+    if (listen_seconds) |p| p.* = @as(f64, @floatFromInt(frames)) / @as(f64, @floatFromInt(SAMPLE_RATE));
+    return 0;
+}
+
+/// Escribe una etiqueta (key/value) en el archivo de la pista actual. Solo
+/// FLAC por ahora. `value` NULL borra el campo. Devuelve 0 si ok.
+export fn ch_engine_set_tag(self: ?*Engine, key: [*c]const u8, value: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (key == null) return -1;
+    e.list_mutex.lock();
+    const idx = e.queue_index;
+    const path: ?[:0]u8 = if (idx < e.playlist.items.len) e.playlist.items[idx] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return -2;
+    return ch_tags_set(p.ptr, key, value orelse @ptrCast(""));
 }
 
 /// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).

@@ -120,6 +120,7 @@ pub fn build(b: *std.Build) void {
             "src/cue.c",
             "src/fileio.c",
             "src/analysis.c",
+            "src/tags.c",
         },
         .flags = &.{ "-std=c23", "-O2" },
     });

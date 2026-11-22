@@ -64,6 +64,8 @@ int32_t ch_engine_set_peq(ch_engine* engine, int32_t band, int32_t enabled, int3
 int32_t ch_engine_peq(ch_engine* engine, int32_t band, int32_t* type, float* freq, float* gain_db, float* q);
 int32_t ch_engine_set_hrtf(ch_engine* engine, int32_t enabled, float angle);
 int32_t ch_engine_hrtf(ch_engine* engine, float* angle);
+int32_t ch_engine_stats(ch_engine* engine, uint64_t* play_count, double* listen_seconds);
+int32_t ch_engine_set_tag(ch_engine* engine, const char* key, const char* value);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
 int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);

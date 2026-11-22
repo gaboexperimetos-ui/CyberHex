@@ -539,3 +539,11 @@ limitan a 4 por pista en memoria.
   (`angle` -1 izquierda .. +1 derecha) con retardo interaural.
 - `ch_engine_spectrum(engine, out, bands)` ya devuelve `bands` valores 0..1
   para dibujar el visualizador.
+
+### Caratula desde archivo, estadisticas y tags
+
+- Si el audio no trae caratula, el motor busca `cover.jpg/png` (y variantes)
+  junto al archivo y la expone como caratula 0.
+- `ch_engine_stats(&plays, &seconds)` devuelve reproducciones y tiempo total.
+- `ch_engine_set_tag(key, value)` escribe etiquetas en FLAC (Vorbis comments).
+  `value = NULL` borra el campo. Solo FLAC por ahora.
