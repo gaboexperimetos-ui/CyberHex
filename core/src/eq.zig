@@ -250,3 +250,89 @@ test "solo se reinicia el estado de la banda que cambia" {
     e.process(&buf, 2);
     try std.testing.expectEqual(@as(u64, 0), e.pending_reset);
 }
+
+// ---------------------------------------------------------------------------
+// Presets de EQ
+// ---------------------------------------------------------------------------
+
+/// Punto de control de un preset: ganancia en dB a una frecuencia.
+pub const PresetPoint = struct { freq: f32, gain_db: f32 };
+
+pub const Preset = struct {
+    name: []const u8,
+    /// Puntos de control (frecuencia, ganancia). Se interpolan en log-frecuencia.
+    points: []const PresetPoint,
+};
+
+/// Presets incluidos en el nucleo, del 0 al `PRESET_COUNT - 1`.
+pub const PRESETS = [_]Preset{
+    .{ .name = "Flat", .points = &[_]PresetPoint{} },
+    .{ .name = "Bass Boost", .points = &[_]PresetPoint{ .{ .freq = 60, .gain_db = 6 }, .{ .freq = 150, .gain_db = 4 }, .{ .freq = 400, .gain_db = 0 } } },
+    .{ .name = "Bass Reducer", .points = &[_]PresetPoint{ .{ .freq = 60, .gain_db = -6 }, .{ .freq = 150, .gain_db = -4 }, .{ .freq = 400, .gain_db = 0 } } },
+    .{ .name = "Treble Boost", .points = &[_]PresetPoint{ .{ .freq = 4000, .gain_db = 0 }, .{ .freq = 8000, .gain_db = 4 }, .{ .freq = 14000, .gain_db = 6 } } },
+    .{ .name = "Treble Reducer", .points = &[_]PresetPoint{ .{ .freq = 4000, .gain_db = 0 }, .{ .freq = 8000, .gain_db = -4 }, .{ .freq = 14000, .gain_db = -6 } } },
+    .{ .name = "Vocal", .points = &[_]PresetPoint{ .{ .freq = 100, .gain_db = -3 }, .{ .freq = 300, .gain_db = -2 }, .{ .freq = 2500, .gain_db = 4 }, .{ .freq = 6000, .gain_db = 2 }, .{ .freq = 12000, .gain_db = -2 } } },
+    .{ .name = "Rock", .points = &[_]PresetPoint{ .{ .freq = 60, .gain_db = 5 }, .{ .freq = 200, .gain_db = 2 }, .{ .freq = 800, .gain_db = -2 }, .{ .freq = 3000, .gain_db = 2 }, .{ .freq = 10000, .gain_db = 4 } } },
+    .{ .name = "Pop", .points = &[_]PresetPoint{ .{ .freq = 80, .gain_db = 3 }, .{ .freq = 300, .gain_db = -2 }, .{ .freq = 1000, .gain_db = 1 }, .{ .freq = 5000, .gain_db = 3 }, .{ .freq = 12000, .gain_db = 2 } } },
+    .{ .name = "Jazz", .points = &[_]PresetPoint{ .{ .freq = 60, .gain_db = 3 }, .{ .freq = 250, .gain_db = 2 }, .{ .freq = 1200, .gain_db = -1 }, .{ .freq = 4000, .gain_db = 2 }, .{ .freq = 10000, .gain_db = 3 } } },
+    .{ .name = "Classical", .points = &[_]PresetPoint{ .{ .freq = 60, .gain_db = 2 }, .{ .freq = 400, .gain_db = -1 }, .{ .freq = 1000, .gain_db = -2 }, .{ .freq = 4000, .gain_db = 1 }, .{ .freq = 12000, .gain_db = 3 } } },
+    .{ .name = "Electronic", .points = &[_]PresetPoint{ .{ .freq = 50, .gain_db = 6 }, .{ .freq = 200, .gain_db = 2 }, .{ .freq = 800, .gain_db = -3 }, .{ .freq = 5000, .gain_db = 3 }, .{ .freq = 12000, .gain_db = 4 } } },
+    .{ .name = "Hip-Hop", .points = &[_]PresetPoint{ .{ .freq = 50, .gain_db = 7 }, .{ .freq = 150, .gain_db = 4 }, .{ .freq = 600, .gain_db = -2 }, .{ .freq = 3000, .gain_db = 1 }, .{ .freq = 10000, .gain_db = 3 } } },
+    .{ .name = "Acoustic", .points = &[_]PresetPoint{ .{ .freq = 100, .gain_db = 2 }, .{ .freq = 300, .gain_db = 1 }, .{ .freq = 2000, .gain_db = 3 }, .{ .freq = 6000, .gain_db = 1 }, .{ .freq = 12000, .gain_db = 2 } } },
+    .{ .name = "Late Night", .points = &[_]PresetPoint{ .{ .freq = 60, .gain_db = 2 }, .{ .freq = 400, .gain_db = -2 }, .{ .freq = 2000, .gain_db = 1 }, .{ .freq = 8000, .gain_db = -3 } } },
+    .{ .name = "Loudness", .points = &[_]PresetPoint{ .{ .freq = 40, .gain_db = 8 }, .{ .freq = 120, .gain_db = 3 }, .{ .freq = 1000, .gain_db = 0 }, .{ .freq = 8000, .gain_db = 2 }, .{ .freq = 14000, .gain_db = 5 } } },
+};
+
+pub const PRESET_COUNT: usize = PRESETS.len;
+
+/// Rellena `out` con las ganancias del preset `index` (36 bandas).
+/// Devuelve false si el indice no existe.
+pub fn presetGains(index: usize, out: *[BAND_COUNT]f32) bool {
+    if (index >= PRESET_COUNT) return false;
+    const p = PRESETS[index];
+    var i: usize = 0;
+    while (i < BAND_COUNT) : (i += 1) {
+        out[i] = gainAt(p.points, FREQS[i]);
+    }
+    return true;
+}
+
+/// Interpolacion lineal en log2(frecuencia) entre los puntos del preset.
+fn gainAt(points: []const PresetPoint, freq: f32) f32 {
+    if (points.len == 0) return 0;
+    if (freq <= points[0].freq) return points[0].gain_db;
+    const last = points[points.len - 1];
+    if (freq >= last.freq) return last.gain_db;
+    var k: usize = 0;
+    while (k + 2 < points.len and freq > points[k + 1].freq) : (k += 1) {}
+    const a = points[k];
+    const b = points[k + 1];
+    const fa = std.math.log2(a.freq);
+    const fb = std.math.log2(b.freq);
+    const t = (std.math.log2(freq) - fa) / (fb - fa);
+    return a.gain_db + (b.gain_db - a.gain_db) * t;
+}
+
+test "preset flat deja las 36 bandas a cero" {
+    var gains: [BAND_COUNT]f32 = @splat(7);
+    try std.testing.expect(presetGains(0, &gains));
+    for (gains) |g| try std.testing.expectApproxEqAbs(0, g, 1e-6);
+}
+
+test "los presets quedan dentro del rango del EQ" {
+    var gains: [BAND_COUNT]f32 = undefined;
+    for (0..PRESET_COUNT) |i| {
+        try std.testing.expect(presetGains(i, &gains));
+        for (gains) |g| {
+            try std.testing.expect(g >= -MAX_GAIN_DB and g <= MAX_GAIN_DB);
+        }
+    }
+}
+
+test "el preset de graves sube 60 Hz y no toca 20 kHz" {
+    var gains: [BAND_COUNT]f32 = undefined;
+    try std.testing.expect(presetGains(1, &gains)); // Bass Boost
+    const low = gains[0]; // 20 Hz, por debajo del primer punto
+    try std.testing.expect(low > 5.9);
+    try std.testing.expectApproxEqAbs(0, gains[BAND_COUNT - 1], 1e-6);
+}

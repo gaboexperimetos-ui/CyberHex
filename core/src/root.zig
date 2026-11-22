@@ -2,6 +2,7 @@ const std = @import("std");
 const eq = @import("eq.zig");
 const fft = @import("fft.zig");
 const Stretch = @import("stretch.zig").Stretch;
+const png = @import("png.zig");
 
 pub const SAMPLE_RATE: u32 = 48000;
 const SAMPLE_RATE_F: f32 = 48000.0;
@@ -4435,6 +4436,199 @@ export fn ch_engine_export_waveform_csv(self: ?*Engine, path: [*c]const u8, buck
         buf.appendSlice(e.allocator, line) catch return -3;
     }
     return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Numero de presets de EQ incluidos en el nucleo.
+export fn ch_engine_eq_preset_count() i32 {
+    return @intCast(eq.PRESET_COUNT);
+}
+
+/// Nombre del preset `index` ("" si no existe).
+export fn ch_engine_eq_preset_name(index: i32, out: [*c]u8, out_len: i32) i32 {
+    if (index < 0 or index >= eq.PRESET_COUNT or out == null or out_len <= 0) return -1;
+    const name = eq.PRESETS[@intCast(index)].name;
+    const n: usize = @min(name.len, @as(usize, @intCast(out_len)) - 1);
+    @memcpy(out[0..n], name[0..n]);
+    out[n] = 0;
+    return @intCast(n);
+}
+
+/// Aplica el preset `index`. Devuelve 0 si ok.
+export fn ch_engine_apply_eq_preset(self: ?*Engine, index: i32) i32 {
+    const e = self orelse return -1;
+    if (index < 0 or index >= eq.PRESET_COUNT) return e.fail("preset de EQ inexistente", -2);
+    var gains: [eq.BAND_COUNT]f32 = undefined;
+    if (!eq.presetGains(@intCast(index), &gains)) return -2;
+    e.eq_gains = gains;
+    e.equalizer.setGains(&gains);
+    return 0;
+}
+
+/// Exporta la forma de onda de la pista actual como PNG (RGB, fondo oscuro).
+export fn ch_engine_export_waveform_png(self: ?*Engine, path: [*c]const u8, width: i32, height: i32) i32 {
+    const e = self orelse return -1;
+    if (path == null or width < 16 or height < 16) return -1;
+    const w: usize = @min(@as(usize, @intCast(width)), 4096);
+    const h: usize = @min(@as(usize, @intCast(height)), 2048);
+
+    e.list_mutex.lock();
+    const cur: ?[:0]u8 = if (e.queue_index < e.playlist.items.len) e.playlist.items[e.queue_index] else null;
+    e.list_mutex.unlock();
+    const p = cur orelse return -2;
+
+    const peaks = e.allocator.alloc(f32, w) catch return -3;
+    defer e.allocator.free(peaks);
+    if (ch_waveform_peaks(p.ptr, @intCast(w), peaks.ptr) != 0) return -4;
+
+    var canvas = png.Canvas.create(e.allocator, w, h) catch return -3;
+    defer e.allocator.free(canvas.pixels);
+    canvas.fillRect(0, w, 0, h, 16, 18, 24);
+    const mid = h / 2;
+    canvas.fillRect(0, w, mid, mid + 1, 60, 66, 80);
+    for (peaks, 0..) |v, x| {
+        const amp = @as(usize, @intFromFloat(std.math.clamp(v, 0, 1) * @as(f32, @floatFromInt(mid))));
+        const top = mid -| amp;
+        const bot = mid + @max(amp, 1);
+        canvas.fillRect(x, x + 1, top, bot, 80, 220, 220);
+    }
+    _ = png.write(e.allocator, std.mem.span(path), canvas);
+    return 0;
+}
+
+/// Exporta el espectro actual como PNG de barras.
+export fn ch_engine_export_spectrum_png(self: ?*Engine, path: [*c]const u8, width: i32, height: i32, bands: i32) i32 {
+    const e = self orelse return -1;
+    if (path == null or width < 16 or height < 16 or bands <= 0) return -1;
+    const w: usize = @min(@as(usize, @intCast(width)), 4096);
+    const h: usize = @min(@as(usize, @intCast(height)), 2048);
+    const n: usize = @min(@as(usize, @intCast(bands)), w);
+
+    const vals = e.allocator.alloc(f32, n) catch return -3;
+    defer e.allocator.free(vals);
+    if (ch_engine_spectrum(e, vals.ptr, @intCast(n)) != 0) return -4;
+
+    var canvas = png.Canvas.create(e.allocator, w, h) catch return -3;
+    defer e.allocator.free(canvas.pixels);
+    canvas.fillRect(0, w, 0, h, 16, 18, 24);
+
+    var b: usize = 0;
+    while (b < n) : (b += 1) {
+        const x0 = b * w / n;
+        const x1 = @max(x0 + 1, (b + 1) * w / n);
+        const bh: usize = @intFromFloat(std.math.clamp(vals[b], 0, 1) * @as(f32, @floatFromInt(h)));
+        const r: u8 = @intCast(@min(@as(usize, 255), 60 + bh * 200 / @max(h, 1)));
+        const g: u8 = @intCast(@min(@as(usize, 255), 180 + bh * 75 / @max(h, 1)));
+        canvas.fillRect(x0, x1, h -| bh, h, r, g, 230);
+    }
+    _ = png.write(e.allocator, std.mem.span(path), canvas);
+    return 0;
+}
+
+/// Copia las etiquetas de `src` a `dst` (FLAC o MP3). Devuelve el numero de
+/// campos copiados, 0 si no habia nada que copiar, negativo si fallo.
+export fn ch_engine_copy_tags(src: [*c]const u8, dst: [*c]const u8) i32 {
+    if (src == null or dst == null) return -1;
+    const d = ch_decode_open(src, 8000, 1) orelse return -1;
+    defer ch_decode_close(d);
+
+    const dst_span = std.mem.span(dst);
+    const dst_z = e_dupZ(dst_span) orelse return -2;
+    defer std.heap.c_allocator.free(dst_z);
+    const is_mp3 = std.mem.endsWith(u8, dst_span, ".mp3");
+
+    const keys = [_][]const u8{ "TITLE", "ARTIST", "ALBUM", "ALBUMARTIST", "GENRE", "DATE", "TRACK", "DISC", "COMPOSER", "REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK" };
+    var copied: i32 = 0;
+    for (keys) |k| {
+        const z = e_dupZ(k) orelse continue;
+        defer std.heap.c_allocator.free(z);
+        const v = ch_decode_tag(d, z.ptr);
+        if (v == null) continue;
+        const text = std.mem.span(v);
+        if (text.len == 0) continue;
+        const text_z = e_dupZ(text) orelse continue;
+        defer std.heap.c_allocator.free(text_z);
+        const rc = if (is_mp3)
+            ch_tags_mp3_set(dst_z.ptr, z.ptr, text_z.ptr)
+        else
+            ch_tags_set(dst_z.ptr, z.ptr, text_z.ptr);
+        if (rc == 0) copied += 1;
+    }
+    return copied;
+}
+
+fn e_dupZ(s: []const u8) ?[:0]u8 {
+    const z = std.heap.c_allocator.allocSentinel(u8, s.len, 0) catch return null;
+    @memcpy(z, s);
+    return z;
+}
+
+/// Exporta la cola actual a CSV (indice,ruta,titulo,artista,album,duracion).
+export fn ch_engine_export_queue_csv(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(e.allocator);
+    out.appendSlice(e.allocator, "index,path,title,artist,album,duration\n") catch return -2;
+    var line: std.ArrayListUnmanaged(u8) = .empty;
+    defer line.deinit(e.allocator);
+
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    for (e.playlist.items, 0..) |item, i| {
+        const path_s: []const u8 = item;
+        var title: []const u8 = "";
+        var artist: []const u8 = "";
+        var album: []const u8 = "";
+        var dur: f64 = 0;
+        if (ch_decode_open(item, 8000, 1)) |d| {
+            title = std.mem.span(ch_decode_title(d));
+            artist = std.mem.span(ch_decode_artist(d));
+            album = std.mem.span(ch_decode_album(d));
+            dur = ch_decode_duration(d);
+            ch_decode_close(d);
+        }
+        line.clearRetainingCapacity();
+        line.appendSlice(e.allocator, tryFmt("{d}", .{i}) orelse "0") catch return -2;
+        line.append(e.allocator, ',') catch return -2;
+        csvField(e.allocator, &line, path_s) catch return -2;
+        line.append(e.allocator, ',') catch return -2;
+        csvField(e.allocator, &line, title) catch return -2;
+        line.append(e.allocator, ',') catch return -2;
+        csvField(e.allocator, &line, artist) catch return -2;
+        line.append(e.allocator, ',') catch return -2;
+        csvField(e.allocator, &line, album) catch return -2;
+        line.append(e.allocator, ',') catch return -2;
+        line.appendSlice(e.allocator, tryFmt("{d:.1}", .{dur}) orelse "0") catch return -2;
+        line.append(e.allocator, '\n') catch return -2;
+        out.appendSlice(e.allocator, line.items) catch return -2;
+    }
+    return ch_file_write_atomic(path, out.items.ptr, out.items.len);
+}
+
+/// Buffer temporal para formatear un numero sin arriesgar el asignador.
+fn tryFmt(comptime fmt: []const u8, args: anytype) ?[]const u8 {
+    const S = struct {
+        var buf: [128]u8 = undefined;
+    };
+    return std.fmt.bufPrint(&S.buf, fmt, args) catch null;
+}
+
+/// Anade un campo CSV escapado (entrecomillas si contiene , " o salto).
+fn csvField(allocator: Allocator, out: *std.ArrayListUnmanaged(u8), s: []const u8) !void {
+    var needs = false;
+    for (s) |c| {
+        if (c == ',' or c == '"' or c == '\n' or c == '\r') {
+            needs = true;
+            break;
+        }
+    }
+    if (!needs) return out.appendSlice(allocator, s);
+    try out.append(allocator, '"');
+    for (s) |c| {
+        if (c == '"') try out.append(allocator, '"');
+        try out.append(allocator, c);
+    }
+    try out.append(allocator, '"');
 }
 
 /// 1 = ReplayGain por album, 0 = por pista. Afecta a las pistas que se abran
