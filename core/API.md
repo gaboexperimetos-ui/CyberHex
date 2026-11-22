@@ -106,6 +106,8 @@ int32_t ch_engine_ab_loop(ch_engine* engine, double* a_seconds, double* b_second
 /* Estado persistente (cola, pista, posicion y ajustes). */
 int32_t ch_engine_save_state(ch_engine* engine, const char* path);
 int32_t ch_engine_load_state(ch_engine* engine, const char* path, double* position_out);
+/* Exporta cola + ajustes a un archivo JSON legible (para backups). */
+int32_t ch_engine_export_json(ch_engine* engine, const char* path);
 
 /* Sonoridad y picos (analisis offline). */
 typedef struct { double integrated_lufs; double sample_peak_dbfs; double duration_s; } ch_loudness_result;
@@ -131,6 +133,8 @@ float   ch_engine_stereo_width(ch_engine* engine);
 int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float threshold_db);
 int32_t ch_engine_detect_silence(const char* utf8_path, float threshold_db, double* lead, double* tail);
 int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
+int32_t ch_engine_set_fade_out(ch_engine* engine, float seconds); /* 0 .. 30 */
+float   ch_engine_fade_out(ch_engine* engine);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
 int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
 
@@ -287,6 +291,9 @@ void      ch_library_destroy(void* lib);
 int32_t   ch_library_scan(void* lib, const char* root);
 int32_t   ch_library_count(const void* lib);
 const char* ch_library_path(const void* lib, int32_t index);
+/* Busca rutas que contengan el texto (case-insensitive). Devuelve un buffer de
+ * indices (int32) y escribe el total en count_out; liberar con ch_file_free. */
+int32_t*  ch_library_search(const void* lib, const char* needle, int32_t* count_out);
 int32_t   ch_library_removed(const void* lib);
 
 /* Caratulas multiples: una pista puede traer varias (p.ej. FLAC con varios
@@ -501,3 +508,15 @@ creación del motor, p. ej. sin dispositivo de audio).
 
 Motor de conversión, descargador y funciones de IA. Las carátulas múltiples se
 limitan a 4 por pista en memoria.
+
+### Búsqueda, fade-out y backup JSON
+
+- `ch_library_search(lib, "texto", &n)` devuelve un buffer con los índices de la
+  biblioteca cuya ruta contiene el texto (case-insensitive, así que "FLAC" caza
+  la extensión y "radiohead" caza una carpeta). Hay que liberarlo con
+  `ch_file_free`.
+- `ch_engine_set_fade_out(seconds)` aplica un fundido de salida de N segundos
+  (0..30) cuando quedan N segundos de pista; útil para mezclas sin cortes secos.
+- `ch_engine_export_json(path)` escribe cola, pista actual, posición y todos los
+  ajustes en un JSON legible, ideal para copias de seguridad o migrar a otro
+  dispositivo.

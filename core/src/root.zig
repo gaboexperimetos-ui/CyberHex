@@ -68,6 +68,7 @@ extern fn c_lib_scan(lib: ?*ch_library, root: [*c]const u8, exts: [*c]const [*c]
 extern fn c_lib_count(lib: ?*const ch_library) c_int;
 extern fn c_lib_path(lib: ?*const ch_library, index: c_int) [*c]const u8;
 extern fn c_lib_removed(lib: ?*const ch_library) c_int;
+extern fn c_lib_search(lib: ?*const ch_library, needle: [*c]const u8, count_out: *i32) ?[*]i32;
 
 extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
 extern fn ch_file_free(data: [*c]u8) void;
@@ -271,6 +272,9 @@ pub const Engine = struct {
     // Recorte automatico de silencio al abrir pista.
     trim_enabled: bool = false,
     trim_threshold_db: f32 = -60,
+
+    // Fundido de salida al llegar al final de la pista (segundos, 0 = corte).
+    fade_out_s: f32 = 0,
 
     // Mezcla: mono y balance (-1 izquierda .. +1 derecha).
     balance_bits: u32 = @bitCast(@as(f32, 0)),
@@ -1257,6 +1261,7 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         }
 
         var target: f32 = 0;
+        var fade_out_gain: f32 = 1;
         if (playing) {
             target = self.volume();
             if (@atomicLoad(bool, &self.rg_enabled, .monotonic)) target *= self.audibleGain();
@@ -1266,6 +1271,27 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 target *= sg;
                 if (sg <= 0) self.fireSleep();
             }
+            // Fundido de salida cuando quedan menos de N segundos de pista.
+            if (self.fade_out_s > 0 and self.seg_count > 0) {
+                e_fade: {
+                    self.seg_lock.lock();
+                    if (self.seg_count == 0) {
+                        self.seg_lock.unlock();
+                        break :e_fade;
+                    }
+                    const end = self.segments[self.seg_count - 1].end;
+                    self.seg_lock.unlock();
+                    const pos = @atomicLoad(usize, &self.played, .acquire);
+                    if (end <= pos) break :e_fade;
+                    const remaining = @as(f32, @floatFromInt(end - pos)) / @as(f32, @floatFromInt(SAMPLE_RATE));
+                    const total = self.fade_out_s;
+                    if (remaining < total) {
+                        const x = std.math.clamp(remaining / total, 0, 1);
+                        fade_out_gain = x * x; // curva cuadratica suave
+                    }
+                }
+            }
+            target *= fade_out_gain;
         }
         if (take > 0) {
             var g = self.fade_gain;
@@ -2310,6 +2336,18 @@ export fn ch_engine_trim_silence(self: ?*Engine, threshold_db: ?*f32) i32 {
     return if (e.trim_enabled) 1 else 0;
 }
 
+/// Fundido de salida al llegar al final de la pista (segundos, 0 = corte).
+export fn ch_engine_set_fade_out(self: ?*Engine, seconds: f32) i32 {
+    const e = self orelse return -1;
+    e.fade_out_s = std.math.clamp(seconds, 0, 30);
+    return 0;
+}
+
+export fn ch_engine_fade_out(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.fade_out_s;
+}
+
 /// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).
 export fn ch_engine_analyze_current(self: ?*Engine, lufs: ?*f64, peak_db: ?*f64) i32 {
     const e = self orelse return -1;
@@ -2854,6 +2892,17 @@ export fn ch_library_count(lib: ?*const ch_library) i32 {
     return @intCast(c_lib_count(lib));
 }
 
+/// Busca rutas que contengan `needle` (case-insensitive). Devuelve un buffer con
+/// los indices encontrados y escribe el total en `count_out`; el buffer se libera
+/// con `ch_file_free`. Devuelve null si no hay coincidencias.
+export fn ch_library_search(lib: ?*const ch_library, needle: [*c]const u8, count_out: ?*i32) ?[*]i32 {
+    if (lib == null or needle == null) return null;
+    var n: i32 = 0;
+    const ptr = c_lib_search(lib, needle, &n);
+    if (count_out) |out| out.* = n;
+    return ptr;
+}
+
 export fn ch_library_path(lib: ?*const ch_library, index: i32) [*c]const u8 {
     if (index < 0) return @ptrCast("");
     const p = c_lib_path(lib, index);
@@ -2976,6 +3025,106 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
     }
 
     return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Exporta cola, pista actual, posicion y ajustes a un archivo JSON.
+/// Devuelve 0 si ok.
+export fn ch_engine_export_json(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+
+    buf.appendSlice(e.allocator, "{\n  \"queue\": [\n") catch return -2;
+
+    e.list_mutex.lock();
+    for (e.playlist.items, 0..) |item, i| {
+        if (i == e.queue_index) {
+            buf.appendSlice(e.allocator, "    { \"current\": true, \"path\": \"") catch {};
+        } else {
+            buf.appendSlice(e.allocator, "    { \"current\": false, \"path\": \"") catch {};
+        }
+        appendJsonString(&buf, e.allocator, item) catch {};
+        buf.appendSlice(e.allocator, "\" }") catch {};
+        if (i + 1 < e.playlist.items.len) buf.append(e.allocator, ',') catch {};
+        buf.append(e.allocator, '\n') catch {};
+    }
+    e.list_mutex.unlock();
+
+    buf.appendSlice(e.allocator, "  ],\n  \"settings\": {\n") catch {};
+
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    var seg_start: usize = 0;
+    e.seg_lock.lock();
+    if (e.findSegment(p)) |pos| seg_start = e.segments[pos].start;
+    e.seg_lock.unlock();
+    const position = @as(f64, @floatFromInt(p -| seg_start)) / SAMPLE_RATE;
+
+    const volume = @as(f32, @bitCast(@atomicLoad(u32, &e.volume_bits, .monotonic)));
+    const speed = e.speedValue();
+    const pitch = @as(f32, @bitCast(@atomicLoad(u32, &e.pitch_bits, .monotonic)));
+    const balance = @as(f32, @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic)));
+    const gain_db = @as(f32, @bitCast(@atomicLoad(u32, &e.gain_db_bits, .monotonic)));
+    const xfade = @as(f32, @bitCast(@atomicLoad(u32, &e.xfade_bits, .monotonic)));
+    const width = @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic)));
+
+    var line_buf: [1024]u8 = undefined;
+    var w: usize = 0;
+    var tmp: [256]u8 = undefined;
+    const add = struct {
+        fn f(dst: []u8, w2: *usize, key: []const u8, val: []const u8, comma: bool) void {
+            if (comma and w2.* > 0) {
+                dst[w2.*] = ',';
+                w2.* += 1;
+            }
+            const s = std.fmt.bufPrint(dst[w2.* ..], "\n    \"{s}\": {s}", .{ key, val }) catch return;
+            w2.* += s.len;
+        }
+    }.f;
+
+    add(&line_buf, &w, "position", std.fmt.bufPrint(&tmp, "{d:.3}", .{position}) catch "0", false);
+    add(&line_buf, &w, "volume", std.fmt.bufPrint(&tmp, "{d:.4}", .{volume}) catch "0", true);
+    add(&line_buf, &w, "speed", std.fmt.bufPrint(&tmp, "{d:.4}", .{speed}) catch "1", true);
+    add(&line_buf, &w, "pitch", std.fmt.bufPrint(&tmp, "{d:.3}", .{pitch}) catch "0", true);
+    add(&line_buf, &w, "xfade", std.fmt.bufPrint(&tmp, "{d:.3}", .{xfade}) catch "0", true);
+    add(&line_buf, &w, "balance", std.fmt.bufPrint(&tmp, "{d:.4}", .{balance}) catch "0", true);
+    add(&line_buf, &w, "gain_db", std.fmt.bufPrint(&tmp, "{d:.3}", .{gain_db}) catch "0", true);
+    add(&line_buf, &w, "width", std.fmt.bufPrint(&tmp, "{d:.3}", .{width}) catch "1", true);
+    add(&line_buf, &w, "repeat", std.fmt.bufPrint(&tmp, "{d}", .{e.repeat_mode}) catch "0", true);
+    add(&line_buf, &w, "shuffle", if (@atomicLoad(bool, &e.shuffle, .monotonic)) "true" else "false", true);
+    add(&line_buf, &w, "replaygain", if (@atomicLoad(bool, &e.rg_enabled, .monotonic)) "true" else "false", true);
+    add(&line_buf, &w, "limiter", if (e.limit_enabled) "true" else "false", true);
+    add(&line_buf, &w, "channel_mode", std.fmt.bufPrint(&tmp, "{d}", .{@atomicLoad(u32, &e.chan_mode, .monotonic)}) catch "0", true);
+    add(&line_buf, &w, "trim", if (e.trim_enabled) "true" else "false", true);
+    add(&line_buf, &w, "fade_out", std.fmt.bufPrint(&tmp, "{d:.2}", .{e.fade_out_s}) catch "0", true);
+
+    buf.appendSlice(e.allocator, line_buf[0..w]) catch {};
+    buf.appendSlice(e.allocator, "\n  }\n}\n") catch {};
+
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Escapa un string para JSON (comillas, backslash, control).
+fn appendJsonString(buf: *std.ArrayListUnmanaged(u8), alloc: Allocator, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '"' => try buf.appendSlice(alloc, "\\\""),
+            '\\' => try buf.appendSlice(alloc, "\\\\"),
+            '\n' => try buf.appendSlice(alloc, "\\n"),
+            '\r' => try buf.appendSlice(alloc, "\\r"),
+            '\t' => try buf.appendSlice(alloc, "\\t"),
+            else => {
+                if (c < 0x20) {
+                    var tmp: [6]u8 = undefined;
+                    const txt = try std.fmt.bufPrint(&tmp, "\\u{X:0>4}", .{c});
+                    try buf.appendSlice(alloc, txt);
+                } else {
+                    try buf.append(alloc, c);
+                }
+            },
+        }
+    }
 }
 
 /// Carga el estado guardado. Deja la pista cargada y en pausa; escribe en

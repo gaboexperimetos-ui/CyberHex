@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/stat.h>
 
 /* Profundidad maxima del arbol: evita recursiones infinitas (symlinks). */
@@ -230,4 +231,44 @@ const char* c_lib_path(const ch_library* lib, int32_t index) {
 
 int32_t c_lib_removed(const ch_library* lib) {
     return lib ? lib->removed : 0;
+}
+/* Busca rutas que contengan `needle` (case-insensitive). Devuelve un buffer
+ * con los indices (int32) encontrados y escribe el numero en `count_out`.
+ * El buffer se libera con ch_file_free(). NULL si no hay coincidencias. */
+int32_t* c_lib_search(const ch_library* lib, const char* needle, int32_t* count_out) {
+    if (count_out) *count_out = 0;
+    if (!lib || !needle || needle[0] == '\0') return NULL;
+
+    int32_t cap = 16, n = 0;
+    int32_t* out = malloc((size_t)cap * sizeof(int32_t));
+    if (!out) return NULL;
+
+    for (int32_t i = 0; i < lib->count; i++) {
+        const char* p = lib->items[i].path;
+        /* substring case-insensitive */
+        const char* hay = p;
+        size_t nl = strlen(needle);
+        int match = 0;
+        for (; *hay && !match; hay++) {
+            size_t k = 0;
+            while (k < nl && hay[k] &&
+                   tolower((unsigned char)hay[k]) == tolower((unsigned char)needle[k])) {
+                k++;
+            }
+            if (k == nl) match = 1;
+        }
+        if (match) {
+            if (n == cap) {
+                int32_t next = cap * 2;
+                int32_t* grown = realloc(out, (size_t)next * sizeof(int32_t));
+                if (!grown) { free(out); return NULL; }
+                out = grown;
+                cap = next;
+            }
+            out[n++] = i;
+        }
+    }
+    if (n == 0) { free(out); return NULL; }
+    if (count_out) *count_out = n;
+    return out;
 }

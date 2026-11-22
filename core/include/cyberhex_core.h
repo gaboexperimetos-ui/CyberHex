@@ -52,6 +52,8 @@ int32_t ch_engine_set_stereo_width(ch_engine* engine, float width); /* 0 .. 2 */
 float   ch_engine_stereo_width(ch_engine* engine);
 int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float threshold_db);
 int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
+int32_t ch_engine_set_fade_out(ch_engine* engine, float seconds); /* 0 .. 30 */
+float   ch_engine_fade_out(ch_engine* engine);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
 int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
@@ -265,6 +267,12 @@ void      ch_library_destroy(void* lib);
 int32_t   ch_library_scan(void* lib, const char* root);
 int32_t   ch_library_count(const void* lib);
 const char* ch_library_path(const void* lib, int32_t index);
+/* Busca rutas que contengan el texto (case-insensitive). Devuelve un buffer de
+ * indices (int32) y escribe el total en count_out; liberar con ch_file_free. */
+int32_t*  ch_library_search(const void* lib, const char* needle, int32_t* count_out);
+
+/* Libera un buffer devuelto por ch_library_search o ch_file_read_all. */
+void      ch_file_free(void* data);
 int32_t   ch_library_removed(const void* lib);
 
 /* Marcadores por pista (marcas de posicion persistentes). */
@@ -286,6 +294,7 @@ int32_t   ch_markers_clear(ch_markers* markers, const char* track);
 /* Estado de reproduccion: cola, pista actual, posicion y ajustes. */
 int32_t ch_engine_save_state(ch_engine* engine, const char* path);
 int32_t ch_engine_load_state(ch_engine* engine, const char* path, double* position_out);
+int32_t ch_engine_export_json(ch_engine* engine, const char* path);
 
 /* Sonoridad y picos (analisis offline, sin tocar el motor). */
 typedef struct {
