@@ -21,9 +21,7 @@ on:
   pull_request:
 
 permissions:
-  # `contents: write` solo lo usa el paso de diagnóstico, que publica el
-  # registro del fallo como comentario del commit (ver la nota de ese paso).
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -139,6 +137,11 @@ jobs:
 
   app:
     name: App (Flutter)
+    # `write` solo para el paso de diagnóstico, que publica el registro del
+    # fallo como comentario del commit (ver la nota de ese paso). Los otros dos
+    # trabajos siguen con `contents: read`.
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

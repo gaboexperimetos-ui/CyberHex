@@ -857,8 +857,8 @@ de la clavija sigue funcionando igual.
 | R27 | Automix sin audio real | el plan y la máquina de estados están probados con un `BpmProbe` inyectado; falta oír una mezcla de verdad y decidir si ±8 % es el límite bueno | `automix_engine.dart` |
 | R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
 | R38 | Windows y macOS escritos, no ejecutados | `packaging/windows/build_windows.ps1` y `packaging/macos/build_macos.sh` compilan el núcleo con Zig y copian la biblioteca al bundle, pero aquí no hay macOS/Windows, ni SDK de Flutter, ni el andamiaje `windows/`/`macos/` (lo genera `flutter create --platforms=...`). Solo están verificados a nivel de sintaxis | `packaging/windows/`, `packaging/macos/` |
-| R39 | ~~La CI no se ha visto correr~~ | **resuelto en parte**: ya corre en cada push. `Estático` y `Núcleo` en verde (Zig 0.17.1, `zig build test`, humo, `zig build -Ddecoder=miniaudio` con ALSA nulo en el runner) y `flutter analyze` sin errores; `flutter test` deja **219 de 224** y fallan cinco pruebas concretas (R40) | `.github/workflows/ci.yml` |
-| R40 | Cinco tests en rojo | `AudioLabSheet detectar BPM` (la sección «Herramientas» está plegada: el botón no existe), `TagEditorSheet` (el guardado no llega al archivo), `Automix` (el motor no pasa a «Mezclando»), `MultiQueueStore` (guardado en disco) y `modo bolsillo` (el botón de la cabecera no muestra el bloqueo). El resto de la suite pasa; cada iteración de la CI deja el detalle en un comentario del commit | `test/`, `player_page.dart`, `tag_editor_sheet.dart` |
+| R39 | ~~La CI no se ha visto correr~~ | **resuelto**: verde en los tres trabajos con 224 de 224 pruebas. `Estático` valida manifiesto/scripts/YAML; `Núcleo` corre `zig build test` y el humo con ALSA nulo en el runner y comprueba `zig build -Ddecoder=miniaudio`; `App` pasa `flutter analyze` sin errores y la suite entera | `.github/workflows/ci.yml` |
+| R40 | ~~Cinco tests en rojo~~ | **resuelto**: la CI destapó desbordes, `ListTile` sobre `DecoratedBox` y pruebas mal escritas. Al final quedaron verdes las 224. Los dos últimos arreglos fueron el automix (una mezcla en vuelo no debe reaplicar el tempo tras cambiar de pista) y el modo bolsillo, que ahora vive en `ThemeController.pocketMode` y se resuelve cuando vence la ventana del doble toque | `test/`, `player_page.dart`, `automix_engine.dart` |
 | R35 | Radio y nube con búfer, no continuas | el núcleo abre archivos: la radio se captura en ventanas de 12 s/24 MB y suena desde el temporal (hay un salto entre ventanas y no hay metadatos en directo); un archivo de nube se baja entero antes de sonar | `radio_store.dart` |
 | R36 | Credenciales en claro | usuario/contraseña de WebDAV y tokens de ListenBrainz/Last.fm se guardan legibles en el directorio privado de la app; cifrarlos exige `flutter_secure_storage` (paquete nuevo) | `network_page.dart`, `scrobbler.dart` |
 | R37 | WebDAV mínimo | solo `PROPFIND Depth: 1`, Basic/Bearer y descarga por URL; sin `MKCOL`, `PUT`, `LOCK`, ni paginación. Los enlaces «compartidos» de Nextcloud/Dropbox/Drive solo funcionan si la URL descarga el archivo directamente | `network_page.dart` |
@@ -900,7 +900,7 @@ de la clavija sigue funcionando igual.
 ~~CUE sheets~~ (núcleo listo, falta UI) · trim de `skip_samples` (gapless real) ·
 Windows/macOS (**scripts hechos**, falta el andamiaje de Flutter y probarlos, R38) ·
 ~~streaming HTTP~~ (radio con búfer, R35) · ~~CI con `zig build test`/`smoke`~~
-(HECHO, R39; quedan cinco tests en rojo, R40).
+(HECHO y **verde**: 224/224, R39).
 
 ### P3 — grande, solo con pedido explícito
 

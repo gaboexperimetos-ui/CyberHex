@@ -18,7 +18,7 @@ Formato:
 
 ---
 
-## 2026-11-21 · turno 24 · La CI arranca de verdad: de 37 fallos a 5
+## 2026-11-21 · turno 24 · La CI arranca de verdad: de 37 fallos a verde
 
 - **PEDIDO:** seguir el cierre maestro (pedido 10): dejar la CI corriendo y
   verde, y poner el informe al día con el estado real.
@@ -55,19 +55,24 @@ Formato:
     fallo` publica las excepciones, los `Expected/Actual` y la lista de tests en
     rojo como **comentario del commit** y como anotaciones. Ese paso es
     temporal y necesita `contents: write`; cuando la suite esté verde se quita.
-- **VERIFICADO:** 12 ejecuciones de la CI, leyendo anotaciones y comentarios.
-  Última: `Estático` ✅, `Núcleo` ✅, `App` ❌ con **219 de 224** pruebas en
-  verde y cinco rojos (R40): `AudioLabSheet detectar BPM` (la sección
-  «Herramientas» está plegada y el botón no existe en el árbol),
-  `TagEditorSheet` (el guardado no llega al archivo), `Automix` (no pasa a
-  «Mezclando»), `MultiQueueStore` (guardado en disco) y `modo bolsillo` (el
-  botón de la cabecera no muestra el bloqueo).
+- **VERIFICADO:** 16 ejecuciones de la CI, leyendo anotaciones y comentarios del
+  commit. **Última: verde en los tres trabajos** (`Estático`, `Núcleo` y `App`)
+  con **224 de 224** pruebas. El camino fue 37 → 19 → 8 → 3 → 2 → 1 → 0; los
+  últimos en caer fueron el automix (una mezcla que ya estaba analizándose
+  volvía a subir el tempo después de restaurarlo: ahora aborta si cambió el
+  índice de la cola) y el modo bolsillo (vive en `ThemeController.pocketMode`,
+  así que el interruptor de Ajustes y el botón de la cabecera son lo mismo; el
+  test tenía que dejar vencer la ventana del doble toque de la página). Las
+  cinco colas pasaron a guardarse con antirrebote y sin chocar en el `.tmp`.
 - **NO VERIFICABLE AQUÍ:** el resto de plataformas (R33, R38) y cualquier cosa
   visual: no hay Flutter ni dispositivo en el sandbox.
 - **COMMITS:** `f9b3d7c`, `1836737`, `8da2808`, `7307f9b`, `a2cfb5a`, `ff86f3a`,
-  `f5b6567`, `9bb64fc`, `80b2658`, `b8e716d`, `2742abd`, `d9c7c06`, `2261ebb`
-- **ABIERTO / RIESGOS:** R40 (los cinco tests), R38 (Windows/macOS sin
-  ejecutar), y quitar el paso de diagnóstico cuando la CI esté verde.
+  `f5b6567`, `9bb64fc`, `80b2658`, `b8e716d`, `2742abd`, `d9c7c06`, `2261ebb`,
+  `bf59141`, `fba93b2`, `b664011`, `10af48a`, `a0be686`, `45237b2`
+- **ABIERTO / RIESGOS:** R38 (Windows/macOS sin ejecutar). El paso
+  `Diagnóstico del fallo` sigue en el flujo (solo se dispara si algo falla y es
+  el único que usa `contents: write`, acotado al trabajo `App`): quitar cuando
+  no haga falta.
 
 ---
 
