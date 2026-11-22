@@ -220,8 +220,10 @@ jobs:
             {
               grep -A26 'EXCEPTION CAUGHT BY' tests.log
               grep -B4 -A4 'Test failed\. See exception logs' tests.log
+              # Toques que no llegan al widget: explican los "no encuentro el texto".
+              grep -A3 'would not hit test\|Warning: A call to' tests.log
               grep -E '\[E\]' tests.log
-            } | head -500 >> diagnostico.txt
+            } | head -700 >> diagnostico.txt
             printf '\n### cola del registro\n\n' >> diagnostico.txt
             tail -40 tests.log >> diagnostico.txt
             printf '\n\n' >> diagnostico.txt
