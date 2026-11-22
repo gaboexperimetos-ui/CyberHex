@@ -62,6 +62,8 @@ extern fn ch_lyrics_free(lyrics: ?*ch_lyrics) void;
 extern fn ch_lyrics_count(lyrics: ?*ch_lyrics) c_int;
 extern fn ch_lyrics_line_at(lyrics: ?*ch_lyrics, time_s: f64, line_start: ?*f64, index: ?*c_int) [*c]const u8;
 extern fn ch_lyrics_offset_ms(lyrics: ?*ch_lyrics) [*c]const u8;
+extern fn ch_lyrics_shift(lyrics: ?*ch_lyrics, delta_s: f64) c_int;
+extern fn ch_lyrics_write_file(lyrics: ?*const ch_lyrics, path: [*c]const u8) c_int;
 
 const ch_library = opaque {};
 extern fn c_lib_create() ?*ch_library;
@@ -3921,6 +3923,207 @@ export fn ch_engine_set_tag(self: ?*Engine, key: [*c]const u8, value: [*c]const 
         return ch_tags_ogg_set(p.ptr, key, value orelse @ptrCast(""));
     }
     return -3;
+}
+
+/// Guarda la letra de la pista actual en un .lrc (0 si ok).
+export fn ch_engine_save_lyrics(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    const pos = e.findSegment(p) orelse return -2;
+    const ly = e.segments[pos].lyrics orelse return -2;
+    return ch_lyrics_write_file(ly, path);
+}
+
+/// Desplaza la letra actual `delta_s` segundos y lo refleja en el offset.
+export fn ch_engine_shift_lyrics(self: ?*Engine, delta_s: f64) i32 {
+    const e = self orelse return -1;
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    const pos = e.findSegment(p) orelse return -2;
+    const seg = &e.segments[pos];
+    const ly = seg.lyrics orelse return -2;
+    if (ch_lyrics_shift(ly, delta_s) != 0) return -3;
+    seg.lyrics_offset += delta_s * 1000.0;
+    return 0;
+}
+
+/// Desplazamiento actual de la letra en ms (lo que suma [offset:]).
+export fn ch_engine_lyrics_offset_ms(self: ?*Engine) f64 {
+    const e = self orelse return 0;
+    return e.audibleLyricsOffset();
+}
+
+/// Carga una letra LRC desde `path` para la pista actual (0 si ok).
+export fn ch_engine_load_lyrics(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    const lyrics = ch_lyrics_read_file(path) orelse return -2;
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    const pos = e.findSegment(p) orelse {
+        e.seg_lock.unlock();
+        ch_lyrics_free(lyrics);
+        return -2;
+    };
+    if (e.segments[pos].lyrics) |old| ch_lyrics_free(old);
+    e.segments[pos].lyrics = lyrics;
+    e.segments[pos].lyrics_offset = parseLeadingFloat(std.mem.span(ch_lyrics_offset_ms(lyrics))) orelse 0;
+    return 0;
+}
+
+/// Numero de caratulas de la pista actual.
+export fn ch_engine_cover_count_current(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    if (e.findSegment(p)) |pos| return @intCast(e.segments[pos].cover_count);
+    return 0;
+}
+
+/// Guarda la caratula `index` de la pista actual en `path` (0 si ok).
+export fn ch_engine_save_cover_current(self: ?*Engine, index: i32, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null or index < 0) return -1;
+    const p = @atomicLoad(usize, &e.played, .acquire);
+    e.seg_lock.lock();
+    defer e.seg_lock.unlock();
+    if (e.findSegment(p)) |pos| {
+        const seg = &e.segments[pos];
+        const i: usize = @intCast(index);
+        if (i < seg.cover_count) {
+            if (seg.covers[i]) |cover| return ch_file_write_atomic(path, cover.ptr, cover.len);
+        }
+        return -2;
+    }
+    return -2;
+}
+
+/// Exporta un fragmento de `src` a WAV PCM de 16 bits.
+///
+/// `start_s` y `dur_s` en segundos (dur_s <= 0 = hasta el final). `channels`
+/// vale 1 (mono) o 2 (estereo) y se remuestrea a `rate` Hz si difiere del
+/// original. No aplica DSP: es una copia del audio decodificado.
+export fn ch_engine_export_wav(self: ?*Engine, src: [*c]const u8, dst: [*c]const u8, start_s: f64, dur_s: f64, rate: i32, channels: i32) i32 {
+    const e = self orelse return -1;
+    if (src == null or dst == null) return -1;
+    if (rate < 8000 or rate > 192000) return -1;
+    if (channels != 1 and channels != 2) return -1;
+    if (!(start_s >= 0)) return -1;
+
+    const out_ch: u32 = @intCast(channels);
+    const out_rate: u32 = @intCast(rate);
+    const d = ch_decode_open(src, out_rate, out_ch) orelse return -2;
+    defer ch_decode_close(d);
+
+    const total = ch_decode_duration(d);
+    var start_f: u64 = 0;
+    if (total > 0 and start_s >= total) return -3;
+    if (start_s > 0) {
+        start_f = @intFromFloat(start_s * @as(f64, @floatFromInt(out_rate)));
+        if (ch_decode_seek_frame(d, @intCast(start_f)) != 0) return -4;
+    }
+
+    var frames: u64 = 0;
+    if (dur_s > 0) frames = @intFromFloat(dur_s * @as(f64, @floatFromInt(out_rate)));
+
+    // WAV: cabecera de 44 bytes + PCM16 little-endian.
+    var out: std.ArrayListUnmanaged(u8) = .empty;
+    defer out.deinit(e.allocator);
+    out.appendSlice(e.allocator, &std.mem.zeroes([44]u8)) catch return -5;
+
+    // El buffer cubre 4096 frames de 2 canales: el decodificador entrega
+    // muestras entrelazadas, asi que con estereo hacen falta 8192 floats.
+    var buf: [8192]f32 = undefined;
+    var total_frames: u64 = 0;
+    while (frames == 0 or total_frames < frames) {
+        const want: u64 = if (frames == 0) 4096 else @min(@as(u64, 4096), frames - total_frames);
+        const got = ch_decode_read(d, &buf, want);
+        if (got == 0) break;
+        var i: u64 = 0;
+        while (i < got * out_ch) : (i += 1) {
+            var v = buf[i];
+            v = std.math.clamp(v, -1.0, 1.0);
+            const s: i16 = @intFromFloat(v * 32767.0);
+            const bytes: [2]u8 = .{ @truncate(@as(u16, @bitCast(s))), @truncate(@as(u16, @bitCast(s)) >> 8) };
+            out.appendSlice(e.allocator, &bytes) catch return -5;
+        }
+        total_frames += got;
+    }
+
+    const data_len: u32 = @intCast(out.items.len - 44);
+    const byte_rate: u32 = out_rate * out_ch * 2;
+    const block_align: u16 = @intCast(out_ch * 2);
+    // 16 = tamano del subchunk "fmt " (16 para PCM), 20 = formato (1 = PCM),
+    // 22 = canales, 24 = rate, 28 = byte rate, 32 = block align,
+    // 34 = bits por muestra, 36 = "data", 40 = tamano de datos.
+    wr32(out.items[16..20], 16);
+    wr16(out.items[20..22], 1);
+    wr16(out.items[22..24], @intCast(out_ch));
+    wr32(out.items[24..28], out_rate);
+    wr32(out.items[28..32], byte_rate);
+    wr16(out.items[32..34], block_align);
+    wr16(out.items[34..36], 16);
+    wr32(out.items[4..8], 36 + data_len);
+    wr32(out.items[40..44], data_len);
+    @memcpy(out.items[0..4], "RIFF");
+    @memcpy(out.items[8..12], "WAVE");
+    @memcpy(out.items[12..16], "fmt ");
+    @memcpy(out.items[36..40], "data");
+
+    return ch_file_write_atomic(dst, out.items.ptr, out.items.len);
+}
+
+fn wr16(b: []u8, v: u16) void {
+    b[0] = @truncate(v);
+    b[1] = @truncate(v >> 8);
+}
+
+fn wr32(b: []u8, v: u32) void {
+    b[0] = @truncate(v);
+    b[1] = @truncate(v >> 8);
+    b[2] = @truncate(v >> 16);
+    b[3] = @truncate(v >> 24);
+}
+
+/// Busca un preset de EQ por nombre (sin distinguir mayusculas). Devuelve su
+/// indice o -1 si no existe.
+export fn ch_engine_eq_preset_find(name: [*c]const u8) i32 {
+    if (name == null) return -1;
+    const span = std.mem.span(name);
+    for (eq.PRESETS, 0..) |p, i| {
+        if (std.ascii.eqlIgnoreCase(p.name, span)) return @intCast(i);
+    }
+    return -1;
+}
+
+/// Escribe el BPM detectado de `path` como tag (0 si ok).
+export fn ch_engine_write_bpm(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var bpm: f64 = 0;
+    if (ch_bpm_detect(path, &bpm) != 0) return -2;
+    if (bpm < 20 or bpm > 400) return -3;
+    var buf: [32]u8 = undefined;
+    const s = std.fmt.bufPrintSentinel(&buf, "{d:.0}", .{bpm}, 0) catch return -3;
+    const path_span = std.mem.span(path);
+    const SetFn2 = *const fn ([*c]const u8, [*c]const u8, [*c]const u8) callconv(.c) i32;
+    var w: SetFn2 = ch_tags_set;
+    if (std.mem.endsWith(u8, path_span, ".mp3")) {
+        w = ch_tags_mp3_set;
+    } else if (std.mem.endsWith(u8, path_span, ".opus")) {
+        w = ch_tags_opus_set;
+    } else if (std.mem.endsWith(u8, path_span, ".ogg") or std.mem.endsWith(u8, path_span, ".oga")) {
+        w = ch_tags_ogg_set;
+    } else if (!std.mem.endsWith(u8, path_span, ".flac")) {
+        return e.fail("BPM solo soporta FLAC, MP3, Ogg y Opus", -4);
+    }
+    return w(path, "BPM", s.ptr);
 }
 
 /// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).

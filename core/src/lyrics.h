@@ -47,6 +47,13 @@ const char* ch_lyrics_title(const ch_lyrics* lyrics);
 const char* ch_lyrics_album(const ch_lyrics* lyrics);
 const char* ch_lyrics_offset_ms(const ch_lyrics* lyrics);
 
+/* Desplaza todas las marcas de tiempo `delta_s` segundos (puede ser negativo;
+ * los tiempos no bajan de 0). Devuelve 0 si ok. */
+int32_t ch_lyrics_shift(ch_lyrics* lyrics, double delta_s);
+
+/* Escribe la letra en formato LRC (metadatos + lineas). Devuelve 0 si ok. */
+int32_t ch_lyrics_write_file(const ch_lyrics* lyrics, const char* path);
+
 #ifdef __cplusplus
 }
 #endif

@@ -272,3 +272,55 @@ const char* ch_lyrics_album(const ch_lyrics* lyrics) {
 const char* ch_lyrics_offset_ms(const ch_lyrics* lyrics) {
     return (lyrics && lyrics->offset_ms) ? lyrics->offset_ms : "";
 }
+
+/* ------------------------------------------------------------------------- */
+/* Escritura y desplazamiento                                                */
+/* ------------------------------------------------------------------------- */
+
+/* Formatea `t` (segundos) como [mm:ss.xx] o [hh:mm:ss.xx] en `out`. */
+static int format_timestamp(char* out, size_t out_size, double t) {
+    if (t < 0) t = 0;
+    int total_cs = (int)(t * 100.0 + 0.5);
+    int cs = total_cs % 100;
+    int total_s = total_cs / 100;
+    int s = total_s % 60;
+    int total_m = total_s / 60;
+    int m = total_m % 60;
+    int h = total_m / 60;
+    if (h > 0) {
+        return snprintf(out, out_size, "[%02d:%02d:%02d.%02d]", h, m, s, cs);
+    }
+    return snprintf(out, out_size, "[%02d:%02d.%02d]", m, s, cs);
+}
+
+int32_t ch_lyrics_shift(ch_lyrics* lyrics, double delta_s) {
+    if (!lyrics) return -1;
+    for (int32_t i = 0; i < lyrics->count; i++) {
+        lyrics->lines[i].time += delta_s;
+        if (lyrics->lines[i].time < 0) lyrics->lines[i].time = 0;
+    }
+    return 0;
+}
+
+int32_t ch_lyrics_write_file(const ch_lyrics* lyrics, const char* path) {
+    if (!lyrics || !path) return -1;
+    FILE* f = fopen(path, "wb");
+    if (!f) return -1;
+
+    /* Metadatos primero. */
+    if (lyrics->offset_ms) fprintf(f, "[offset:%s]\n", lyrics->offset_ms);
+    if (lyrics->artist) fprintf(f, "[ar:%s]\n", lyrics->artist);
+    if (lyrics->title) fprintf(f, "[ti:%s]\n", lyrics->title);
+    if (lyrics->album) fprintf(f, "[al:%s]\n", lyrics->album);
+
+    /* Una linea por marca de tiempo, en el orden en que estan almacenadas. */
+    char ts[32];
+    for (int32_t i = 0; i < lyrics->count; i++) {
+        int n = format_timestamp(ts, sizeof ts, lyrics->lines[i].time);
+        if (n < 0) continue;
+        fprintf(f, "%s%s\n", ts, lyrics->lines[i].text);
+    }
+    int ok = (ferror(f) == 0);
+    fclose(f);
+    return ok ? 0 : -1;
+}
