@@ -27,6 +27,14 @@ int32_t ch_loudness_scan(const char* path, ch_loudness_result* out);
  * Devuelve 0 si ok, -1 si no se pudo leer. */
 int32_t ch_waveform_peaks(const char* path, uint32_t buckets, float* out_max);
 
+/* Estima el tempo (BPM) por autocorrelacion de la envolvente de energia.
+ * Devuelve 0 si ok, -1 si no se pudo leer, -3 si la pista es demasiado corta. */
+int32_t ch_bpm_detect(const char* path, double* out_bpm);
+
+/* Mide el rango dinamico (DR) con bloques de 3 s.
+ * Devuelve 0 si ok, -1 si no se pudo leer, -3 si no hay bloques validos. */
+int32_t ch_dr_measure(const char* path, double* out_dr, uint32_t* out_blocks);
+
 #ifdef __cplusplus
 }
 #endif

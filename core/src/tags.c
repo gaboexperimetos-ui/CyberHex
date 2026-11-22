@@ -83,20 +83,73 @@ static int add_comment(buf* v, const char* key, const char* value) {
     return buf_append(v, line, (size_t)n);
 }
 
-/* Empaqueta el VORBIS_COMMENT en un bloque METADATA_BLOCK (cabecera + datos). */
-static char* build_comment_block(const char* vendor, const char* key,
-                                 const char* value, size_t* out_len) {
-    buf v = {0};
-    if (buf_u32le(&v, (uint32_t)strlen(vendor)) != 0) goto fail;
-    if (buf_append(&v, vendor, strlen(vendor)) != 0) goto fail;
-    if (buf_u32le(&v, 1) != 0) goto fail; /* 1 comentario */
-    if (add_comment(&v, key, value) != 0) goto fail;
+/* ¿La linea "KEY=valor" corresponde a `key`? (sin distinguir mayusculas). */
+static int comment_key_is(const unsigned char* line, uint32_t len, const char* key) {
+    size_t klen = strlen(key);
+    size_t eq = 0;
+    while (eq < len && line[eq] != '=') eq++;
+    if (eq != klen) return 0;
+    for (size_t j = 0; j < klen; j++) {
+        unsigned char a = line[j];
+        unsigned char b = (unsigned char)key[j];
+        if (a >= 'A' && a <= 'Z') a = (unsigned char)(a + 32);
+        if (b >= 'A' && b <= 'Z') b = (unsigned char)(b + 32);
+        if (a != b) return 0;
+    }
+    return 1;
+}
 
-    /* Cabecera del bloque: 1 byte (last=0, tipo=4) + 3 bytes de longitud. */
+/* Construye un bloque VORBIS_COMMENT conservando los comentarios existentes
+ * salvo el que coincide con `key`, que se sustituye por el nuevo valor. */
+static char* build_comment_block_merged(const unsigned char* old_body,
+                                        uint32_t old_len, const char* key,
+                                        const char* value, size_t* out_len) {
+    buf v = {0};
+    const unsigned char* vendor = (const unsigned char*)"CyberHex";
+    uint32_t vend_len = 8;
+    const unsigned char* p = NULL;
+    const unsigned char* end = NULL;
+    uint32_t ncomments = 0;
+
+    if (old_body && old_len >= 8) {
+        uint32_t vl = rd_u32le(old_body);
+        if (4 + (size_t)vl + 4 <= old_len) {
+            vendor = old_body + 4;
+            vend_len = vl;
+            ncomments = rd_u32le(old_body + 4 + vl);
+            p = old_body + 8 + vl;
+            end = old_body + old_len;
+        }
+    }
+
+    if (buf_u32le(&v, vend_len) != 0) goto fail;
+    if (buf_append(&v, vendor, vend_len) != 0) goto fail;
+    size_t count_pos = v.len;
+    if (buf_u32le(&v, 0) != 0) goto fail;
+
+    uint32_t kept = 0;
+    if (p) {
+        for (uint32_t i = 0; i < ncomments; i++) {
+            if (p + 4 > end) break;
+            uint32_t l = rd_u32le(p);
+            p += 4;
+            if (p + l > end) break;
+            if (!comment_key_is(p, l, key)) {
+                if (buf_u32le(&v, l) != 0) goto fail;
+                if (buf_append(&v, p, l) != 0) goto fail;
+                kept++;
+            }
+            p += l;
+        }
+    }
+    if (add_comment(&v, key, value) != 0) goto fail;
+    kept++;
+    wr_u32le((unsigned char*)v.data + count_pos, kept);
+
     size_t total = 4 + v.len;
     unsigned char* out = malloc(total);
     if (!out) goto fail;
-    out[0] = 0x04; /* no es el ultimo, tipo VORBIS_COMMENT */
+    out[0] = 0x04;
     wr_u24be(out + 1, (uint32_t)v.len);
     if (v.len > 0) memcpy(out + 4, v.data, v.len);
     free(v.data);
@@ -130,6 +183,8 @@ int32_t ch_tags_set(const char* path, const char* key, const char* value) {
     size_t pos = 4;
     int found_vendor = 0;
     char vendor[128] = "CyberHex";
+    const unsigned char* vc_body = NULL;
+    uint32_t vc_len = 0;
     while (pos + 4 <= (size_t)fsize) {
         unsigned char h = d[pos];
         int last = (h & 0x80) != 0;
@@ -141,7 +196,9 @@ int32_t ch_tags_set(const char* path, const char* key, const char* value) {
         if (type == 0) {
             /* STREAMINFO: no se toca. */
         } else if (type == 4) {
-            /* VORBIS_COMMENT existente: extraer vendor. */
+            /* VORBIS_COMMENT existente: recordar para conservar el resto. */
+            vc_body = d + body;
+            vc_len = len;
             const unsigned char* p = d + body;
             if (len >= 4) {
                 uint32_t vlen = rd_u32le(p);
@@ -195,7 +252,7 @@ int32_t ch_tags_set(const char* path, const char* key, const char* value) {
     }
 
     size_t vlen = 0;
-    char* vblock = build_comment_block(vendor, key, value, &vlen);
+    char* vblock = build_comment_block_merged(vc_body, vc_len, key, value, &vlen);
     if (!vblock) goto fail;
     /* Marcar el VORBIS como ultimo bloque (bit 7). */
     ((unsigned char*)vblock)[0] |= 0x80;
@@ -243,6 +300,11 @@ static void wr_syncsafe(unsigned char* p, uint32_t v) {
     p[3] = (unsigned char)(v & 0x7F);
 }
 
+static uint32_t rd_syncsafe(const unsigned char* p) {
+    return ((uint32_t)(p[0] & 0x7F) << 21) | ((uint32_t)(p[1] & 0x7F) << 14) |
+           ((uint32_t)(p[2] & 0x7F) << 7) | (uint32_t)(p[3] & 0x7F);
+}
+
 int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
     if (!path || !key) return -1;
     size_t plen = strlen(path);
@@ -259,12 +321,11 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
     size_t audio_start = 0;
     int has_id3 = (fsize >= 10 && memcmp(d, "ID3", 3) == 0);
     if (has_id3) {
-        uint32_t sz = ((uint32_t)(d[6] & 0x7F) << 21) | ((uint32_t)(d[7] & 0x7F) << 14) |
-                      ((uint32_t)(d[8] & 0x7F) << 7) | (uint32_t)(d[9] & 0x7F);
-        audio_start = 10 + sz;
+        audio_start = 10 + (size_t)rd_syncsafe(d + 6);
+        if (audio_start > (size_t)fsize) audio_start = (size_t)fsize;
     }
 
-    /* Construir el frame de texto: encoding 0x00 (ISO-8859-1) + texto. */
+    /* Frame de texto nuevo: encoding 0x00 (ISO-8859-1) + texto. */
     size_t text_len = value ? strlen(value) : 0;
     size_t frame_size = 1 + text_len;
     size_t total_frame = 10 + frame_size;
@@ -277,22 +338,57 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
     wr_syncsafe(frame_buf + 4, (uint32_t)frame_size);
     frame_buf[8] = 0;
     frame_buf[9] = 0;
-    frame_buf[10] = 0x00; /* ISO-8859-1 */
+    frame_buf[10] = 0x00;
     if (text_len > 0) memcpy(frame_buf + 11, value, text_len);
 
-    /* Reconstruir el tag ID3: header + frame nuevo. */
+    /* Copiar los frames existentes salvo el que se va a sustituir. */
+    buf frames = {0};
+    if (has_id3) {
+        size_t pos = 10;
+        size_t limit = audio_start;
+        /* Cabecera extendida (flag 0x40 en v2.3). */
+        if ((d[5] & 0x40) && pos + 4 <= limit) {
+            uint32_t ext = ((uint32_t)d[pos] << 24) | ((uint32_t)d[pos + 1] << 16) |
+                           ((uint32_t)d[pos + 2] << 8) | (uint32_t)d[pos + 3];
+            pos += 4 + (size_t)ext;
+        }
+        while (pos + 10 <= limit) {
+            if (d[pos] == 0) break; /* relleno */
+            uint32_t fsz = rd_syncsafe(d + pos + 4);
+            size_t ftotal = 10 + (size_t)fsz;
+            if (pos + ftotal > limit) break;
+            if (memcmp(d + pos, frame, 4) != 0) {
+                if (buf_append(&frames, d + pos, ftotal) != 0) {
+                    free(frames.data);
+                    free(frame_buf);
+                    ch_file_free(raw);
+                    return -1;
+                }
+            }
+            pos += ftotal;
+        }
+    }
+    if (buf_append(&frames, frame_buf, total_frame) != 0) {
+        free(frames.data);
+        free(frame_buf);
+        ch_file_free(raw);
+        return -1;
+    }
+    free(frame_buf);
+
+    /* Reconstruir: cabecera ID3v2.3 + frames + audio. */
     buf out = {0};
     if (buf_append(&out, "ID3", 3) != 0) goto fail;
     unsigned char hdr[7];
-    hdr[0] = 0x03; /* version 2.3 */
+    hdr[0] = 0x03;
     hdr[1] = 0x00;
-    hdr[2] = 0x00; /* flags */
-    wr_syncsafe(hdr + 3, (uint32_t)total_frame);
+    hdr[2] = 0x00;
+    wr_syncsafe(hdr + 3, (uint32_t)frames.len);
     if (buf_append(&out, hdr, 7) != 0) goto fail;
-    if (buf_append(&out, frame_buf, total_frame) != 0) goto fail;
-    free(frame_buf);
+    if (buf_append(&out, frames.data, frames.len) != 0) goto fail;
+    free(frames.data);
+    frames.data = NULL;
 
-    /* Audio desde audio_start. */
     if (audio_start < (size_t)fsize) {
         if (buf_append(&out, d + audio_start, (size_t)fsize - audio_start) != 0) goto fail;
     }
@@ -302,7 +398,7 @@ int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
     return rc == 0 ? 0 : -1;
 
 fail:
-    free(frame_buf);
+    free(frames.data);
     ch_file_free(raw);
     free(out.data);
     return -1;

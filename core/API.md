@@ -210,6 +210,15 @@ int32_t ch_engine_set_band_gain(ch_engine* engine, int32_t band, float db);
  * de filtros para que un refuerzo no haga recortar al limitador. */
 int32_t ch_engine_set_eq_preamp(ch_engine* engine, float db);
 float   ch_engine_eq_preamp(ch_engine* engine);
+int32_t ch_engine_save_eq_preset(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_load_eq_preset(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_write_replaygain(ch_engine* engine, const char* utf8_path);
+int32_t ch_engine_export_spectrum_csv(ch_engine* engine, const char* utf8_path, int32_t points);
+int32_t ch_engine_export_waveform_csv(ch_engine* engine, const char* utf8_path, int32_t buckets);
+double  ch_bpm_detect_path(const char* utf8_path);
+double  ch_engine_bpm(ch_engine* engine);
+double  ch_dr_measure_path(const char* utf8_path, uint32_t* out_blocks);
+double  ch_engine_dr(ch_engine* engine, uint32_t* out_blocks);
 
 /* Metadatos y carátula embebida (JPEG/PNG). */
 const char*    ch_engine_title(ch_engine* engine);

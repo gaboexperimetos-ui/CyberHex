@@ -224,3 +224,142 @@ int32_t ch_waveform_peaks(const char* path, uint32_t buckets, float* out_max) {
     ch_decode_close(d);
     return 0;
 }
+/* ------------------------------------------------------------------------- */
+/* Deteccion de BPM                                                          */
+/* ------------------------------------------------------------------------- */
+
+int32_t ch_bpm_detect(const char* path, double* out_bpm) {
+    if (path == NULL || out_bpm == NULL) return -1;
+    const uint32_t rate = 11025;
+    const uint32_t hop = 256;
+    ch_decoder* d = ch_decode_open(path, rate, 1);
+    if (d == NULL) return -1;
+
+    double* env = NULL;
+    size_t nenv = 0, cap = 0;
+    float buf[hop];
+    for (;;) {
+        const uint64_t got = ch_decode_read(d, buf, hop);
+        if (got == 0) break;
+        double sum = 0.0;
+        for (uint64_t i = 0; i < got; i++) sum += (double)buf[i] * (double)buf[i];
+        const double rms = sqrt(sum / (double)got) + 1e-9;
+        if (nenv == cap) {
+            const size_t nc = cap ? cap * 2 : 4096;
+            double* tmp = realloc(env, nc * sizeof(double));
+            if (!tmp) { free(env); ch_decode_close(d); return -2; }
+            env = tmp;
+            cap = nc;
+        }
+        env[nenv++] = log(rms);
+        if (got < hop) break;
+    }
+    ch_decode_close(d);
+    if (nenv < 64) { free(env); return -3; }
+
+    /* Envolvente de novedad: solo incrementos de energia. */
+    for (size_t i = nenv - 1; i > 0; i--) {
+        double diff = env[i] - env[i - 1];
+        env[i] = diff > 0.0 ? diff : 0.0;
+    }
+    env[0] = 0.0;
+
+    const double hops_per_sec = (double)rate / (double)hop;
+    const double min_bpm = 60.0, max_bpm = 200.0;
+    size_t lag_lo = (size_t)(hops_per_sec * 60.0 / max_bpm);
+    size_t lag_hi = (size_t)(hops_per_sec * 60.0 / min_bpm) + 1;
+    if (lag_lo < 2) lag_lo = 2;
+    if (lag_hi >= nenv) lag_hi = nenv - 1;
+    if (lag_hi <= lag_lo) { free(env); return -3; }
+
+    double best = -1.0;
+    size_t best_lag = lag_lo;
+    for (size_t lag = lag_lo; lag <= lag_hi; lag++) {
+        double acc = 0.0;
+        for (size_t i = 0; i + lag < nenv; i++) acc += env[i] * env[i + lag];
+        acc /= (double)(nenv - lag);
+        /* Prior suave hacia 120 BPM para evitar el doble/medio tempo. */
+        const double bpm = 60.0 * hops_per_sec / (double)lag;
+        const double w = exp(-0.5 * pow(log2(bpm / 120.0) / 0.7, 2.0));
+        acc *= 0.5 + 0.5 * w;
+        if (acc > best) { best = acc; best_lag = lag; }
+    }
+
+    /* Interpolacion parabolica con los vecinos. */
+    double frac = 0.0;
+    if (best_lag > lag_lo && best_lag < lag_hi) {
+        double y0 = 0, y1 = 0, y2 = 0;
+        for (size_t lag = best_lag - 1; lag <= best_lag + 1; lag++) {
+            double acc = 0.0;
+            for (size_t i = 0; i + lag < nenv; i++) acc += env[i] * env[i + lag];
+            acc /= (double)(nenv - lag);
+            if (lag == best_lag - 1) y0 = acc;
+            else if (lag == best_lag) y1 = acc;
+            else y2 = acc;
+        }
+        const double denom = (y0 - 2.0 * y1 + y2);
+        if (fabs(denom) > 1e-12) frac = 0.5 * (y0 - y2) / denom;
+        if (frac < -0.5) frac = -0.5;
+        if (frac > 0.5) frac = 0.5;
+    }
+    free(env);
+
+    double bpm = 60.0 * hops_per_sec / ((double)best_lag + frac);
+    while (bpm < 70.0) bpm *= 2.0;
+    while (bpm > 180.0) bpm *= 0.5;
+    *out_bpm = bpm;
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Medidor DR (rango dinamico)                                               */
+/* ------------------------------------------------------------------------- */
+
+int32_t ch_dr_measure(const char* path, double* out_dr, uint32_t* out_blocks) {
+    if (path == NULL || out_dr == NULL) return -1;
+    const uint32_t rate = 44100;
+    const uint64_t win = (uint64_t)rate * 3; /* bloques de 3 s */
+    ch_decoder* d = ch_decode_open(path, rate, 1);
+    if (d == NULL) return -1;
+
+    double sum_dr = 0.0;
+    uint32_t used = 0;
+    uint64_t in_win = 0;
+    double peak = 0.0, sumsq = 0.0;
+    uint64_t count = 0;
+    float buf[4096];
+
+    for (;;) {
+        const uint64_t got = ch_decode_read(d, buf, 4096);
+        if (got == 0) break;
+        for (uint64_t i = 0; i < got; i++) {
+            const double s = (double)buf[i];
+            const double a = fabs(s);
+            if (a > peak) peak = a;
+            sumsq += s * s;
+            count++;
+            if (++in_win >= win) {
+                if (count > 0 && peak > 0.0 && sumsq > 0.0) {
+                    const double rms = sqrt(sumsq / (double)count);
+                    const double db = 20.0 * log10(peak) - 20.0 * log10(rms);
+                    if (rms > 1e-4 && db > 0.0) { sum_dr += db; used++; }
+                }
+                in_win = 0;
+                peak = 0.0;
+                sumsq = 0.0;
+                count = 0;
+            }
+        }
+    }
+    /* Resto final (si dura al menos 1 s). */
+    if (in_win > rate / 2 && count > 0 && peak > 0.0 && sumsq > 0.0) {
+        const double rms = sqrt(sumsq / (double)count);
+        const double db = 20.0 * log10(peak) - 20.0 * log10(rms);
+        if (rms > 1e-4 && db > 0.0) { sum_dr += db; used++; }
+    }
+    ch_decode_close(d);
+    if (used == 0) return -3;
+    *out_dr = sum_dr / (double)used;
+    if (out_blocks) *out_blocks = used;
+    return 0;
+}
