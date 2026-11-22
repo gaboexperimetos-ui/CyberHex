@@ -317,6 +317,7 @@ void main() {
         ..queueIndexValue = 0;
       final controller = PlayerController(fake);
       addTearDown(controller.dispose);
+      controller.pump(); // construye el snapshot inicial (incluida la cola)
       controller.seek(96); // quedan 4 s: dentro del pre-roll
 
       final bpms = <String, double>{'/a.mp3': 120, '/b.mp3': 128};

@@ -216,7 +216,7 @@ jobs:
           if [ -f tests.log ]; then
             printf '### tests.log: fallos\n\n' >> diagnostico.txt
             grep -B20 '\[E\]' tests.log |
-              grep -E 'error-causing|overflowed by|Expected:|Actual:|Which:|Exception|respondio|respondió' |
+              grep -E '\[E\]|error-causing|overflowed by|Expected:|Actual:|Which:|Exception|respondio|respondió' |
               head -400 >> diagnostico.txt
             printf '\n\n' >> diagnostico.txt
           fi

@@ -130,7 +130,14 @@ void main() {
   });
 
   tearDown(() {
-    if (temp.existsSync()) temp.deleteSync(recursive: true);
+    // Algún test deja una descarga a medias: no se falla por el borrado.
+    if (temp.existsSync()) {
+      try {
+        temp.deleteSync(recursive: true);
+      } on FileSystemException {
+        // da igual: es un directorio temporal
+      }
+    }
   });
 
   group('RadioStore', () {

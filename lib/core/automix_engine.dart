@@ -73,12 +73,15 @@ abstract final class AutomixPlanner {
         analysed: false,
       );
     }
-    // El doble o la mitad del pulso cuentan como el mismo patrón (90 vs 180).
+    // El doble o la mitad del pulso cuentan como el mismo patrón (90 vs 180):
+    // se baja el cociente a la octava más cercana a 1 antes de limitar el
+    // estiramiento. El corte es √2, el punto donde doblar deja de estar más
+    // cerca que no doblar.
     var ratio = b / a;
-    while (ratio > 2) {
+    while (ratio > 1.4142135623730951) {
       ratio /= 2;
     }
-    while (ratio < 0.5) {
+    while (ratio < 0.7071067811865475) {
       ratio *= 2;
     }
     final bounded = (ratio - 1).clamp(-maxStretch, maxStretch) + 1;
