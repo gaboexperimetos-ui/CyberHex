@@ -221,3 +221,89 @@ fail:
     free(out.data);
     return -1;
 }
+/* ------------------------------------------------------------------------- */
+/* ID3v2.3 para MP3                                                          */
+/* ------------------------------------------------------------------------- */
+
+static const char* id3_frame_for(const char* key) {
+    if (strcasecmp(key, "TITLE") == 0) return "TIT2";
+    if (strcasecmp(key, "ARTIST") == 0) return "TPE1";
+    if (strcasecmp(key, "ALBUM") == 0) return "TALB";
+    if (strcasecmp(key, "GENRE") == 0) return "TCON";
+    if (strcasecmp(key, "YEAR") == 0 || strcasecmp(key, "DATE") == 0) return "TYER";
+    if (strcasecmp(key, "TRACK") == 0) return "TRCK";
+    return NULL;
+}
+
+/* Sincroniza el tamano de un frame ID3 (4 bytes, syncsafe). */
+static void wr_syncsafe(unsigned char* p, uint32_t v) {
+    p[0] = (unsigned char)((v >> 21) & 0x7F);
+    p[1] = (unsigned char)((v >> 14) & 0x7F);
+    p[2] = (unsigned char)((v >> 7) & 0x7F);
+    p[3] = (unsigned char)(v & 0x7F);
+}
+
+int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value) {
+    if (!path || !key) return -1;
+    size_t plen = strlen(path);
+    if (plen < 4 || strcasecmp(path + plen - 4, ".mp3") != 0) return -1;
+    const char* frame = id3_frame_for(key);
+    if (!frame) return -2;
+
+    uint64_t fsize = 0;
+    char* raw = ch_file_read_all(path, &fsize);
+    if (!raw) return -1;
+    const unsigned char* d = (const unsigned char*)raw;
+
+    /* Localizar el final del tag ID3v2 existente (si hay). */
+    size_t audio_start = 0;
+    int has_id3 = (fsize >= 10 && memcmp(d, "ID3", 3) == 0);
+    if (has_id3) {
+        uint32_t sz = ((uint32_t)(d[6] & 0x7F) << 21) | ((uint32_t)(d[7] & 0x7F) << 14) |
+                      ((uint32_t)(d[8] & 0x7F) << 7) | (uint32_t)(d[9] & 0x7F);
+        audio_start = 10 + sz;
+    }
+
+    /* Construir el frame de texto: encoding 0x00 (ISO-8859-1) + texto. */
+    size_t text_len = value ? strlen(value) : 0;
+    size_t frame_size = 1 + text_len;
+    size_t total_frame = 10 + frame_size;
+    unsigned char* frame_buf = malloc(total_frame);
+    if (!frame_buf) {
+        ch_file_free(raw);
+        return -1;
+    }
+    memcpy(frame_buf, frame, 4);
+    wr_syncsafe(frame_buf + 4, (uint32_t)frame_size);
+    frame_buf[8] = 0;
+    frame_buf[9] = 0;
+    frame_buf[10] = 0x00; /* ISO-8859-1 */
+    if (text_len > 0) memcpy(frame_buf + 11, value, text_len);
+
+    /* Reconstruir el tag ID3: header + frame nuevo. */
+    buf out = {0};
+    if (buf_append(&out, "ID3", 3) != 0) goto fail;
+    unsigned char hdr[7];
+    hdr[0] = 0x03; /* version 2.3 */
+    hdr[1] = 0x00;
+    hdr[2] = 0x00; /* flags */
+    wr_syncsafe(hdr + 3, (uint32_t)total_frame);
+    if (buf_append(&out, hdr, 7) != 0) goto fail;
+    if (buf_append(&out, frame_buf, total_frame) != 0) goto fail;
+    free(frame_buf);
+
+    /* Audio desde audio_start. */
+    if (audio_start < (size_t)fsize) {
+        if (buf_append(&out, d + audio_start, (size_t)fsize - audio_start) != 0) goto fail;
+    }
+    ch_file_free(raw);
+    int32_t rc = ch_file_write_atomic(path, out.data, (uint64_t)out.len);
+    free(out.data);
+    return rc == 0 ? 0 : -1;
+
+fail:
+    free(frame_buf);
+    ch_file_free(raw);
+    free(out.data);
+    return -1;
+}

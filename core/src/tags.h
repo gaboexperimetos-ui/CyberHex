@@ -18,3 +18,5 @@ int32_t ch_tags_set(const char* path, const char* key, const char* value);
 #ifdef __cplusplus
 }
 #endif
+/* Escritura de tags ID3v2.3 para MP3 (solo texto). */
+int32_t ch_tags_mp3_set(const char* path, const char* key, const char* value);

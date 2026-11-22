@@ -598,3 +598,7 @@ limitan a 4 por pista en memoria.
 - `ch_engine_queue_duplicate_current()` la duplica al final.
 - `ch_engine_queue_rotate()` la mueve al final.
 - `ch_engine_queue_count_ext(".flac")` cuenta por extension.
+
+### Tags MP3
+
+- `ch_engine_set_tag` ahora soporta FLAC (Vorbis) y MP3 (ID3v2.3).

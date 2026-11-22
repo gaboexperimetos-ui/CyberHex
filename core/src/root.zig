@@ -75,6 +75,7 @@ extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
 extern fn ch_file_free(data: [*c]u8) void;
 extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
 extern fn ch_tags_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_tags_mp3_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 extern fn ch_dir_list_audio(dir: [*c]const u8, extensions: [*c]const [*c]const u8, count_out: *i32) [*c]u8;
 
 const ChLoudness = extern struct {
@@ -3308,7 +3309,15 @@ export fn ch_engine_set_tag(self: ?*Engine, key: [*c]const u8, value: [*c]const 
     const path: ?[:0]u8 = if (idx < e.playlist.items.len) e.playlist.items[idx] else null;
     e.list_mutex.unlock();
     const p = path orelse return -2;
-    return ch_tags_set(p.ptr, key, value orelse @ptrCast(""));
+    // Elegir el escritor segun la extension.
+    const span: []const u8 = p;
+    if (std.mem.endsWith(u8, span, ".flac")) {
+        return ch_tags_set(p.ptr, key, value orelse @ptrCast(""));
+    }
+    if (std.mem.endsWith(u8, span, ".mp3")) {
+        return ch_tags_mp3_set(p.ptr, key, value orelse @ptrCast(""));
+    }
+    return -3;
 }
 
 /// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).
