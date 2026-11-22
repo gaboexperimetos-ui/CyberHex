@@ -42,6 +42,15 @@ jobs:
         with:
           version: 0.17.1
 
+      - name: ALSA de mentira (los runners no tienen tarjeta de sonido)
+        # Sin tarjeta, miniaudio no consigue abrir el dispositivo y
+        # `ch_engine_create` devuelve nulo (varios tests fallan con SinMotor).
+        # El plugin `null` de ALSA deja que el motor arranque igual.
+        run: |
+          set -euo pipefail
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "$RUNNER_TEMP/asound.conf"
+          echo "ALSA_CONFIG_PATH=$RUNNER_TEMP/asound.conf" >> "$GITHUB_ENV"
+
       - name: Tests del núcleo (miniaudio)
         # El registro se guarda y se reemite como anotaciones del check: así se
         # puede leer el fallo desde la API sin descargar el log del job.
