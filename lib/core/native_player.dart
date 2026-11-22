@@ -163,7 +163,18 @@ typedef _U64Dart = int Function(Pointer<Void>);
 typedef _NoArgIntNative = Int32 Function();
 typedef _NoArgIntDart = int Function();
 
-const String _libraryName = 'libcyberhex_core.so';
+/// Nombre del binario del núcleo según la plataforma.
+///
+/// Linux y Android siguen cargando `libcyberhex_core.so` (el mismo nombre de
+/// siempre: `jniLibs` y el bundle de CMake no cambian); Windows y macOS usan el
+/// que produce `zig build` allí, que es lo que copian
+/// `packaging/windows/build_windows.ps1` y `packaging/macos/build_macos.sh`
+/// junto al ejecutable.
+String get _libraryName {
+  if (Platform.isWindows) return 'cyberhex_core.dll';
+  if (Platform.isMacOS) return 'libcyberhex_core.dylib';
+  return 'libcyberhex_core.so';
+}
 
 /// Carga una pista en un isolate aparte: `ch_engine_load` abre el archivo,
 /// copia carátulas y parsea la letra, así que no debe bloquear el hilo de UI.
@@ -1938,7 +1949,10 @@ class _Bindings {
   }
 
   static DynamicLibrary _open() {
-    if (Platform.isAndroid || Platform.isLinux) {
+    if (Platform.isAndroid ||
+        Platform.isLinux ||
+        Platform.isWindows ||
+        Platform.isMacOS) {
       return DynamicLibrary.open(_libraryName);
     }
     throw UnsupportedError('CyberHex aún no soporta ${Platform.operatingSystem}');

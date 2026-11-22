@@ -5,10 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.bluetooth.BluetoothDevice
 import android.view.KeyEvent
@@ -491,7 +493,10 @@ class MediaSessionService : Service() {
      * Auto-play configurable al conectar.
      *
      * `ACTION_HEADSET_PLUG` (cable) y `BluetoothDevice.ACTION_ACL_CONNECTED`
-     * llegan aquí. Solo se manda `play` si el usuario lo activó **y** había una
+     * llegan aquí. El de Bluetooth solo se escucha si hay permiso
+     * `BLUETOOTH_CONNECT` (Android 12+; lo pide `MainActivity` al arrancar): sin
+     * él el sistema no lo entrega y registrarlo sería un filtro muerto. Solo se
+     * manda `play` si el usuario lo activó **y** había una
      * pista en pausa (nunca se arranca de la nada ni se interrumpe lo que ya
      * suena). `EXTRA_STATE` de la clavija se ignora: en Android moderno llega
      * `STATE_UNPLUGGED/PLUGGED` sin fiabilidad según el fabricante, y para
@@ -511,7 +516,7 @@ class MediaSessionService : Service() {
         }
         val filter = IntentFilter().apply {
             addAction(AudioManager.ACTION_HEADSET_PLUG)
-            addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            if (canWatchBluetooth()) addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -520,6 +525,17 @@ class MediaSessionService : Service() {
         }
         headsetReceiver = receiver
     }
+
+    /**
+     * ¿Podemos recibir `ACTION_ACL_CONNECTED`?
+     *
+     * Desde Android 12 es un broadcast protegido: sin `BLUETOOTH_CONNECT`
+     * concedido no llega nada (R32). Antes de Android 12 no hacía falta.
+     */
+    private fun canWatchBluetooth(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED
 
     // -------------------------------------------------------------------------
     // Notificación

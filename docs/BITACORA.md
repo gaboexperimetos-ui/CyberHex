@@ -18,6 +18,61 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 23 · Cierre maestro, pedido 10 de 10: R32, empaquetado y CI
+
+- **PEDIDO:** `BLUETOOTH_CONNECT` (cierra R32), `packaging/windows/build_windows.ps1`
+  y `packaging/macos/build_macos.sh` que compilen `cyberhex_core` con Zig y
+  empaqueten el bundle de Flutter, `.github/workflows/ci.yml`
+  (`zig build test -Ddecoder=miniaudio`, `zig build smoke`, `flutter analyze`,
+  `flutter test` en push y PR), auditoría final y documentación con inventario
+  final. PROHIBIDO romper los builds de Linux o Android. RIESGO: no.
+- **HECHO:**
+  - `MainActivity.kt`: `requestNotificationPermission()` pasa a
+    `requestRuntimePermissions()`, que pide en un solo diálogo
+    `POST_NOTIFICATIONS` (13+) y `BLUETOOTH_CONNECT` (12+), solo si faltan y
+    solo una vez (en `onPostResume`). El manifiesto ya declaraba el permiso:
+    el comentario ahora dice la verdad (se pide en runtime).
+  - `MediaSessionService.kt`: el filtro de `ACTION_ACL_CONNECTED` se añade
+    solo si `canWatchBluetooth()` (SDK < 31 o permiso concedido). Sin permiso
+    deja de ser un filtro muerto y no hay riesgo de `SecurityException`.
+  - `lib/core/native_player.dart`: `_libraryName` pasa de constante a getter por
+    plataforma (`cyberhex_core.dll` / `libcyberhex_core.dylib` /
+    `libcyberhex_core.so`) y `_open()` acepta Windows y macOS en vez de lanzar
+    `UnsupportedError`. Linux y Android cargan exactamente el mismo `.so`.
+  - `packaging/macos/build_macos.sh` (nuevo, ejecutable): núcleo con Zig →
+    `libcyberhex_core.dylib` al `Contents/Frameworks` del `.app`,
+    `install_name_tool -id @rpath/...`, rpath `@executable_path/../Frameworks`
+    si falta y firma ad-hoc. `--decoder`, `--skip-flutter`, `--help`; si no hay
+    `macos/` se detiene y dice `flutter create --platforms=macos .`.
+  - `packaging/windows/build_windows.ps1` (nuevo): lo mismo para Windows, con
+    `-Decoder` y `-SkipFlutter`; copia `cyberhex_core.dll` junto a
+    `cyberhex.exe` en `build\windows\x64\runner\Release`.
+  - `.github/workflows/ci.yml` (nuevo): job `core` (Zig 0.17.1: tests con
+    `-Ddecoder=miniaudio`, humo con `-Dsmoke-dir`, y comprobación de que el
+    `.so` exporta `ch_*`), job `static` (XML del manifiesto, `bash -n` del
+    script de macOS, parser de PowerShell para el `.ps1`, YAML del propio flujo)
+    y job `app` (`flutter pub get`, `flutter analyze --no-fatal-infos
+    --no-fatal-warnings`, `flutter test`). En `push: ['**']` y `pull_request`,
+    con `concurrency` y `permissions: contents: read`.
+  - `docs/INFORME.md`: **R32** y **R9** cerrados, **R38** (Windows/macOS sin
+    ejecutar) y **R39** (la CI no se ha visto correr) nuevos, sección de
+    empaquetado, tabla de verificación ampliada, backlog limpiado (P0.6, P1.1,
+    P1.3, P1.4, P2 CI ya hechos) y changelog con el cierre.
+- **VERIFICADO:** tree-sitter-dart 56/56; paridad de `PlayerApi` 112/112;
+  `bash -n` del script de macOS; YAML del flujo con `yaml.safe_load` (3 jobs) y
+  sus pasos de Python ejecutados a mano (7 permisos, jobs correctos); escáner
+  de llaves/paréntesis sobre los 8 `.kt`; `AndroidManifest.xml` parseado con
+  `ElementTree`.
+- **NO VERIFICABLE AQUÍ:** el compilador de Kotlin, PowerShell y macOS (no hay
+  JDK, ni `pwsh`, ni Darwin), `flutter build windows/macos` (no hay SDK ni
+  andamiaje) y la primera ejecución real de la CI (R39). El núcleo no se tocó:
+  los builds de Linux y Android quedan como estaban.
+- **COMMITS:** `cierre maestro` (este turno).
+- **ABIERTO:** R30, R31 (Android sin compilar), R33 (runner GTK), R35–R39.
+  Backlog: gapless real (`skip_samples`), UI de hojas CUE y sample rate nativo.
+
+---
+
 ## 2026-11-21 · turno 22 · FASE 7B, pedido 9 de 10: radios, red, exportador, scrobbling y copia
 
 - **PEDIDO:** emisoras propias con `.m3u`/`.pls` y streams HTTP/HTTPS (escritura

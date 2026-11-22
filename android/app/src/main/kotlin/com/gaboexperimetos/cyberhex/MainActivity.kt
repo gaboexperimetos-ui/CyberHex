@@ -28,9 +28,10 @@ import java.io.FileOutputStream
  *    porque el motor ya viene enganchado desde la Application);
  *  * engancha también `cyberhex/storage`, que devuelve `filesDir` para que Dart
  *    guarde la sesión y los favoritos fuera del caché (R14);
- *  * pide `POST_NOTIFICATIONS` en Android 13+, necesario para que se vea la
- *    notificación de reproducción (sin permiso el servicio sigue sonando, pero
- *    la notificación no se muestra);
+ *  * pide en runtime `POST_NOTIFICATIONS` (Android 13+, para que se vea la
+ *    notificación de reproducción) y `BLUETOOTH_CONNECT` (Android 12+, sin el
+ *    cual el sistema no entrega `ACTION_ACL_CONNECTED` y el auto-play al
+ *    conectar unos auriculares Bluetooth nunca ocurriría: R32);
  *  * recibe `ACTION_VIEW` (tocar un audio en el explorador, en WhatsApp, en
  *    "Compartir con..."), convierte el `content://` en un archivo real dentro
  *    de `cacheDir/shared_audio` y lo entrega a Dart por el canal
@@ -38,7 +39,7 @@ import java.io.FileOutputStream
  */
 class MainActivity : FlutterActivity() {
 
-    private var askedNotifications = false
+    private var askedPermissions = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,15 +89,38 @@ class MainActivity : FlutterActivity() {
         super.onPostResume()
         // Se pide aquí (no en onCreate) para que la actividad ya esté en primer
         // plano y el diálogo no se descarte.
-        if (askedNotifications) return
-        askedNotifications = true
-        requestNotificationPermission()
+        if (askedPermissions) return
+        askedPermissions = true
+        requestRuntimePermissions()
     }
 
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+    /**
+     * Pide los permisos que de verdad se usan en runtime.
+     *
+     * Se piden **una sola vez**, juntos, para no encadenar dos diálogos al
+     * abrir la app:
+     *  * `POST_NOTIFICATIONS` (Android 13+): sin él el servicio sigue sonando,
+     *    pero la notificación de reproducción no se muestra.
+     *  * `BLUETOOTH_CONNECT` (Android 12+): el sistema solo entrega
+     *    `BluetoothDevice.ACTION_ACL_CONNECTED` a quien lo tiene concedido; sin
+     *    él, el auto-play al conectar unos auriculares Bluetooth no ocurre
+     *    (el de la clavija de 3,5 mm no lo necesita). Si el usuario lo deniega,
+     *    todo lo demás funciona igual (R32).
+     */
+    private fun requestRuntimePermissions() {
+        val wanted = ArrayList<String>(2)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            wanted.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            wanted.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        if (wanted.isEmpty()) return
+        requestPermissions(wanted.toTypedArray(), REQUEST_PERMISSIONS)
     }
 
     // ---------------------------------------------------------------------
@@ -184,7 +208,8 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val TAG = "CyberHex.Intent"
-        const val REQUEST_NOTIFICATIONS = 0x4E
+        /** Código único: da igual cuál de los dos permisos vuelve aquí. */
+        const val REQUEST_PERMISSIONS = 0x4E
         const val SHARED_AUDIO_DIR = "shared_audio"
     }
 }

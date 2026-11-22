@@ -84,6 +84,38 @@ flutter build linux --release
 ./build/linux/x64/release/bundle/cyberhex
 ```
 
+## Empaquetar en Windows y macOS
+
+Linux se lo guisa solo (CMake), pero Windows y macOS no tienen integración en el
+repo: los dos scripts compilan el núcleo con Zig, llaman a `flutter build` y
+dejan la biblioteca dinámica junto al ejecutable del bundle (que es donde la
+busca el cargador).
+
+```powershell
+# Windows (PowerShell 5.1+); antes, una vez: flutter create --platforms=windows .
+.\packaging\windows\build_windows.ps1                    # -Decoder auto|ffmpeg|miniaudio
+```
+
+```bash
+# macOS (Xcode + Flutter + Zig); antes, una vez: flutter create --platforms=macos .
+./packaging/macos/build_macos.sh                       # --decoder ... --skip-flutter
+```
+
+En macOS el script ajusta el `install_name` a `@rpath`, añade el rpath del bundle
+si falta y vuelve a firmar en ad-hoc (tocar la biblioteca invalida la firma).
+Ninguno de los dos se ha podido ejecutar en el entorno del agente: si algo baila,
+el mensaje de error dice qué falta.
+
+## Integración continua
+
+`.github/workflows/ci.yml` corre en cada `push` y en cada pull request:
+
+- **core**: Zig 0.17.1, `zig build test -Ddecoder=miniaudio` y `zig build smoke`.
+- **static**: XML del manifiesto, sintaxis de los scripts de empaquetado y el
+  propio YAML.
+- **app**: `flutter pub get`, `flutter analyze` (solo fallan los errores) y
+  `flutter test`.
+
 ## Compilar el APK
 
 ```bash

@@ -36,7 +36,7 @@
   núcleo, dos apps: **escritorio Linux/Arch** y **Android**.
 - Núcleo: **133 818 líneas** (sin `third_party`), **199 símbolos `ch_*`**, ABI **3**.
   Decodifica con FFmpeg si está; si no, con miniaudio (WAV/FLAC/MP3/Vorbis).
-- App: **20 295 líneas Dart** + **5 682 de tests** (224 casos). Estado
+- App: **20 309 líneas Dart** + **5 682 de tests** (224 casos). Estado
   centralizado en `PlayerController` (testeable **sin** la `.so`). Fases 1B y 2
   cerradas (cola, biblioteca, sesión persistente y DSP audiófilo) y **fase 3 en
   marcha**: paisajes sonoros, detector de BPM, exportador WAV y `.cue` en el
@@ -46,8 +46,10 @@
   estadísticas y descargas, la fase 6A de temas, gestos y mini-reproductor, la
   6B de escritorio (MPRIS, drag & drop, atajos) y la **7B: radios por Internet,
   WebDAV/nube, exportador de rango con DSP, scrobbling y copia de seguridad
-  unificada**.
-- Android: **823 líneas Kotlin** (actividad, puente de canal y servicio de
+  unificada**. El **pedido 10** cierra la tanda: `BLUETOOTH_CONNECT` pedido en
+  runtime (R32), scripts de empaquetado para Windows y macOS, **CI** en GitHub
+  Actions (R9) y auditoría final.
+- Android: **2 007 líneas Kotlin** (actividad, puente de canal y servicio de
   reproducción en primer plano con `MediaSession`). El motor sigue en Dart:
   Kotlin no decodifica nada, solo mantiene el proceso vivo y reenvía controles.
 - Verificado aquí: 13 tests Zig, `.so` ReleaseFast nativa y cruzada aarch64,
@@ -74,7 +76,7 @@ core/                       motor nativo (Zig 0.17.1 + C23)        133 818 líne
   tests/smoke.c             prueba de humo portable (PC y teléfono)
   API.md                    referencia de la API
   build.zig                 -Ddecoder=auto|ffmpeg|miniaudio, pasos test/smoke
-lib/                        app Flutter                                 20 295 líneas
+lib/                        app Flutter                                 20 309 líneas
   core/player_api.dart      contrato PlayerApi (112 miembros) + PlayerSnapshot + AudioSettings
   core/player_controller.dart  estado + bombeo de eventos cada 80 ms
   core/native_player.dart   bindings FFI (única frontera con el núcleo)
@@ -115,6 +117,9 @@ android/                    Gradle + tarea que compila el núcleo + jniLibs
   app/src/main/kotlin/…/MediaSessionService.kt 566 líneas, FGS + MediaSession
 linux/                      CMake: compila y empaqueta el núcleo en bundle/lib
 packaging/linux/            PKGBUILD de Arch + .desktop + icono SVG
+packaging/windows/          build_windows.ps1: núcleo Zig (.dll) + bundle de Flutter
+packaging/macos/            build_macos.sh: núcleo Zig (.dylib), rpath y firma ad-hoc
+.github/workflows/ci.yml    Zig 0.17.1 (test + smoke), estáticos y Flutter (analyze + test)
 docs/                       este informe y la bitácora
 ANALISIS.md                 auditoría técnica original + tabla de hallazgos A/B/C
 ```
@@ -541,6 +546,29 @@ cd packaging/linux && makepkg -si            # paquete nativo con .desktop e ico
   `$ORIGIN/lib`). Vigila `src/`, `include/`, `vendor/`, `build.zig(.zon)`.
 - `-DCYBERHEX_DECODER=miniaudio|ffmpeg|auto` desde CMake.
 
+### Windows y macOS (scripts de empaquetado, pedido 10)
+
+```powershell
+.\packaging\windows\build_windows.ps1                  # -Decoder auto|ffmpeg|miniaudio
+```
+
+```bash
+./packaging/macos/build_macos.sh                        # --decoder ... --skip-flutter
+```
+
+Los dos hacen lo mismo que el CMake de Linux pero a mano, porque esas dos
+plataformas no tienen integración en el repo: `zig build -Doptimize=ReleaseFast`
+produce la biblioteca dinámica (`cyberhex_core.dll` en Windows,
+`libcyberhex_core.dylib` en macOS) y el script la deja **junto al ejecutable**
+del bundle de Flutter, que es donde la busca el cargador (`native_player.dart`
+elige el nombre según `Platform`). En macOS además reescribe el `install_name` a
+`@rpath`, añade el rpath del bundle si falta y vuelve a firmar en ad-hoc.
+
+- **El andamiaje `windows/`/`macos/` no está en el repo**: lo genera
+  `flutter create --platforms=windows .` (o `macos`). Los scripts se detienen con
+  ese mensaje si falta, en vez de inventarse un runner.
+- Sin probar en su sistema (R38).
+
 #### Fase 7A (pedido 8): escritorio de verdad, sin paquetes nuevos
 
 | Pieza | Qué hace |
@@ -665,10 +693,13 @@ Cambios en `MediaSessionService` (779) y `MediaBridge` (232):
   perder el comando (el motor arranca, `MainActivity` monta el canal y la sesión
   se restaura).
 
-Límites conocidos (R30–R32): sin SDK de Android no se compilan ni se ejecutan
+Límites conocidos (R30–R31): sin SDK de Android no se compilan ni se ejecutan
 estas piezas aquí; el `MediaBrowserService` solo publica la pista actual (no hay
-catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesita
-`BLUETOOTH_CONNECT` concedido a mano (el de la clavija no).
+catálogo, porque la biblioteca vive en Dart). **R32 ya no aplica**: desde el
+pedido 10 `MainActivity` pide `BLUETOOTH_CONNECT` en runtime (junto a
+`POST_NOTIFICATIONS`, un solo diálogo) y el servicio solo escucha
+`ACTION_ACL_CONNECTED` si está concedido; si el usuario lo deniega, el auto-play
+de la clavija sigue funcionando igual.
 
 ---
 
@@ -694,6 +725,10 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | Layout FFI | `sizeof/offsetof` en C vs `_ChEvent` | 24 B, 0/4/8/16 |
 | Integración CMake | harness con CMake 4.4 + Zig 0.17.1 | compila; 2ª pasada no-op |
 | MD5 propio (Last.fm) | transliteración a Python comparada con `hashlib` | `''`, `abc` y el pangrama coinciden |
+| Llaves/paréntesis Kotlin | escáner propio que ignora strings y comentarios | 8/8 archivos balanceados |
+| YAML de la CI | `yaml.safe_load` sobre `.github/workflows/ci.yml` | 3 jobs (`core`, `static`, `app`); los pasos de Python se ejecutaron a mano |
+| Script de macOS | `bash -n packaging/macos/build_macos.sh` | sin errores de sintaxis |
+| Permisos del manifiesto | `ElementTree` sobre `AndroidManifest.xml` | 7 permisos, `BLUETOOTH_CONNECT` entre ellos |
 | Canales y JSON de la 7B | lectura cruzada de nombres de archivo/miembro | los 10 `.json` y los miembros usados por las páginas existen |
 
 ### 7.2 Lo que **no** se puede verificar aquí (lo hace el usuario)
@@ -801,7 +836,7 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | R6 | Vúmetro post-limitador | muestra la señal ya limitada | `applyLevels` |
 | R7 | ~~Sin dither a S16~~ | **resuelto** en la fase 2: TPDF ±1 LSB opt-in (`ch_engine_set_s16_output`) y también en el exportador WAV | `audio.c`, `root.zig` |
 | R8 | `ffmpeg.tar.xz` en git | ~decenas de MB; decisión de empaquetado pendiente (A4) | `core/third_party/` |
-| R9 | Sin CI | ninguna acción de GitHub valida nada | `.github/` (no existe) |
+| R9 | ~~Sin CI~~ | **resuelto** en el pedido 10: `.github/workflows/ci.yml` corre `zig build test`/`smoke` con Zig 0.17.1, validaciones estáticas y `flutter analyze`/`flutter test` en push y PR. Falta verlo verde la primera vez (R39) | `.github/workflows/ci.yml` |
 | R10 | Android antes de P0.1 | ~~sin MediaSession ni servicio~~ **resuelto** en P0.1 (notificación, bloqueo, foco, auriculares) | `android/` |
 | R11 | ~~Recientes mata el motor~~ | **resuelto**: engine cacheado en `CyberHexApplication`, `shouldDestroyEngineWithHost = false` | `CyberHexApplication.kt` |
 | R12 | ~~Icono genérico en la notificación~~ | **resuelto**: `R.drawable.ic_launcher_foreground` (hexágono propio) | `MediaSessionService.kt` |
@@ -817,10 +852,12 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 | R34 | Sin atajos globales fuera de la app | las teclas multimedia y los botones del teclado del portátil no se capturan con `XGrabKey` (rompería Wayland): se delegan en MPRIS, que es lo que usan GNOME/KDE/`playerctl`/Bluetooth. Fuera de un entorno de escritorio no hay teclas globales | `mpris_bridge.cc` |
 | R30 | Widget, azulejo y `MediaBrowserService` sin compilar ni ejecutar | escritos contra la API del sistema (sin AndroidX ni paquetes nuevos), pero aquí no hay JDK/Gradle/emulador: faltan por verificar el aspecto real de los `RemoteViews`, que el lanzador acepte los dos `<receiver>` y que Android Auto liste la app | `android/app/src/main/` |
 | R31 | El navegador de medios solo publica la pista actual | `onLoadChildren` devuelve `cyberhex_now` (título, artista, álbum) desde `PlaybackCache`; no hay catálogo ni carpetas porque la biblioteca vive en Dart y no se puede consultar de forma síncrona desde Kotlin | `CyberHexBrowserService.kt` |
-| R32 | Auto-play por Bluetooth condicionado a un permiso | `ACTION_ACL_CONNECTED` solo se entrega con `BLUETOOTH_CONNECT` (Android 12+), que se declara pero no se pide en runtime: si el usuario no lo concede, ese auto-play no ocurre (el de la clavija sí) | `MediaSessionService.kt` |
+| R32 | ~~Auto-play por Bluetooth condicionado a un permiso~~ | **resuelto** en el pedido 10: `MainActivity` pide `BLUETOOTH_CONNECT` (y `POST_NOTIFICATIONS`) en un solo diálogo en `onPostResume` y el servicio solo escucha `ACTION_ACL_CONNECTED` si lo tiene concedido | `MainActivity.kt`, `MediaSessionService.kt` |
 | R26 | Descargas sin verificar en red real | el descargador se prueba contra un `HttpServer` local y contra los parsers del JSON de Archive; falta comprobar la API real (límites, ítems enormes, redirecciones) y que el archivo descargado suene | `audio_downloader.dart` |
 | R27 | Automix sin audio real | el plan y la máquina de estados están probados con un `BpmProbe` inyectado; falta oír una mezcla de verdad y decidir si ±8 % es el límite bueno | `automix_engine.dart` |
 | R24 | Etiquetas sin comprobar en el teléfono | el escritor ID3v2.3/Vorbis se ha probado contra sus propios lectores y bytes sintéticos; falta validar con archivos reales de la biblioteca del usuario (carátulas grandes, nombres con emoji, FLAC con bloques raros) | `tag_editor.dart` |
+| R38 | Windows y macOS escritos, no ejecutados | `packaging/windows/build_windows.ps1` y `packaging/macos/build_macos.sh` compilan el núcleo con Zig y copian la biblioteca al bundle, pero aquí no hay macOS/Windows, ni SDK de Flutter, ni el andamiaje `windows/`/`macos/` (lo genera `flutter create --platforms=...`). Solo están verificados a nivel de sintaxis | `packaging/windows/`, `packaging/macos/` |
+| R39 | La CI no se ha visto correr | el flujo está validado como YAML y sus pasos de Python se ejecutaron a mano, pero el primer `push` es la primera ejecución real: pueden saltar avisos de `flutter analyze`, la versión de Flutter del runner o el `smoke` sin tarjeta de sonido | `.github/workflows/ci.yml` |
 | R35 | Radio y nube con búfer, no continuas | el núcleo abre archivos: la radio se captura en ventanas de 12 s/24 MB y suena desde el temporal (hay un salto entre ventanas y no hay metadatos en directo); un archivo de nube se baja entero antes de sonar | `radio_store.dart` |
 | R36 | Credenciales en claro | usuario/contraseña de WebDAV y tokens de ListenBrainz/Last.fm se guardan legibles en el directorio privado de la app; cifrarlos exige `flutter_secure_storage` (paquete nuevo) | `network_page.dart`, `scrobbler.dart` |
 | R37 | WebDAV mínimo | solo `PROPFIND Depth: 1`, Basic/Bearer y descarga por URL; sin `MKCOL`, `PUT`, `LOCK`, ni paginación. Los enlaces «compartidos» de Nextcloud/Dropbox/Drive solo funcionan si la URL descarga el archivo directamente | `network_page.dart` |
@@ -841,7 +878,7 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 |---|---|---|---|
 | P0.1 | ~~`MediaSession` + servicio en primer plano~~ **HECHO** (turno 9): servicio, foco, notificación y bloqueo, sin dependencias nuevas | Kotlin + manifest + Dart | falta compilar y probar en el teléfono |
 | P0.4 | ~~`FlutterEngine` cacheado en una `Application`~~ **HECHO**: `CyberHexApplication` + `provideFlutterEngine` + `shouldDestroyEngineWithHost = false` | Kotlin + manifest | falta probar en el teléfono |
-| P0.6 | Escritorio: consumir `%U` (el `.desktop` ya lo pasa, el runner no lo entrega a Dart) | runner C++ o `dart:io` con `Platform.environment` | requiere tocar el runner de Linux |
+| P0.6 | ~~Escritorio: consumir `%U`~~ **HECHO** (fase 7A): `G_APPLICATION_HANDLES_COMMAND_LINE` + canal `cyberhex/intent` | runner C++ | falta `flutter run -d linux` (R33) |
 | P0.5 | Bindear en Dart la API que trajo `main`: R128 (`ch_engine_analyze_loudness`), picos de forma de onda, ganancia manual en dB, crossfeed, hojas CUE y guardado de carátula | Dart | círculo de 1 turno; el núcleo ya está fusionado y verificado |
 | P0.2 | Pantallas de **biblioteca** (escaneo con `ch_library_*`) y **cola** (reordenar, quitar, saltar) | Dart | no verificable aquí |
 | P0.3 | ~~Abrir archivos desde el gestor~~ **HECHO en Android** (`ACTION_VIEW` + copia de `content://` + canal `cyberhex/intent`); el `.desktop` ya lleva `Exec=cyberhex %U` | Kotlin + Dart | en Linux falta el puente de argv (P0.6) |
@@ -850,18 +887,19 @@ catálogo, porque la biblioteca vive en Dart); el auto-play por Bluetooth necesi
 
 | # | Tarea | Notas |
 |---|---|---|
-| P1.1 | MPRIS en Linux (`org.mpris.MediaPlayer2`) | D-Bus por MethodChannel o FFI; da controles desde el escritorio |
+| P1.1 | ~~MPRIS en Linux~~ **HECHO** (fase 7A): GDBus en el runner, sin paquetes nuevos | falta verlo con un `playerctl` real (R33) |
 | P1.2 | Sample rate nativo (44,1/48/96) con `ma_device` a la tasa del dispositivo | toca `ch_audio_create`, decodificadores y EQ |
-| P1.3 | Dither TPDF al convertir a S16 | 20 líneas en `audio.c` |
-| P1.4 | Crossfeed Bauer para auriculares | 30 líneas en `render` |
+| P1.3 | ~~Dither TPDF al convertir a S16~~ **HECHO** (fase 2): opt-in por `ch_engine_set_s16_output` | — |
+| P1.4 | ~~Crossfeed Bauer para auriculares~~ **HECHO** (fase 2) | — |
 | P1.5 | ~~UI del vúmetro y del espectro~~ **HECHO** (turno 16): `VisualizerWidget` con barras o hexágonos y medidores RMS/pico | falta verlo en el teléfono |
 | P1.6 | ~~UI de ReplayGain por álbum, balance, mono y loop A-B~~ **HECHO** (turno 16) en el laboratorio de audio | falta verlo en el teléfono |
 
 ### P2 — alcance
 
-CUE sheets · trim de `skip_samples` (gapless real) · Windows/macOS como tercer
-target · streaming HTTP (requiere FFmpeg con red) · CI con `zig build test` y
-`zig build smoke`.
+~~CUE sheets~~ (núcleo listo, falta UI) · trim de `skip_samples` (gapless real) ·
+Windows/macOS (**scripts hechos**, falta el andamiaje de Flutter y probarlos, R38) ·
+~~streaming HTTP~~ (radio con búfer, R35) · ~~CI con `zig build test`/`smoke`~~
+(HECHO, R39).
 
 ### P3 — grande, solo con pedido explícito
 
@@ -883,9 +921,10 @@ Multicala · grabadora · separación de fuentes / IA · letras karaoke avanzada
 
 ---
 
-## 12. Changelog (45 commits + fusión de `main` desde `eca1490`)
+## 12. Changelog (47 commits + fusión de `main` desde `eca1490`)
 
 ```
+CIERRE → android+packaging+ci: BLUETOOTH_CONNECT, scripts de Windows/macOS y CI
 FASE 7B → app: radios por Internet, WebDAV/nube, exportador con DSP, scrobbling y copia
 FASE 7A → linux: MPRIS2, %U, drag & drop, siempre encima y notificaciones
 FASE 6B → android: widget 4x1/4x2, azulejo, coche, doble clic del casco y auto-play

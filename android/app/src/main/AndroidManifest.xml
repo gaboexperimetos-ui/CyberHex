@@ -26,9 +26,11 @@
 
     <!--
       Auto-play al conectar auriculares Bluetooth: desde Android 12 el sistema
-      solo entrega BluetoothDevice.ACTION_ACL_CONNECTED con este permiso. No se
-      pide en runtime: si el usuario no lo concede, el auto-play por Bluetooth
-      simplemente no ocurre (el de la clavija de 3,5 mm no lo necesita).
+      solo entrega BluetoothDevice.ACTION_ACL_CONNECTED con este permiso, así
+      que MainActivity lo pide en runtime junto a POST_NOTIFICATIONS (un solo
+      diálogo; ver requestRuntimePermissions). Si el usuario lo deniega, todo
+      sigue funcionando y el auto-play por Bluetooth simplemente no ocurre (el
+      de la clavija de 3,5 mm no lo necesita).
     -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 

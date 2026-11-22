@@ -1,0 +1,129 @@
+# Integración continua de CyberHex.
+#
+# Tres trabajos, de más barato a más caro:
+#
+#   core      compila el núcleo con Zig 0.17.1 sin FFmpeg y pasa sus tests y la
+#             prueba de humo (sirve en un runner sin tarjeta de sonido: el
+#             motor cae a un dispositivo nulo y aun así mide niveles).
+#   static    valida lo que no necesita SDK: XML del manifiesto, sintaxis de los
+#             scripts de empaquetado y que este propio YAML sea válido.
+#   app       `flutter pub get`, `flutter analyze` (solo falla con errores) y
+#             `flutter test`. Es el único sitio donde la capa Dart se ejecuta de
+#             verdad: en el sandbox del agente no hay SDK.
+#
+# No se despliega nada: son comprobaciones, no publicaciones.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Núcleo (Zig 0.17.1)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Zig
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+
+      - name: Tests del núcleo (miniaudio)
+        run: zig build test -Ddecoder=miniaudio
+
+      - name: Prueba de humo con audio real
+        # El WAV sintético se escribe en el temporal del runner, no en el repo.
+        run: zig build smoke -Ddecoder=miniaudio -Dsmoke-dir="$RUNNER_TEMP"
+
+      - name: La biblioteca dinámica se produce
+        run: |
+          set -euo pipefail
+          test -f zig-out/lib/libcyberhex_core.so
+          nm -D zig-out/lib/libcyberhex_core.so | grep -q ' T ch_'
+
+  static:
+    name: Estático (manifiesto, scripts, YAML)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: XML del manifiesto de Android
+        run: >
+          python3 -c "import xml.etree.ElementTree as ET;
+          ns = '{http://schemas.android.com/apk/res/android}';
+          tree = ET.parse('android/app/src/main/AndroidManifest.xml');
+          names = [node.get(ns + 'name') for node in tree.iter('uses-permission')];
+          assert 'android.permission.BLUETOOTH_CONNECT' in names, names;
+          assert 'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK' in names, names;
+          print('permisos:', len(names), 'ok')"
+
+      - name: Sintaxis de los scripts de empaquetado
+        run: |
+          set -euo pipefail
+          bash -n packaging/macos/build_macos.sh
+          echo 'macOS: ok'
+          if command -v pwsh >/dev/null 2>&1; then
+            pwsh -NoProfile -Command '
+              $tokens = $null; $errors = $null;
+              [void][System.Management.Automation.Language.Parser]::ParseFile(
+                "packaging/windows/build_windows.ps1", [ref]$tokens, [ref]$errors);
+              if ($errors.Count -gt 0) {
+                $errors | ForEach-Object { Write-Host $_ };
+                exit 1
+              }
+              Write-Host "Windows: ok"'
+          else
+            echo 'pwsh no esta: me salto el .ps1'
+          fi
+
+      - name: El flujo de trabajo es YAML válido
+        run: |
+          pip install --quiet --disable-pip-version-check pyyaml
+          python3 -c "import yaml; d = yaml.safe_load(open('.github/workflows/ci.yml', encoding='utf-8')); assert set(d['jobs']) == {'core', 'static', 'app'}, list(d['jobs']); print('jobs:', ', '.join(d['jobs']))"
+
+  app:
+    name: App (Flutter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Versiones
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Analizador
+        # Los avisos y las notas no rompen el build (hay deuda de estilo
+        # acumulada); los errores sí.
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Tests de la app
+        run: flutter test --reporter expanded
