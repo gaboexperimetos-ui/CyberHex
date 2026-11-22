@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'player_api.dart';
+import 'services/lyrics_service.dart';
+import 'services/music_downloader.dart';
 
 /// Estado y acciones del reproductor para la UI.
 ///
@@ -491,6 +493,38 @@ class PlayerController extends ChangeNotifier {
 
   bool saveCover(int index, String path) =>
       _disposed ? false : _player.saveCover(index, path);
+
+  // ---------------------------------------------------------------------------
+  // Letras y descarga (servicios Dart; requieren red)
+  // ---------------------------------------------------------------------------
+
+  /// Busca la letra de la pista actual en Lrclib y, si [useAiFallback] y hay un
+  /// [aiEndpoint] configurado, usa IA de respaldo. Devuelve null si no hay.
+  Future<LyricsResult?> fetchLyrics({
+    bool useAiFallback = false,
+    String? aiEndpoint,
+    String? aiApiKey,
+  }) async {
+    final service = LyricsService(aiEndpoint: aiEndpoint, aiApiKey: aiApiKey);
+    return service.fetch(
+      title: _player.title,
+      artist: _player.artist,
+      album: _player.album,
+      durationSeconds: _player.duration,
+      useAiFallback: useAiFallback,
+    );
+  }
+
+  /// Descarga `url` a `destPath`. `referer` opcional. Devuelve el resultado o
+  /// null si falla.
+  Future<DownloadResult?> downloadTrack({
+    required String url,
+    required String destPath,
+    String? referer,
+  }) {
+    final dl = MusicDownloader(jamendoClientId: null);
+    return dl.downloadUrl(url: url, destPath: destPath, referer: referer);
+  }
 
   /// Restaura el estado y deja la posición en la pista recuperada.
   double? loadState(String path) {

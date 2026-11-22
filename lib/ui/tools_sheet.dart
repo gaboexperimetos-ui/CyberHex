@@ -160,9 +160,128 @@ class _ToolsSheetState extends State<ToolsSheet> {
                 : 'Sin temporizador activo',
             style: const TextStyle(color: chMuted, fontSize: 12),
           ),
+          const SizedBox(height: 20),
+          Text('Letra y descarga', style: chDisplay.copyWith(fontSize: 20)),
+          const SizedBox(height: 4),
+          const Text(
+            'Busca la letra en Lrclib (sincronizada) y, si no aparece, usa IA '
+            'de respaldo cuando esté configurada. La descarga admite URL directa '
+            'o Jamendo (sin anuncios).',
+            style: TextStyle(color: chMuted, fontSize: 12),
+          ),
+          const SizedBox(height: 10),
+          FilledButton.icon(
+            onPressed: () => _fetchLyrics(context),
+            icon: const Icon(Icons.lyrics_outlined),
+            label: const Text('Buscar letra (IA respaldo)'),
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: () => _showDownloadDialog(context),
+            icon: const Icon(Icons.download_outlined),
+            label: const Text('Descargar pista'),
+          ),
         ],
       ),
     );
+  }
+
+  Future<void> _fetchLyrics(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Buscando letra...')),
+    );
+    final result = await _controller.fetchLyrics(useAiFallback: true);
+    if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
+    if (result == null || result.plain.trim().isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No se encontró letra.')),
+      );
+      return;
+    }
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_controller.snapshot.title),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(child: Text(result.plain)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDownloadDialog(BuildContext context) async {
+    final controller = TextEditingController(text: '');
+    final path = TextEditingController(text: '');
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Descargar pista'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: 'URL de audio directa',
+                hintText: 'https://ejemplo.com/cancion.mp3',
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: path,
+              decoration: const InputDecoration(
+                labelText: 'Guardar como',
+                hintText: '/home/usuario/music/cancion.mp3',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Descargar'),
+          ),
+        ],
+      ),
+    );
+    if (result != true) return;
+    final url = controller.text.trim();
+    final dest = path.text.trim();
+    if (url.isEmpty || dest.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Falta URL o ruta.')),
+      );
+      return;
+    }
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Descargando...')),
+    );
+    final r = await _controller.downloadTrack(url: url, destPath: dest);
+    if (!context.mounted) return;
+    messenger.hideCurrentSnackBar();
+    if (r == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Fallo la descarga.')),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Guardado en ${r.path} (${r.bytes} bytes)')),
+      );
+    }
   }
 }
 
