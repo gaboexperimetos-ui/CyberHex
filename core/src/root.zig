@@ -78,6 +78,9 @@ extern fn ch_file_free(data: [*c]u8) void;
 extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
 extern fn ch_tags_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 extern fn ch_tags_mp3_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_tags_ogg_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_tags_opus_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+const SetFn = *const fn ([*c]const u8, [*c]const u8, [*c]const u8) callconv(.c) i32;
 extern fn ch_dir_list_audio(dir: [*c]const u8, extensions: [*c]const [*c]const u8, count_out: *i32) [*c]u8;
 
 const ChLoudness = extern struct {
@@ -3911,6 +3914,12 @@ export fn ch_engine_set_tag(self: ?*Engine, key: [*c]const u8, value: [*c]const 
     if (std.mem.endsWith(u8, span, ".mp3")) {
         return ch_tags_mp3_set(p.ptr, key, value orelse @ptrCast(""));
     }
+    if (std.mem.endsWith(u8, span, ".opus")) {
+        return ch_tags_opus_set(p.ptr, key, value orelse @ptrCast(""));
+    }
+    if (std.mem.endsWith(u8, span, ".ogg") or std.mem.endsWith(u8, span, ".oga")) {
+        return ch_tags_ogg_set(p.ptr, key, value orelse @ptrCast(""));
+    }
     return -3;
 }
 
@@ -4334,20 +4343,26 @@ export fn ch_engine_write_replaygain(self: ?*Engine, path: [*c]const u8) i32 {
     const peak = std.math.pow(f64, 10.0, r.sample_peak_dbfs / 20.0);
     var gbuf: [64]u8 = undefined;
     var pbuf: [64]u8 = undefined;
-    const gs = std.fmt.bufPrint(&gbuf, "{d:.2} dB", .{gain}) catch return -3;
-    const ps = std.fmt.bufPrint(&pbuf, "{d:.6}", .{peak}) catch return -3;
+    // printSentinel: los escritores de tags hablan C y esperan terminador nulo.
+    const gs = std.fmt.bufPrintSentinel(&gbuf, "{d:.2} dB", .{gain}, 0) catch return -3;
+    const ps = std.fmt.bufPrintSentinel(&pbuf, "{d:.6}", .{peak}, 0) catch return -3;
     const span = std.mem.span(path);
 
-    var ok = false;
+    var writer: ?SetFn = null;
     if (std.mem.endsWith(u8, span, ".flac")) {
-        ok = ch_tags_set(path, "REPLAYGAIN_TRACK_GAIN", gs.ptr) == 0 and
-            ch_tags_set(path, "REPLAYGAIN_TRACK_PEAK", ps.ptr) == 0;
+        writer = ch_tags_set;
     } else if (std.mem.endsWith(u8, span, ".mp3")) {
-        ok = ch_tags_mp3_set(path, "REPLAYGAIN_TRACK_GAIN", gs.ptr) == 0 and
-            ch_tags_mp3_set(path, "REPLAYGAIN_TRACK_PEAK", ps.ptr) == 0;
+        writer = ch_tags_mp3_set;
+    } else if (std.mem.endsWith(u8, span, ".opus")) {
+        writer = ch_tags_opus_set;
+    } else if (std.mem.endsWith(u8, span, ".ogg") or std.mem.endsWith(u8, span, ".oga")) {
+        writer = ch_tags_ogg_set;
     } else {
-        return e.fail("ReplayGain solo soporta FLAC y MP3", -4);
+        return e.fail("ReplayGain solo soporta FLAC, MP3, Ogg y Opus", -4);
     }
+    const w = writer.?;
+    const ok = w(path, "REPLAYGAIN_TRACK_GAIN", gs.ptr) == 0 and
+        w(path, "REPLAYGAIN_TRACK_PEAK", ps.ptr) == 0;
     if (!ok) return e.fail("no se pudieron escribir las etiquetas", -4);
     return 0;
 }
@@ -4547,10 +4562,15 @@ export fn ch_engine_copy_tags(src: [*c]const u8, dst: [*c]const u8) i32 {
         if (text.len == 0) continue;
         const text_z = e_dupZ(text) orelse continue;
         defer std.heap.c_allocator.free(text_z);
-        const rc = if (is_mp3)
-            ch_tags_mp3_set(dst_z.ptr, z.ptr, text_z.ptr)
-        else
-            ch_tags_set(dst_z.ptr, z.ptr, text_z.ptr);
+        var w: SetFn = ch_tags_set;
+        if (is_mp3) {
+            w = ch_tags_mp3_set;
+        } else if (std.mem.endsWith(u8, dst_span, ".opus")) {
+            w = ch_tags_opus_set;
+        } else if (std.mem.endsWith(u8, dst_span, ".ogg") or std.mem.endsWith(u8, dst_span, ".oga")) {
+            w = ch_tags_ogg_set;
+        }
+        const rc = w(dst_z.ptr, z.ptr, text_z.ptr);
         if (rc == 0) copied += 1;
     }
     return copied;
