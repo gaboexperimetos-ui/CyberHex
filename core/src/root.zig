@@ -70,6 +70,7 @@ extern fn c_lib_count(lib: ?*const ch_library) c_int;
 extern fn c_lib_path(lib: ?*const ch_library, index: c_int) [*c]const u8;
 extern fn c_lib_removed(lib: ?*const ch_library) c_int;
 extern fn c_lib_search(lib: ?*const ch_library, needle: [*c]const u8, count_out: *i32) ?[*]i32;
+extern fn c_lib_remove(lib: ?*ch_library, path: [*c]const u8) i32;
 
 extern fn ch_file_read_all(path: [*c]const u8, size: *u64) [*c]u8;
 extern fn ch_file_free(data: [*c]u8) void;
@@ -2226,6 +2227,88 @@ export fn ch_engine_queue_export_json(self: ?*Engine, path: [*c]const u8) i32 {
     return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
 }
 
+/// Exporta la cola a M3U con #EXTINF (titulo - artista) ademas de la ruta.
+export fn ch_engine_queue_export_m3u_ext(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+    buf.appendSlice(e.allocator, "#EXTM3U\n") catch return -2;
+    e.list_mutex.lock();
+    for (e.playlist.items) |item| {
+        // Abrir el archivo para leer titulo/artista (rapido, solo si existe).
+        var title: []const u8 = "";
+        var artist: []const u8 = "";
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const t = std.mem.span(ch_decode_title(d));
+            const a = std.mem.span(ch_decode_artist(d));
+            if (t.len > 0) title = t;
+            if (a.len > 0) artist = a;
+            ch_decode_close(d);
+        }
+        var tmp: [512]u8 = undefined;
+        const line = std.fmt.bufPrint(&tmp, "#EXTINF:-1,{s} - {s}\n{s}\n", .{ artist, title, item }) catch continue;
+        buf.appendSlice(e.allocator, line) catch {};
+    }
+    e.list_mutex.unlock();
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Importa una cola desde un JSON exportado por ch_engine_queue_export_json.
+/// Devuelve el numero de pistas importadas, o negativo si error.
+export fn ch_engine_queue_import_json(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var size: u64 = 0;
+    const raw = ch_file_read_all(path, &size) orelse return -2;
+    defer ch_file_free(raw);
+    const data = raw[0..@intCast(size)];
+
+    var added: i32 = 0;
+    // Buscar lineas que empiecen por espacios + comilla (los paths).
+    var it = std.mem.splitScalar(u8, data, '\n');
+    e.list_mutex.lock();
+    while (it.next()) |line| {
+        const t = std.mem.trim(u8, line, " \t");
+        if (t.len < 2 or t[0] != '"') continue;
+        // Extraer el contenido entre comillas (con escapes).
+        const end = std.mem.lastIndexOfScalar(u8, t, '"') orelse continue;
+        if (end <= 0) continue;
+        const content = t[1..end];
+        // Desescapar.
+        var clean: std.ArrayListUnmanaged(u8) = .empty;
+        defer clean.deinit(e.allocator);
+        var i: usize = 0;
+        while (i < content.len) : (i += 1) {
+            if (content[i] == '\\' and i + 1 < content.len) {
+                i += 1;
+                clean.append(e.allocator, switch (content[i]) {
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    else => content[i],
+                }) catch {};
+            } else {
+                clean.append(e.allocator, content[i]) catch {};
+            }
+        }
+        if (clean.items.len == 0) continue;
+        const z = e.allocator.dupeSentinel(u8, clean.items, 0) catch continue;
+        e.playlist.append(e.allocator, z) catch {
+            e.allocator.free(z);
+            continue;
+        };
+        added += 1;
+    }
+    e.list_mutex.unlock();
+    if (added > 0) {
+        e.pushEvent(EV_QUEUE, added, 0, 0);
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return added;
+}
+
 /// Ordena la cola alfabeticamente por ruta. Devuelve 0 si ok.
 export fn ch_engine_queue_sort(self: ?*Engine) i32 {
     const e = self orelse return -1;
@@ -2235,6 +2318,344 @@ export fn ch_engine_queue_sort(self: ?*Engine) i32 {
             return std.mem.lessThan(u8, a, b);
         }
     }.lt);
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por titulo (abre cada archivo para leer el tag). Devuelve 0.
+export fn ch_engine_queue_sort_title(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    // Precomputar titulos.
+    const titles = e.allocator.alloc([]const u8, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(titles);
+    for (e.playlist.items, 0..) |item, i| {
+        var title: []const u8 = item;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const t = std.mem.span(ch_decode_title(d));
+            if (t.len > 0) title = t;
+            ch_decode_close(d);
+        }
+        titles[i] = title;
+    }
+    // Ordenar por titulo (simple insertion sort, n pequeno).
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and std.mem.lessThan(u8, titles[j], titles[j - 1])) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap([]const u8, &titles[j], &titles[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por artista (abre cada archivo para leer el tag). Devuelve 0.
+export fn ch_engine_queue_sort_artist(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const arts = e.allocator.alloc([]const u8, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(arts);
+    for (e.playlist.items, 0..) |item, i| {
+        var artist: []const u8 = item;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const a = std.mem.span(ch_decode_artist(d));
+            if (a.len > 0) artist = a;
+            ch_decode_close(d);
+        }
+        arts[i] = artist;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and std.mem.lessThan(u8, arts[j], arts[j - 1])) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap([]const u8, &arts[j], &arts[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por album. Devuelve 0.
+export fn ch_engine_queue_sort_album(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const vals = e.allocator.alloc([]const u8, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(vals);
+    for (e.playlist.items, 0..) |item, i| {
+        var album: []const u8 = item;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const a = std.mem.span(ch_decode_album(d));
+            if (a.len > 0) album = a;
+            ch_decode_close(d);
+        }
+        vals[i] = album;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and std.mem.lessThan(u8, vals[j], vals[j - 1])) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap([]const u8, &vals[j], &vals[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por año (tag date). Devuelve 0.
+export fn ch_engine_queue_sort_year(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const years = e.allocator.alloc(i32, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(years);
+    for (e.playlist.items, 0..) |item, i| {
+        var year: i32 = 0;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const dt = parseLeadingFloat(std.mem.span(ch_decode_tag(d, "date"))) orelse 0;
+            year = @intFromFloat(dt);
+            ch_decode_close(d);
+        }
+        years[i] = year;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and years[j] < years[j - 1]) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap(i32, &years[j], &years[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por numero de pista. Devuelve 0.
+export fn ch_engine_queue_sort_track(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const nums = e.allocator.alloc(i32, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(nums);
+    for (e.playlist.items, 0..) |item, i| {
+        var num: i32 = 0;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            num = @intFromFloat(parseLeadingFloat(std.mem.span(ch_decode_tag(d, "track"))) orelse 0);
+            ch_decode_close(d);
+        }
+        nums[i] = num;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and nums[j] < nums[j - 1]) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap(i32, &nums[j], &nums[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por duracion (menor a mayor). Devuelve 0.
+export fn ch_engine_queue_sort_duration(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const durs = e.allocator.alloc(f64, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(durs);
+    for (e.playlist.items, 0..) |item, i| {
+        var dur: f64 = 0;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            dur = ch_decode_duration(d);
+            ch_decode_close(d);
+        }
+        durs[i] = dur;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and durs[j] < durs[j - 1]) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap(f64, &durs[j], &durs[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por albumartist. Devuelve 0.
+export fn ch_engine_queue_sort_albumartist(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const vals = e.allocator.alloc([]const u8, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(vals);
+    for (e.playlist.items, 0..) |item, i| {
+        var v: []const u8 = item;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const a = std.mem.span(ch_decode_tag(d, "albumartist"));
+            if (a.len > 0) v = a;
+            ch_decode_close(d);
+        }
+        vals[i] = v;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and std.mem.lessThan(u8, vals[j], vals[j - 1])) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap([]const u8, &vals[j], &vals[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por genero. Devuelve 0.
+export fn ch_engine_queue_sort_genre(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const vals = e.allocator.alloc([]const u8, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(vals);
+    for (e.playlist.items, 0..) |item, i| {
+        var v: []const u8 = item;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const g = std.mem.span(ch_decode_tag(d, "genre"));
+            if (g.len > 0) v = g;
+            ch_decode_close(d);
+        }
+        vals[i] = v;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and std.mem.lessThan(u8, vals[j], vals[j - 1])) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap([]const u8, &vals[j], &vals[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por compositor. Devuelve 0.
+export fn ch_engine_queue_sort_composer(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const vals = e.allocator.alloc([]const u8, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(vals);
+    for (e.playlist.items, 0..) |item, i| {
+        var v: []const u8 = item;
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const c = std.mem.span(ch_decode_tag(d, "composer"));
+            if (c.len > 0) v = c;
+            ch_decode_close(d);
+        }
+        vals[i] = v;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and std.mem.lessThan(u8, vals[j], vals[j - 1])) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap([]const u8, &vals[j], &vals[j - 1]);
+            j -= 1;
+        }
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Ordena la cola por tamaño de archivo (menor a mayor). Devuelve 0.
+export fn ch_engine_queue_sort_filesize(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    const sizes = e.allocator.alloc(u64, n) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer e.allocator.free(sizes);
+    for (e.playlist.items, 0..) |item, i| {
+        var sz: u64 = 0;
+        if (ch_file_read_all(item.ptr, &sz)) |raw| {
+            ch_file_free(raw);
+        }
+        sizes[i] = sz;
+    }
+    var i: usize = 1;
+    while (i < n) : (i += 1) {
+        var j = i;
+        while (j > 0 and sizes[j] < sizes[j - 1]) {
+            std.mem.swap([:0]u8, &e.playlist.items[j], &e.playlist.items[j - 1]);
+            std.mem.swap(u64, &sizes[j], &sizes[j - 1]);
+            j -= 1;
+        }
+    }
     e.list_mutex.unlock();
     e.order.clearRetainingCapacity();
     e.order_pos = 0;
@@ -2382,6 +2803,167 @@ export fn ch_engine_queue_count_ext(self: ?*Engine, ext: [*c]const u8) i32 {
     e.list_mutex.unlock();
     return count;
 }
+
+/// Devuelve la ruta de la pista `index` de la cola ("" si no existe).
+export fn ch_engine_queue_path(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    if (index >= @as(i32, @intCast(e.playlist.items.len))) return @ptrCast("");
+    return @ptrCast(e.playlist.items[@intCast(index)].ptr);
+}
+
+/// Devolve el indice de la pista que suena ahora (o -1).
+export fn ch_engine_queue_current_index(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    const idx = e.audibleIndex() orelse e.queue_index;
+    return @intCast(idx);
+}
+
+/// Titulo de la pista `index` de la cola ("" si no se puede leer).
+export fn ch_engine_queue_title(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return @ptrCast("");
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const t = std.mem.span(ch_decode_title(d));
+        ch_decode_close(d);
+        // Copiar a un buffer persistente (thread-local).
+        return copyTls(t);
+    }
+    return @ptrCast("");
+}
+
+fn copyTls(s: []const u8) [*c]const u8 {
+    const buf = &tls_queue_meta;
+    const n = @min(s.len, buf.len - 1);
+    @memcpy(buf[0..n], s[0..n]);
+    buf[n] = 0;
+    return @ptrCast(&tls_queue_meta);
+}
+
+var tls_queue_meta: [1024]u8 = std.mem.zeroes([1024]u8);
+
+/// Artista de la pista `index` de la cola ("" si no se puede leer).
+export fn ch_engine_queue_artist(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return @ptrCast("");
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const a = std.mem.span(ch_decode_artist(d));
+        ch_decode_close(d);
+        return copyTls(a);
+    }
+    return @ptrCast("");
+}
+
+/// Album de la pista `index` de la cola ("" si no se puede leer).
+export fn ch_engine_queue_album(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return @ptrCast("");
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const a = std.mem.span(ch_decode_album(d));
+        ch_decode_close(d);
+        return copyTls(a);
+    }
+    return @ptrCast("");
+}
+
+/// Duracion de la pista `index` de la cola en segundos (-1 si no se puede leer).
+export fn ch_engine_queue_duration(self: ?*Engine, index: i32) f64 {
+    const e = self orelse return -1;
+    if (index < 0) return -1;
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return -1;
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const dur = ch_decode_duration(d);
+        ch_decode_close(d);
+        return dur;
+    }
+    return -1;
+}
+
+/// Numero de caratulas de la pista `index` de la cola (-1 si no se puede leer).
+export fn ch_engine_queue_cover_count(self: ?*Engine, index: i32) i32 {
+    const e = self orelse return -1;
+    if (index < 0) return -1;
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return -1;
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const n = ch_decode_cover_count(d);
+        ch_decode_close(d);
+        return @intCast(n);
+    }
+    return -1;
+}
+
+/// Genero de la pista `index` de la cola ("" si no se puede leer).
+export fn ch_engine_queue_genre(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return @ptrCast("");
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const g = std.mem.span(ch_decode_tag(d, "genre"));
+        ch_decode_close(d);
+        return copyTls(g);
+    }
+    return @ptrCast("");
+}
+
+/// Fecha de la pista `index` de la cola ("" si no se puede leer).
+export fn ch_engine_queue_date(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return @ptrCast("");
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const g = std.mem.span(ch_decode_tag(d, "date"));
+        ch_decode_close(d);
+        return copyTls(g);
+    }
+    return @ptrCast("");
+}
+
+/// Compositor de la pista `index` de la cola ("" si no se puede leer).
+export fn ch_engine_queue_composer(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0) return @ptrCast("");
+    e.list_mutex.lock();
+    const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
+    e.list_mutex.unlock();
+    const p = path orelse return @ptrCast("");
+    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+        const g = std.mem.span(ch_decode_tag(d, "composer"));
+        ch_decode_close(d);
+        return copyTls(g);
+    }
+    return @ptrCast("");
+}
+
+
+
 
 export fn ch_engine_play(self: ?*Engine) i32 {
     const e = self orelse return -1;
@@ -3910,6 +4492,12 @@ export fn ch_library_search(lib: ?*const ch_library, needle: [*c]const u8, count
     const ptr = c_lib_search(lib, needle, &n);
     if (count_out) |out| out.* = n;
     return ptr;
+}
+
+/// Elimina una ruta de la biblioteca. Devuelve 1 si se elimino, 0 si no estaba.
+export fn ch_library_remove(lib: ?*ch_library, path: [*c]const u8) i32 {
+    if (lib == null or path == null) return 0;
+    return @intCast(c_lib_remove(lib, path));
 }
 
 export fn ch_library_path(lib: ?*const ch_library, index: i32) [*c]const u8 {

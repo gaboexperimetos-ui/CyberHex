@@ -272,3 +272,16 @@ int32_t* c_lib_search(const ch_library* lib, const char* needle, int32_t* count_
     if (count_out) *count_out = n;
     return out;
 }
+
+int32_t c_lib_remove(ch_library* lib, const char* path) {
+    if (!lib || !path) return 0;
+    for (int32_t i = 0; i < lib->count; i++) {
+        if (strcmp(lib->items[i].path, path) == 0) {
+            free(lib->items[i].path);
+            lib->items[i] = lib->items[lib->count - 1];
+            lib->count--;
+            return 1;
+        }
+    }
+    return 0;
+}

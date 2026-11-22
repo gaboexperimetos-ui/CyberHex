@@ -602,3 +602,15 @@ limitan a 4 por pista en memoria.
 ### Tags MP3
 
 - `ch_engine_set_tag` ahora soporta FLAC (Vorbis) y MP3 (ID3v2.3).
+
+### Metadatos de cola por indice
+
+- `ch_engine_queue_title/artist/album/genre/date/composer(index)` leen el tag
+  sin cargar la pista en el motor.
+- `ch_engine_queue_duration/cover_count(index)` dan duracion y caratulas.
+- `ch_engine_queue_path/current_index(index)` dan la ruta y el indice actual.
+
+### Ordenar cola por metadatos
+
+- `ch_engine_queue_sort_title/artist/album/year/track/albumartist/genre/composer/duration/filesize`
+  ordenan la cola abriendo cada archivo para leer su tag.

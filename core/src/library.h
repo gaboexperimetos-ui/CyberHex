@@ -50,3 +50,6 @@ int32_t c_lib_removed(const ch_library* lib);
  * los indices encontrados y escribe el total en `count_out` (0 si nada). El
  * buffer se libera con ch_file_free(). NULL si no hay coincidencias. */
 int32_t* c_lib_search(const ch_library* lib, const char* needle, int32_t* count_out);
+
+/* Elimina una ruta de la biblioteca. 1 si se elimino, 0 si no estaba. */
+int32_t c_lib_remove(ch_library* lib, const char* path);
