@@ -569,3 +569,13 @@ limitan a 4 por pista en memoria.
 
 - `ch_engine_set_fade_in/out` (fundido de entrada/salida) y `ch_engine_set_gap`
   (silencio entre pistas).
+
+### Historial reciente y pausa por carpeta
+
+- `ch_engine_set_avoid_recent(1)` evita repetir pistas ya sonadas (shuffle).
+- `ch_engine_recent_count/clear` consultan/limpian el historial.
+- `ch_engine_set_pause_at_dir_end(1)` pausa al terminar una carpeta.
+
+### Exportar biblioteca
+
+- `ch_library_export_csv(path)` exporta a CSV (path;filename).

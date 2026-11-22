@@ -398,6 +398,11 @@ pub const Engine = struct {
     listen_frames: u64 = 0,
     // Favoritos (rutas persistentes).
     favorites: std.ArrayListUnmanaged([]u8) = .empty,
+    // Historial de reproduccion reciente (para shuffle con recencia).
+    recent: std.ArrayListUnmanaged([]u8) = .empty,
+    recent_cap: usize = 50,
+    avoid_recent: bool = false,
+    pause_at_dir_end: bool = false,
     sleep_end_ms: u64 = 0,
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
@@ -1035,6 +1040,27 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         self.stats_lock.lock();
         self.play_count += 1;
         self.stats_lock.unlock();
+        // Historial reciente (evita repetir en shuffle).
+        if (index < self.playlist.items.len) {
+            const path = self.playlist.items[index];
+            var already = false;
+            for (self.recent.items) |r| {
+                if (std.mem.eql(u8, r, path)) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already) {
+                if (self.recent.items.len >= self.recent_cap) {
+                    const old = self.recent.orderedRemove(0);
+                    self.allocator.free(old);
+                }
+                const copy = self.allocator.dupe(u8, path) catch null;
+                if (copy) |c| self.recent.append(self.allocator, c) catch {
+                    self.allocator.free(c);
+                };
+            }
+        }
         // Fundido de entrada suave (evita el clic al abrir una pista nueva).
         self.fade_gain = 0;
         if (self.trim_enabled) self.applyTrim(index);
@@ -1678,6 +1704,11 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                     @atomicStore(bool, &self.playing, false, .release);
                     self.pushEvent(EV_END, 0, 0, 0);
                     self.pushEvent(EV_STATE, 0, 0, 0);
+                    // Pausar al final de carpeta: si la siguiente pista esta en
+                    // otro directorio, no seguir (la UI decide si continuar).
+                    if (self.pause_at_dir_end and self.differentDir(self.queue_index)) {
+                        self.pushEvent(EV_QUEUE, -1, 0, 0);
+                    }
                 }
             }
         }
@@ -1735,6 +1766,16 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         }
         self.comp_env = env;
     }
+
+/// Comprueba si la pista `index` y la siguiente estan en directorios distintos.
+fn differentDir(self: *Engine, index: usize) bool {
+    if (index + 1 >= self.playlist.items.len) return false;
+    const a = self.playlist.items[index];
+    const b = self.playlist.items[index + 1];
+    const da = std.mem.lastIndexOfScalar(u8, a, '/') orelse return false;
+    const db = std.mem.lastIndexOfScalar(u8, b, '/') orelse return false;
+    return !std.mem.eql(u8, a[0..da], b[0..db]);
+}
 
     fn spectrum(self: *Engine, out: []f32) void {
         const bands = out.len;
@@ -1892,6 +1933,8 @@ fn destroyEngine(e: *Engine) void {
     e.retired_covers.deinit(e.allocator);
     for (e.favorites.items) |f| e.allocator.free(f);
     e.favorites.deinit(e.allocator);
+    for (e.recent.items) |r| e.allocator.free(r);
+    e.recent.deinit(e.allocator);
     for (e.playlist.items) |p| e.allocator.free(p);
     e.playlist.deinit(e.allocator);
     e.order.deinit(e.allocator);
@@ -3665,6 +3708,75 @@ export fn ch_library_export_json(lib: ?*const ch_library, path: [*c]const u8) i3
     buf.appendSlice(alloc, "\n}\n") catch return -2;
     return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
 }
+
+/// Exporta la biblioteca a un archivo CSV (path;filename). Devuelve 0 si ok.
+export fn ch_library_export_csv(lib: ?*const ch_library, path: [*c]const u8) i32 {
+    if (lib == null or path == null) return -1;
+    const alloc = std.heap.c_allocator;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(alloc);
+    buf.appendSlice(alloc, "path;filename\n") catch return -2;
+    const n = c_lib_count(lib);
+    var i: i32 = 0;
+    while (i < n) : (i += 1) {
+        const p: [*c]const u8 = c_lib_path(lib, i) orelse @ptrCast("");
+        const span = std.mem.span(p);
+        buf.appendSlice(alloc, span) catch return -2;
+        buf.append(alloc, ';') catch return -2;
+        if (std.mem.lastIndexOfScalar(u8, span, '/')) |slash| {
+            buf.appendSlice(alloc, span[slash + 1 ..]) catch return -2;
+        } else {
+            buf.appendSlice(alloc, span) catch return -2;
+        }
+        buf.append(alloc, '\n') catch return -2;
+    }
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Activa/desactiva "evitar repetir pista reciente" (shuffle con recencia).
+export fn ch_engine_set_avoid_recent(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    e.avoid_recent = enabled != 0;
+    if (!e.avoid_recent) {
+        for (e.recent.items) |r| e.allocator.free(r);
+        e.recent.clearRetainingCapacity();
+    }
+    return 0;
+}
+
+export fn ch_engine_avoid_recent(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.avoid_recent) 1 else 0;
+}
+
+/// Numero de pistas en el historial reciente.
+export fn ch_engine_recent_count(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return @intCast(e.recent.items.len);
+}
+
+/// Limpia el historial reciente.
+export fn ch_engine_recent_clear(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    for (e.recent.items) |r| e.allocator.free(r);
+    e.recent.clearRetainingCapacity();
+    return 0;
+}
+
+/// Pausa automaticamente al terminar una carpeta (cuando la siguiente pista
+/// esta en otro directorio).
+export fn ch_engine_set_pause_at_dir_end(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    e.pause_at_dir_end = enabled != 0;
+    return 0;
+}
+
+export fn ch_engine_pause_at_dir_end(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.pause_at_dir_end) 1 else 0;
+}
+
+
 
 // ---- Estado de reproduccion persistente ----
 
