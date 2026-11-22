@@ -199,6 +199,10 @@ void main() {
 
       await tester.scrollUntilVisible(find.text('Detectar BPM'), 250,
           scrollable: find.byType(Scrollable).first);
+      // Deja el botón dentro de la ventana antes de tocarlo: si queda al borde,
+      // el toque no llega.
+      await tester.ensureVisible(find.text('Detectar BPM'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Detectar BPM'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 50));

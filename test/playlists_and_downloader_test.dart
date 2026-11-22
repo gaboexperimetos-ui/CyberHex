@@ -328,6 +328,10 @@ void main() {
       );
       engine.setEnabled(true);
       engine.tick();
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      // El análisis es asíncrono: un segundo paso confirma que el estado ya
+      // está asentado sin depender de cuántos microtareas tarde la sonda.
+      engine.tick();
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
       expect(engine.phase, AutomixPhase.blending);
