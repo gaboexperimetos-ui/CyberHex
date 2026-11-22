@@ -429,7 +429,7 @@ class ShareCard extends StatelessWidget {
 /// No es la forma de onda real (el núcleo aún no la expone): es un dibujo
 /// estable, suave y distinto por pista, para que la tarjeta no salga idéntica
 /// siempre. Se documenta aquí para no confundirla con datos medidos.
-List<double> shareWaveform(String seed, {int bars = 48}) {
+List<double> shareWaveform(String seed, {int bars = 46}) {
   if (bars <= 0) return const <double>[];
   var state = 0x811C9DC5;
   for (final unit in seed.codeUnits) {

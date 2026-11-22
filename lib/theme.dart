@@ -137,8 +137,17 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
 
   String get label => id.label;
 
-  /// Copia con otro acento (color dinámico de la carátula).
-  CyberHexPalette withAccent(Color color) => CyberHexPalette(
+  /// Copia con otro acento (el color que saca el modo dinámico de la carátula).
+  ///
+  /// Un color puede ser precioso y no leerse (un morado casi negro sobre fondo
+  /// negro), así que se aclara —o se oscurece, en temas claros— hasta que
+  /// contraste con el fondo.
+  CyberHexPalette withAccent(Color color) {
+    final readable = _readableAccent(color);
+    return _withAccentColor(readable);
+  }
+
+  CyberHexPalette _withAccentColor(Color color) => CyberHexPalette(
         id: id,
         background: background,
         surface: surface,
@@ -153,6 +162,34 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
         error: error,
         brightness: brightness,
       );
+
+  /// Sube o baja la luminosidad del acento hasta que se lea sobre el fondo.
+  Color _readableAccent(Color color) {
+    final dark = brightness == Brightness.dark;
+    var hsl = HSLColor.fromColor(color);
+    for (var i = 0; i < 24; i++) {
+      final candidate = hsl.toColor();
+      final luminance = candidate.computeLuminance();
+      final ratio = _contrastRatio(candidate, background);
+      // Se pide contraste suficiente *y* un brillo claro/oscurio de verdad: un
+      // gris medio sobre negro cumple la ratio pero cansa la vista.
+      final readable = ratio >= 3.0 && (dark ? luminance >= 0.25 : luminance <= 0.45);
+      if (readable) return candidate;
+      hsl = hsl.withLightness(
+        (hsl.lightness + (dark ? 0.05 : -0.05)).clamp(0.0, 1.0),
+      );
+    }
+    return dark ? const Color(0xFFF2F2F2) : const Color(0xFF101010);
+  }
+
+  /// Ratio de contraste WCAG entre dos colores (1 = iguales, 21 = blanco/negro).
+  static double _contrastRatio(Color a, Color b) {
+    final la = a.computeLuminance();
+    final lb = b.computeLuminance();
+    final hi = la > lb ? la : lb;
+    final lo = la > lb ? lb : la;
+    return (hi + 0.05) / (lo + 0.05);
+  }
 
   static const CyberHexPalette neon = CyberHexPalette(
     id: CyberHexThemeId.neon,

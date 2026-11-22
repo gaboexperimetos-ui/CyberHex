@@ -466,6 +466,9 @@ Deuxième ligne
         find.widgetWithText(TextField, 'Título'),
         'Nuevo título',
       );
+      // El botón puede quedar por debajo del pliegue del panel.
+      await tester.ensureVisible(find.text('Guardar'));
+      await tester.pump();
       await tester.runAsync(() async {
         await tester.tap(find.text('Guardar'));
         await tester.pump();
@@ -538,11 +541,13 @@ Deuxième ligne
       await tester.pump();
 
       expect(find.text('Tarjeta compartible'), findsOneWidget);
-      expect(find.text('Dos'), findsWidgets);
+      // El verso puede ir entre comillas tipográficas: se busca el texto dentro.
+      expect(find.textContaining('Dos'), findsWidgets);
 
+      await tester.ensureVisible(find.text('Otro verso'));
       await tester.tap(find.text('Otro verso'));
       await tester.pump();
-      expect(find.text('Uno'), findsWidgets);
+      expect(find.textContaining('Uno'), findsWidgets);
 
       await tester.pumpWidget(const SizedBox());
     });

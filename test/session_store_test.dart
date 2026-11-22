@@ -400,7 +400,10 @@ void main() {
     });
 
     test('el aviso de ajustes usa antirrebote y dispose lo escribe', () async {
-      final fake = FakePlayer();
+      // Sin cola la sesión se considera vacía y no se guarda: se da una pista.
+      final fake = FakePlayer()
+        ..queuePaths.add('/m/uno.mp3')
+        ..queueIndexValue = 0;
       final controller = PlayerController(fake);
       final keeper = SessionKeeper(controller: controller, store: store);
       addTearDown(controller.dispose);

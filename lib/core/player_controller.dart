@@ -15,9 +15,10 @@ import 'player_api.dart';
 /// Así se puede refrescar la posición a 12,5 Hz sin reconstruir la pantalla.
 class PlayerController extends ChangeNotifier {
   PlayerController(this._player) {
-    // El primer snapshot ya trae la cola que el motor tenga cargada: sin esto,
-    // quien consulte `snapshot.queue` antes del primer `pump()` la ve vacía.
+    // El primer snapshot se construye aquí: sin esto, quien lo consulte antes
+    // del primer `pump()` ve un `PlayerSnapshot()` vacío (sin pista ni cola).
     _refreshQueue();
+    _refresh();
   }
 
   final PlayerApi _player;

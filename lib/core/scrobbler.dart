@@ -289,9 +289,13 @@ class Scrobbler extends ChangeNotifier {
     return _inFlight!;
   }
 
+  /// `true` cuando el objeto ya se soltó: un envío en vuelo puede terminar
+  /// después y no debe tocar oyentes ni guardar nada.
+  bool _disposed = false;
+
   Future<bool> _flushOnce() async {
     _sending = true;
-    notifyListeners();
+    _notify();
     try {
       final done = <PendingScrobble>[];
       for (final scrobble in List<PendingScrobble>.of(_pending)) {
@@ -315,9 +319,10 @@ class Scrobbler extends ChangeNotifier {
       _dirty = true;
     } finally {
       _sending = false;
+      if (_disposed) return _pending.isEmpty;
       if (_pending.isEmpty) _lastError = null;
       await save();
-      notifyListeners();
+      _notify();
     }
     return _pending.isEmpty;
   }
@@ -495,7 +500,13 @@ class Scrobbler extends ChangeNotifier {
   }
 
   @override
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     _saveTimer?.cancel();
     _saveTimer = null;
     _controller.removeListener(_onControllerChanged);
