@@ -241,13 +241,16 @@ void main() {
       expect(fake.position, closeTo(35, 1.5));
       expect(fake.position, greaterThan(30));
       await tester.pumpWidget(const SizedBox());
+      // El temporizador de guardado que arranca al mover la posición se apaga
+      // aquí: si no, la prueba acaba con un `Timer` pendiente.
+      await tester.pump(const Duration(seconds: 3));
     });
 
     testWidgets('el modo bolsillo bloquea y se sale con pulsación larga',
         (tester) async {
       final (fake, _, _) = await pumpPlayer(tester);
-      await tester.tap(find.byTooltip('Modo bolsillo'));
-      await tester.pump();
+      await tester.tap(find.byIcon(Icons.lock_outline_rounded));
+      await tester.pumpAndSettle();
       expect(find.text('Mantén pulsado para salir'), findsOneWidget);
 
       // Con el bloqueo puesto, el doble toque no hace nada.
@@ -255,9 +258,10 @@ void main() {
       expect(fake.isPlaying, isFalse);
 
       await tester.longPress(find.text('Modo bolsillo'));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.text('Mantén pulsado para salir'), findsNothing);
       await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 3)); // suelta los temporizadores
     });
 
     testWidgets('los cuatro estilos de carátula se pintan sin errores',

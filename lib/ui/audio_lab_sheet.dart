@@ -481,11 +481,15 @@ class _SectionState extends State<_Section> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: chSurface,
+    // `Material` y no `Container`: el `ListTile` pinta su fondo y sus ondas en
+    // el `Material` más cercano; con un `DecoratedBox` por medio, Flutter avisa
+    // (y en las pruebas eso rompe el test).
+    return Material(
+      color: chSurface,
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: chBorder.withValues(alpha: 0.6)),
+        side: BorderSide(color: chBorder.withValues(alpha: 0.6)),
       ),
       child: Column(
         children: [
