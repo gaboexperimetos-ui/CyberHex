@@ -4,6 +4,7 @@ const fft = @import("fft.zig");
 const Stretch = @import("stretch.zig").Stretch;
 
 pub const SAMPLE_RATE: u32 = 48000;
+const SAMPLE_RATE_F: f32 = 48000.0;
 pub const CHANNELS: u32 = 2;
 
 const Allocator = std.mem.Allocator;
@@ -168,6 +169,72 @@ const SpinLock = struct {
 
 const MAX_COVERS: usize = 4;
 
+/// Tipos de banda de EQ parametrico.
+const PEQType = enum(u8) { peaking, low_shelf, high_shelf };
+
+/// Una banda de EQ parametrico.
+const PEQ = struct {
+    enabled: bool = false,
+    type: PEQType = .peaking,
+    freq: f32 = 1000,
+    gain_db: f32 = 0,
+    q: f32 = 1.0,
+    // Coeficientes biquad (RBJ).
+    b0: f32 = 1,
+    b1: f32 = 0,
+    b2: f32 = 0,
+    a1: f32 = 0,
+    a2: f32 = 0,
+    fn recompute(self: *PEQ) void {
+        const w0 = 2.0 * std.math.pi * self.freq / SAMPLE_RATE_F;
+        const cos_w0 = @cos(w0);
+        const sin_w0 = @sin(w0);
+        const a = std.math.pow(f32, 10, self.gain_db / 40.0);
+        var b0: f32 = 1;
+        var b1: f32 = 0;
+        var b2: f32 = 0;
+        var a0: f32 = 1;
+        var a1: f32 = 0;
+        var a2: f32 = 0;
+        switch (self.type) {
+            .peaking => {
+                const alpha = sin_w0 / (2.0 * self.q);
+                b0 = 1 + alpha * a;
+                b1 = -2 * cos_w0;
+                b2 = 1 - alpha * a;
+                a0 = 1 + alpha / a;
+                a1 = -2 * cos_w0;
+                a2 = 1 - alpha / a;
+            },
+            .low_shelf => {
+                const alpha = sin_w0 / 2.0 * std.math.sqrt((a + 1.0 / a) * (1.0 / self.q - 1.0) + 2.0);
+                const t = 2.0 * std.math.sqrt(a) * alpha;
+                b0 = a * ((a + 1) - (a - 1) * cos_w0 + t);
+                b1 = 2 * a * ((a - 1) - (a + 1) * cos_w0);
+                b2 = a * ((a + 1) - (a - 1) * cos_w0 - t);
+                a0 = (a + 1) + (a - 1) * cos_w0 + t;
+                a1 = -2 * ((a - 1) + (a + 1) * cos_w0);
+                a2 = (a + 1) + (a - 1) * cos_w0 - t;
+            },
+            .high_shelf => {
+                const alpha = sin_w0 / 2.0 * std.math.sqrt((a + 1.0 / a) * (1.0 / self.q - 1.0) + 2.0);
+                const t = 2.0 * std.math.sqrt(a) * alpha;
+                b0 = a * ((a + 1) + (a - 1) * cos_w0 + t);
+                b1 = -2 * a * ((a - 1) + (a + 1) * cos_w0);
+                b2 = a * ((a + 1) + (a - 1) * cos_w0 - t);
+                a0 = (a + 1) - (a - 1) * cos_w0 + t;
+                a1 = 2 * ((a - 1) - (a + 1) * cos_w0);
+                a2 = (a + 1) - (a - 1) * cos_w0 - t;
+            },
+        }
+        self.b0 = b0 / a0;
+        self.b1 = b1 / a0;
+        self.b2 = b2 / a0;
+        self.a1 = a1 / a0;
+        self.a2 = a2 / a0;
+    }
+};
+
 const Segment = struct {
     start: usize = 0,
     end: usize = 0,
@@ -281,11 +348,33 @@ pub const Engine = struct {
     spatial_speed_bits: u32 = @bitCast(@as(f32, 0.25)), // vueltas/seg
     spatial_depth_bits: u32 = @bitCast(@as(f32, 0.7)),   // 0..1
     spatial_phase: f32 = 0,
+    // HRTF: localizacion binaural (angulo -1..1) con retardo interaural.
+    hrtf_enabled: bool = false,
+    hrtf_angle_bits: u32 = @bitCast(@as(f32, 0)), // -1 izq .. 1 der
+    hrtf_delay_l: usize = 0,
+    hrtf_delay_r: usize = 0,
+    hrtf_buf: ?[]f32 = null,
+    hrtf_len: usize = 0,
+    hrtf_pos: usize = 0,
     reverb_enabled: bool = false,
     reverb_mix_bits: u32 = @bitCast(@as(f32, 0.25)),
     reverb_buf: ?[]f32 = null,
     reverb_len: usize = 0,
     reverb_pos: usize = 0,
+
+    // Compresor dinamico (dB).
+    comp_enabled: bool = false,
+    comp_threshold_bits: u32 = @bitCast(@as(f32, -18)),
+    comp_ratio_bits: u32 = @bitCast(@as(f32, 4.0)),
+    comp_attack_bits: u32 = @bitCast(@as(f32, 0.01)),
+    comp_release_bits: u32 = @bitCast(@as(f32, 0.15)),
+    comp_env: f32 = 0,
+
+    // EQ parametrico (4 bandas: peaking + low/high shelf). Cada banda tiene
+    // {freq, gain_db, q} y un tipo. Se procesan despues del EQ grafico.
+    peq_enabled: bool = false,
+    peq: [4]PEQ = .{ .{}, .{}, .{}, .{} },
+    peq_z: [4][2][2]f32 = .{ .{ .{ 0, 0 }, .{ 0, 0 } }, .{ .{ 0, 0 }, .{ 0, 0 } }, .{ .{ 0, 0 }, .{ 0, 0 } }, .{ .{ 0, 0 }, .{ 0, 0 } } },
 
     // Mezcla: mono y balance (-1 izquierda .. +1 derecha).
     balance_bits: u32 = @bitCast(@as(f32, 0)),
@@ -1262,6 +1351,16 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         const produced = take * CHANNELS;
         self.equalizer.process(out[0..produced], take);
 
+        // EQ parametrico de 4 bandas (despues del grafico).
+        if (self.peq_enabled) {
+            self.processPEQ(out[0..produced], take);
+        }
+
+        // Compresor dinamico (antes del limitador y los medidores).
+        if (self.comp_enabled) {
+            self.processCompressor(out[0..produced], take);
+        }
+
         // Bucle A-B: al llegar a B se vuelve a A.
         const ab_end = @atomicLoad(usize, &self.ab_end, .acquire);
         if (playing and ab_end != NO_SEEK) {
@@ -1321,6 +1420,8 @@ fn audibleLyricsOffset(self: *Engine) f64 {
             const spatial_depth = @as(f32, @bitCast(@atomicLoad(u32, &self.spatial_depth_bits, .monotonic)));
             const reverb_on = self.reverb_enabled;
             const reverb_mix = @as(f32, @bitCast(@atomicLoad(u32, &self.reverb_mix_bits, .monotonic)));
+            const hrtf_on = self.hrtf_enabled;
+            const hrtf_angle = @as(f32, @bitCast(@atomicLoad(u32, &self.hrtf_angle_bits, .monotonic)));
             var spatial_phase = self.spatial_phase;
             const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &self.cf_strength_bits, .monotonic)));
             const cf_wet = 0.6 * std.math.clamp(cf_strength, 0.0, 1.0);
@@ -1401,6 +1502,33 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                         s = s * dry + rev_l * wet;
                         s2 = s2 * dry + rev_r * wet;
                         self.reverb_pos = (self.reverb_pos + 1) % self.reverb_len;
+                    }
+                }
+                if (hrtf_on) {
+                    // Localizacion binaural: retardo interaural + sombra.
+                    if (self.hrtf_buf) |hbuf| {
+                        const half = self.hrtf_len / 2;
+                        const pos = self.hrtf_pos;
+                        const ang = std.math.clamp(hrtf_angle, -1, 1);
+                        const max_delay: usize = half - 1;
+                        const hdly = @as(usize, @intFromFloat(@abs(ang) * @as(f32, @floatFromInt(max_delay))));
+                        // Leer la muestra del canal derecho retardada (o izq).
+                        const r_idx = (pos + half - hdly) % half;
+                        const l_idx = (pos + half - hdly) % half;
+                        // Escribir actuales en el buffer circular.
+                        hbuf[pos] = s;
+                        hbuf[pos + half] = s2;
+                        // Aplicar retardo al canal contrario.
+                        if (ang > 0) {
+                            s2 = hbuf[l_idx];
+                        } else if (ang < 0) {
+                            s = hbuf[r_idx];
+                        }
+                        self.hrtf_pos = (pos + 1) % half;
+                        // Sombra: atenuar el lado opuesto.
+                        const atten = 1.0 - @abs(ang) * 0.25;
+                        if (ang > 0) s *= atten;
+                        if (ang < 0) s2 *= atten;
                     }
                 }
                 if (limiting) {
@@ -1487,6 +1615,59 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 }
             }
         }
+    }
+
+    fn processPEQ(self: *Engine, buf: []f32, frames: usize) void {
+        for (0..4) |bi| {
+            const bp = &self.peq[bi];
+            if (!bp.enabled) continue;
+            const b = bp.*;
+            for (0..2) |ch| {
+                var z1 = self.peq_z[bi][ch][0];
+                var z2 = self.peq_z[bi][ch][1];
+                var i: usize = 0;
+                while (i < frames) : (i += 1) {
+                    const idx = i * CHANNELS + ch;
+                    const x = buf[idx];
+                    const y = b.b0 * x + z1;
+                    z1 = b.b1 * x - b.a1 * y + z2;
+                    z2 = b.b2 * x - b.a2 * y;
+                    buf[idx] = y;
+                }
+                self.peq_z[bi][ch][0] = z1;
+                self.peq_z[bi][ch][1] = z2;
+            }
+        }
+    }
+
+    fn processCompressor(self: *Engine, buf: []f32, frames: usize) void {
+        const threshold_db = @as(f32, @bitCast(@atomicLoad(u32, &self.comp_threshold_bits, .monotonic)));
+        const ratio = @as(f32, @bitCast(@atomicLoad(u32, &self.comp_ratio_bits, .monotonic)));
+        const attack = @as(f32, @bitCast(@atomicLoad(u32, &self.comp_attack_bits, .monotonic)));
+        const release = @as(f32, @bitCast(@atomicLoad(u32, &self.comp_release_bits, .monotonic)));
+        const attack_coef = 1.0 - @exp(-1.0 / (attack * SAMPLE_RATE_F + 1e-6));
+        const release_coef = 1.0 - @exp(-1.0 / (release * SAMPLE_RATE_F + 1e-6));
+        var env = self.comp_env;
+        var i: usize = 0;
+        while (i < frames) : (i += 1) {
+            const l = buf[i * CHANNELS];
+            const r = buf[i * CHANNELS + 1];
+            const peak = @max(@abs(l), @abs(r));
+            // Envolvente (dB).
+            const level_db = if (peak > 1e-7) 20.0 * std.math.log10(peak) else -120.0;
+            const target_env = level_db;
+            const coef = if (target_env > env) attack_coef else release_coef;
+            env += (target_env - env) * coef;
+            // Solo comprime por encima del umbral.
+            var gain_db: f32 = 0;
+            if (env > threshold_db) {
+                gain_db = (threshold_db - env) * (1.0 - 1.0 / ratio);
+            }
+            const g = std.math.pow(f32, 10, gain_db / 20.0);
+            buf[i * CHANNELS] = l * g;
+            buf[i * CHANNELS + 1] = r * g;
+        }
+        self.comp_env = env;
     }
 
     fn spectrum(self: *Engine, out: []f32) void {
@@ -1653,6 +1834,7 @@ fn destroyEngine(e: *Engine) void {
     e.allocator.free(e.sp_buf);
     e.allocator.free(e.scratch);
     if (e.reverb_buf) |b| e.allocator.free(b);
+    if (e.hrtf_buf) |b| e.allocator.free(b);
     e.allocator.free(e.ring.buf);
     e.allocator.destroy(e);
 }
@@ -1684,6 +1866,11 @@ export fn ch_engine_create() ?*Engine {
     self.reverb_len = 4096;
     self.reverb_buf = alloc.alloc(f32, self.reverb_len) catch null;
     self.reverb_pos = 0;
+
+    // Buffer de retardo interaural para HRTF (~2 ms).
+    self.hrtf_len = 128;
+    self.hrtf_buf = alloc.alloc(f32, self.hrtf_len * 2) catch null;
+    self.hrtf_pos = 0;
 
     self.scratch = alloc.alloc(f32, SCRATCH_FRAMES * CHANNELS) catch {
         setGlobalError("no se pudo reservar el búfer de decodificación");
@@ -2430,6 +2617,76 @@ export fn ch_engine_reverb(self: ?*Engine, mix: ?*f32) i32 {
     const e = self orelse return 0;
     if (mix) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.reverb_mix_bits, .monotonic)));
     return if (e.reverb_enabled) 1 else 0;
+}
+
+/// Compresor dinamico. `threshold_db` (-60..0), `ratio` (1..20), attack/release
+/// en segundos. `enabled != 0` lo activa.
+export fn ch_engine_set_compressor(self: ?*Engine, enabled: i32, threshold_db: f32, ratio: f32, attack_s: f32, release_s: f32) i32 {
+    const e = self orelse return -1;
+    e.comp_enabled = enabled != 0;
+    @atomicStore(u32, &e.comp_threshold_bits, @bitCast(std.math.clamp(threshold_db, -60, 0)), .monotonic);
+    @atomicStore(u32, &e.comp_ratio_bits, @bitCast(std.math.clamp(ratio, 1, 20)), .monotonic);
+    @atomicStore(u32, &e.comp_attack_bits, @bitCast(std.math.clamp(attack_s, 0.001, 1)), .monotonic);
+    @atomicStore(u32, &e.comp_release_bits, @bitCast(std.math.clamp(release_s, 0.01, 2)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_compressor(self: ?*Engine, threshold_db: ?*f32, ratio: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (threshold_db) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.comp_threshold_bits, .monotonic)));
+    if (ratio) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.comp_ratio_bits, .monotonic)));
+    return if (e.comp_enabled) 1 else 0;
+}
+
+/// EQ parametrico de 4 bandas. `band` 0..3. `type`: 0 peaking, 1 low shelf,
+/// 2 high shelf. `freq` Hz, `gain_db`, `q`.
+export fn ch_engine_set_peq(self: ?*Engine, band: i32, enabled: i32, ptype: i32, freq: f32, gain_db: f32, q: f32) i32 {
+    const e = self orelse return -1;
+    if (band < 0 or band >= 4 or ptype < 0 or ptype > 2) return -2;
+    const bi: usize = @intCast(band);
+    var bp = e.peq[bi];
+    bp.enabled = enabled != 0;
+    bp.type = switch (ptype) {
+        0 => .peaking,
+        1 => .low_shelf,
+        else => .high_shelf,
+    };
+    bp.freq = std.math.clamp(freq, 20, 20000);
+    bp.gain_db = std.math.clamp(gain_db, -18, 18);
+    bp.q = std.math.clamp(q, 0.1, 10);
+    bp.recompute();
+    e.peq[bi] = bp;
+    e.peq_enabled = true;
+    return 0;
+}
+
+export fn ch_engine_peq(self: ?*Engine, band: i32, ptype: ?*i32, freq: ?*f32, gain_db: ?*f32, q: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (band < 0 or band >= 4) return -2;
+    const bp = e.peq[@intCast(band)];
+    if (ptype) |p| p.* = switch (bp.type) {
+        .peaking => 0,
+        .low_shelf => 1,
+        .high_shelf => 2,
+    };
+    if (freq) |p| p.* = bp.freq;
+    if (gain_db) |p| p.* = bp.gain_db;
+    if (q) |p| p.* = bp.q;
+    return if (bp.enabled) 1 else 0;
+}
+
+/// Localizacion binaural (HRTF simplificada). `angle`: -1 izquierda .. +1 derecha.
+export fn ch_engine_set_hrtf(self: ?*Engine, enabled: i32, angle: f32) i32 {
+    const e = self orelse return -1;
+    e.hrtf_enabled = enabled != 0;
+    @atomicStore(u32, &e.hrtf_angle_bits, @bitCast(std.math.clamp(angle, -1, 1)), .monotonic);
+    return 0;
+}
+
+export fn ch_engine_hrtf(self: ?*Engine, angle: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (angle) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.hrtf_angle_bits, .monotonic)));
+    return if (e.hrtf_enabled) 1 else 0;
 }
 
 /// Mide la sonoridad de la pista cargada (LUFS y pico de muestra).

@@ -528,3 +528,14 @@ limitan a 4 por pista en memoria.
   estereofónica rota suavemente entre los dos canales.
 - `ch_engine_set_reverb(engine, enabled, mix)`: reverberación estérea
   (delay con feedback cruzado), `mix` 0..1.
+
+### Compresor, EQ parametrico y HRTF
+
+- `ch_engine_set_compressor(engine, enabled, threshold_db, ratio, attack_s, release_s)`
+  comprime por encima del umbral para uniformar la sonoridad.
+- `ch_engine_set_peq(engine, band, enabled, type, freq, gain_db, q)` para 4
+  bandas: `type` 0 = peaking, 1 = low shelf, 2 = high shelf.
+- `ch_engine_set_hrtf(engine, enabled, angle)` localizacion binaural
+  (`angle` -1 izquierda .. +1 derecha) con retardo interaural.
+- `ch_engine_spectrum(engine, out, bands)` ya devuelve `bands` valores 0..1
+  para dibujar el visualizador.

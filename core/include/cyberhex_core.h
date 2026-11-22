@@ -58,6 +58,12 @@ int32_t ch_engine_set_8d(ch_engine* engine, int32_t enabled, float speed, float 
 int32_t ch_engine_8d(ch_engine* engine, float* speed, float* depth);
 int32_t ch_engine_set_reverb(ch_engine* engine, int32_t enabled, float mix);
 int32_t ch_engine_reverb(ch_engine* engine, float* mix);
+int32_t ch_engine_set_compressor(ch_engine* engine, int32_t enabled, float threshold_db, float ratio, float attack_s, float release_s);
+int32_t ch_engine_compressor(ch_engine* engine, float* threshold_db, float* ratio);
+int32_t ch_engine_set_peq(ch_engine* engine, int32_t band, int32_t enabled, int32_t type, float freq, float gain_db, float q);
+int32_t ch_engine_peq(ch_engine* engine, int32_t band, int32_t* type, float* freq, float* gain_db, float* q);
+int32_t ch_engine_set_hrtf(ch_engine* engine, int32_t enabled, float angle);
+int32_t ch_engine_hrtf(ch_engine* engine, float* angle);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
 int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);

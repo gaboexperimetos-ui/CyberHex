@@ -33,8 +33,9 @@ class MusicDownloader {
   static const _jamendo = 'https://api.jamendo.com/v3.0';
   static const _fma = 'https://freemusicarchive.org';
 
-  /// Descarga `url` a `destPath`. `referer` es opcional para fuentes que lo
-  /// exijan. Devuelve el resultado o null si falla.
+  /// Descarga `url` a `destPath`. Si `destPath` no tiene extension o no encaja
+  /// con el tipo real (p. ej. MP4/M4A), se corrige. `referer` es opcional.
+  /// Devuelve el resultado o null si falla.
   Future<DownloadResult?> downloadUrl({
     required String url,
     required String destPath,
@@ -48,7 +49,11 @@ class MusicDownloader {
       );
       if (response.statusCode != 200) return null;
 
-      final file = File(destPath);
+      final contentType = response.headers['content-type'] ?? 'audio/mpeg';
+      final ext = _extensionForContentType(contentType, url);
+      final finalPath = _ensureExtension(destPath, ext);
+
+      final file = File(finalPath);
       await file.create(recursive: true);
       final sink = file.openWrite();
       var total = 0;
@@ -58,13 +63,46 @@ class MusicDownloader {
       });
       await sink.close();
       return DownloadResult(
-        path: destPath,
+        path: finalPath,
         bytes: total,
-        contentType: response.headers['content-type'] ?? 'audio/mpeg',
+        contentType: contentType,
       );
     } catch (_) {
       return null;
     }
+  }
+
+  /// Elige extension segun el Content-Type (o la URL si no hay cabecera).
+  static String _extensionForContentType(String contentType, String url) {
+    final ct = contentType.toLowerCase();
+    if (ct.contains('mp4') || ct.contains('m4a') || ct.contains('aac')) {
+      // MP4 de solo audio -> m4a; con video -> mp4.
+      if (ct.contains('audio') || url.toLowerCase().endsWith('.m4a')) {
+        return '.m4a';
+      }
+      return '.mp4';
+    }
+    if (ct.contains('mpeg') || ct.contains('mp3')) return '.mp3';
+    if (ct.contains('flac')) return '.flac';
+    if (ct.contains('ogg')) return '.ogg';
+    if (ct.contains('wav')) return '.wav';
+    if (ct.contains('webm')) return '.webm';
+    // Fallback: extension de la URL.
+    final uri = Uri.tryParse(url);
+    final path = uri?.path ?? '';
+    final dot = path.lastIndexOf('.');
+    if (dot >= 0 && dot > path.length - 6) return path.substring(dot);
+    return '.mp3';
+  }
+
+  /// Asegura que `path` termina en `ext` (reemplaza la extension si ya tenia).
+  static String _ensureExtension(String path, String ext) {
+    final slash = path.lastIndexOf('/');
+    final dot = path.lastIndexOf('.');
+    if (dot > slash && dot > 0) {
+      return path.substring(0, dot) + ext;
+    }
+    return path + ext;
   }
 
   /// Busca pistas en Jamendo (si hay `client_id`). Devuelve una lista de

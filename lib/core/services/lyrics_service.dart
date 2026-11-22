@@ -29,6 +29,15 @@ class LyricsResult {
 class LyricsService {
   LyricsService({this.aiEndpoint, this.aiApiKey});
 
+  /// Endpoint OpenAI-compatible de respaldo. Por defecto, el router local de
+  /// llama.cpp (`http://127.0.0.1:8004/v1/chat/completions`), sin depender de
+  /// APIs externas de pago.
+  static const String localEndpoint =
+      'http://127.0.0.1:8004/v1/chat/completions';
+
+  /// Modelo local que se pide al router.
+  static const String localModel = 'deepseek-v4pro';
+
   /// Endpoint opcional de IA de respaldo (OpenAI-compatible). Si es null, no se
   /// usa IA y solo se consulta Lrclib.
   final String? aiEndpoint;
