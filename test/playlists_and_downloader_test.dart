@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:cyberhex/core/audio_downloader.dart';
 import 'package:cyberhex/core/automix_engine.dart';
+import 'package:cyberhex/core/player_api.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/core/playlist_store.dart';
 import 'package:cyberhex/core/stats_store.dart';
@@ -340,8 +341,10 @@ void main() {
       expect(fake.speed, lessThanOrEqualTo(1.08));
       expect(engine.status, contains('128'));
 
-      // La pista siguiente entra: el tempo vuelve a 1.
+      // La pista siguiente entra: el motor avisa con `EV_QUEUE` (sin ese
+      // evento el controlador no relee la cola) y el tempo vuelve a 1.
       fake.queueIndexValue = 1;
+      fake.emit(const PlayerEvent(PlayerEventKind.queue, a: 2));
       controller.pump();
       engine.tick();
       expect(fake.speed, 1);
