@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -30,6 +31,11 @@ int32_t ch_waveform_peaks(const char* path, uint32_t buckets, float* out_max);
 /* Estima el tempo (BPM) por autocorrelacion de la envolvente de energia.
  * Devuelve 0 si ok, -1 si no se pudo leer, -3 si la pista es demasiado corta. */
 int32_t ch_bpm_detect(const char* path, double* out_bpm);
+
+/* Detecta la tonalidad (Krumhansl-Schmuckler) y la escribe en `out`
+ * (p. ej. "A minor"). `confidence` recibe la correlacion [-1,1] si se pide.
+ * Devuelve 0 si ok, -1 si no se pudo leer, -3 si no hay energia util. */
+int32_t ch_key_detect(const char* path, char* out, size_t out_size, double* confidence);
 
 /* Mide el rango dinamico (DR) con bloques de 3 s.
  * Devuelve 0 si ok, -1 si no se pudo leer, -3 si no hay bloques validos. */

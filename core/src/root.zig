@@ -94,6 +94,7 @@ extern fn ch_loudness_scan(path: [*c]const u8, out: *ChLoudness) i32;
 extern fn ch_waveform_peaks(path: [*c]const u8, buckets: u32, out_max: [*c]f32) i32;
 extern fn ch_bpm_detect(path: [*c]const u8, out_bpm: [*c]f64) i32;
 extern fn ch_dr_measure(path: [*c]const u8, out_dr: [*c]f64, out_blocks: [*c]u32) i32;
+extern fn ch_key_detect(path: [*c]const u8, out: [*c]u8, out_size: usize, confidence: [*c]f64) i32;
 extern fn ch_decode_close(decoder: *ch_decoder) void;
 extern fn ch_decode_last_error() [*c]const u8;
 
@@ -2274,6 +2275,44 @@ export fn ch_engine_queue_export_m3u_ext(self: ?*Engine, path: [*c]const u8) i32
     return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
 }
 
+/// Igual que ch_engine_queue_export_m3u_ext pero con rutas relativas al
+/// directorio del .m3u (util para mover la lista con la musica).
+export fn ch_engine_queue_export_m3u_relative(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    const span = std.mem.span(path);
+    const slash = std.mem.lastIndexOfScalar(u8, span, '/');
+    const base: []const u8 = if (slash) |i| span[0 .. i + 1] else "";
+
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+    buf.appendSlice(e.allocator, "#EXTM3U\n") catch return -2;
+
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    for (e.playlist.items) |item| {
+        const full: []const u8 = item;
+        // Quitar el prefijo comun para dejar la ruta relativa.
+        var rel: []const u8 = full;
+        if (base.len > 0 and std.mem.startsWith(u8, full, base)) {
+            rel = full[base.len..];
+        }
+        var title: []const u8 = "";
+        var artist: []const u8 = "";
+        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
+            const t = std.mem.span(ch_decode_title(d));
+            const a = std.mem.span(ch_decode_artist(d));
+            if (t.len > 0) title = t;
+            if (a.len > 0) artist = a;
+            ch_decode_close(d);
+        }
+        var tmp: [512]u8 = undefined;
+        const line = std.fmt.bufPrint(&tmp, "#EXTINF:-1,{s} - {s}\n{s}\n", .{ artist, title, rel }) catch continue;
+        buf.appendSlice(e.allocator, line) catch {};
+    }
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
 /// Importa una cola desde un JSON exportado por ch_engine_queue_export_json.
 /// Devuelve el numero de pistas importadas, o negativo si error.
 export fn ch_engine_queue_import_json(self: ?*Engine, path: [*c]const u8) i32 {
@@ -3638,6 +3677,27 @@ export fn ch_engine_seek(self: ?*Engine, seconds: f64) i32 {
     return 0;
 }
 
+/// Salta `delta_s` segundos desde la posicion actual (puede ser negativo).
+export fn ch_engine_seek_relative(self: ?*Engine, delta_s: f64) i32 {
+    const e = self orelse return -1;
+    const pos = ch_engine_position(e);
+    if (pos < 0) return -2;
+    var target = pos + delta_s;
+    if (target < 0) target = 0;
+    const dur = ch_engine_duration(e);
+    if (dur > 0 and target > dur) target = dur;
+    return ch_engine_seek(e, target);
+}
+
+/// Alterna entre reproducir y pausar. Devuelve 1 si queda reproduciendo.
+export fn ch_engine_toggle_play(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    if (ch_engine_is_playing(e) != 0) {
+        return ch_engine_pause(e);
+    }
+    return ch_engine_play(e);
+}
+
 /// Bucle A-B en segundos (A < B). Al llegar a B vuelve a A.
 export fn ch_engine_set_ab_loop(self: ?*Engine, a_seconds: f64, b_seconds: f64) i32 {
     const e = self orelse return -1;
@@ -4607,6 +4667,25 @@ export fn ch_engine_bpm(self: ?*Engine) f64 {
     var bpm: f64 = 0;
     if (ch_bpm_detect(p.ptr, &bpm) != 0) return 0;
     return bpm;
+}
+
+/// Tonalidad de `path` ("C major", "A minor"...). `confidence` recibe la
+/// correlacion [-1,1] si no es null. Devuelve 0 si ok.
+export fn ch_engine_detect_key(self: ?*Engine, path: [*c]const u8, out: [*c]u8, out_size: u32, confidence: [*c]f64) i32 {
+    _ = self;
+    if (path == null or out == null or out_size == 0) return -1;
+    return ch_key_detect(path, out, out_size, confidence);
+}
+
+/// Tonalidad de la pista actual.
+export fn ch_engine_key_current(self: ?*Engine, out: [*c]u8, out_size: u32, confidence: [*c]f64) i32 {
+    const e = self orelse return -1;
+    if (out == null or out_size == 0) return -1;
+    e.list_mutex.lock();
+    const cur: ?[:0]u8 = if (e.queue_index < e.playlist.items.len) e.playlist.items[e.queue_index] else null;
+    e.list_mutex.unlock();
+    const p = cur orelse return -2;
+    return ch_key_detect(p.ptr, out, out_size, confidence);
 }
 
 /// Rango dinamico DR de la pista en `path` (0 si falla).

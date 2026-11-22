@@ -3,6 +3,8 @@
 
 #include "analysis.h"
 
+#include <stdio.h>
+
 #include "decode.h"
 
 #include <math.h>
@@ -361,5 +363,125 @@ int32_t ch_dr_measure(const char* path, double* out_dr, uint32_t* out_blocks) {
     if (used == 0) return -3;
     *out_dr = sum_dr / (double)used;
     if (out_blocks) *out_blocks = used;
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Deteccion de tonalidad (Krumhansl-Schmuckler)                             */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Se acumula un vector cromatico de 12 semitonos con la energia de cada clase
+ * de altura (C..B) y se compara con los perfiles de Krumhansl para mayor y
+ * menor rotados a las 12 tonalidades. Gana la correlacion mas alta.
+ *
+ * La energia por semitono se obtiene con un banco de filtros Goertzel, uno por
+ * nota (C2..B6) y octava: es barato, determinista y no necesita FFT ni
+ * autocorrelacion, que se pierde en cuanto hay acordes.
+ */
+
+static const double KS_MAJOR[12] = {
+    6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88
+};
+static const double KS_MINOR[12] = {
+    6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17
+};
+
+/* Correlacion de Pearson entre dos vectores de 12 elementos. */
+static double pearson12(const double* a, const double* b) {
+    double ma = 0, mb = 0;
+    for (int i = 0; i < 12; i++) { ma += a[i]; mb += b[i]; }
+    ma /= 12.0;
+    mb /= 12.0;
+    double num = 0, da = 0, db = 0;
+    for (int i = 0; i < 12; i++) {
+        const double x = a[i] - ma;
+        const double y = b[i] - mb;
+        num += x * y;
+        da += x * x;
+        db += y * y;
+    }
+    if (da <= 0 || db <= 0) return 0;
+    return num / sqrt(da * db);
+}
+
+/* Potencia de una frecuencia concreta en `buf` mediante Goertzel. */
+static double goertzel(const float* buf, size_t n, double freq, double rate) {
+    const double w = 2.0 * M_PI * freq / rate;
+    const double coeff = 2.0 * cos(w);
+    double s0 = 0, s1 = 0, s2 = 0;
+    for (size_t i = 0; i < n; i++) {
+        s0 = (double)buf[i] + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    return s1 * s1 + s2 * s2 - coeff * s1 * s2;
+}
+
+#define KEY_WIN 4096
+
+int32_t ch_key_detect(const char* path, char* out, size_t out_size, double* confidence) {
+    if (path == NULL || out == NULL || out_size == 0) return -1;
+    const uint32_t rate = 11025;
+    ch_decoder* d = ch_decode_open(path, rate, 1);
+    if (d == NULL) return -1;
+
+    double chroma[12] = {0};
+    float buf[KEY_WIN];
+    uint64_t total = 0;
+
+    for (;;) {
+        const uint64_t got = ch_decode_read(d, buf, KEY_WIN);
+        if (got < KEY_WIN / 2) {
+            if (got == 0) break;
+        }
+        /* C2 = MIDI 36 (65.41 Hz) hasta B6 = MIDI 95 (1975.5 Hz). */
+        for (int note = 36; note <= 95; note++) {
+            const double freq = 440.0 * pow(2.0, (note - 69) / 12.0);
+            if (freq >= rate / 2.0) continue;
+            const double p = goertzel(buf, (size_t)got, freq, (double)rate);
+            chroma[note % 12] += p;
+        }
+        total += got;
+        if (got < KEY_WIN) break;
+    }
+    ch_decode_close(d);
+
+    double sum = 0;
+    for (int i = 0; i < 12; i++) sum += chroma[i];
+    if (sum <= 0) {
+        if (out_size > 0) out[0] = 0;
+        return -3;
+    }
+    /* Compresion logaritmica: los graves dominan en energia bruta. */
+    for (int i = 0; i < 12; i++) chroma[i] = log(1.0 + chroma[i]);
+    sum = 0;
+    for (int i = 0; i < 12; i++) sum += chroma[i];
+    for (int i = 0; i < 12; i++) chroma[i] /= sum;
+
+    static const char* NAMES[12] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+
+    double best_corr = -2.0;
+    int best_tonic = 0;
+    int best_minor = 0;
+    double profile[12];
+    for (int tonic = 0; tonic < 12; tonic++) {
+        for (int m = 0; m < 2; m++) {
+            const double* src = m ? KS_MINOR : KS_MAJOR;
+            for (int i = 0; i < 12; i++) profile[i] = src[(i - tonic + 12) % 12];
+            const double c = pearson12(chroma, profile);
+            if (c > best_corr) {
+                best_corr = c;
+                best_tonic = tonic;
+                best_minor = m;
+            }
+        }
+    }
+
+    if (confidence) *confidence = best_corr;
+    snprintf(out, out_size, "%s %s", NAMES[best_tonic], best_minor ? "minor" : "major");
+    (void)total;
     return 0;
 }
