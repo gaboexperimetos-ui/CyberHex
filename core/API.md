@@ -547,3 +547,25 @@ limitan a 4 por pista en memoria.
 - `ch_engine_stats(&plays, &seconds)` devuelve reproducciones y tiempo total.
 - `ch_engine_set_tag(key, value)` escribe etiquetas en FLAC (Vorbis comments).
   `value = NULL` borra el campo. Solo FLAC por ahora.
+
+### Cola: limpiar, deduplicar y filtrar
+
+- `ch_engine_queue_prune()` elimina rutas que ya no existen.
+- `ch_engine_queue_dedup()` elimina duplicados por ruta.
+- `ch_engine_queue_dedup_hash()` elimina duplicados por contenido (tamano+hash).
+- `ch_engine_queue_filter_dir(dir)` deja solo las pistas de un directorio.
+
+### Favoritos
+
+- `ch_engine_favorites_add/remove/save/load` gestionan una lista persistente.
+- `ch_engine_favorites_export_m3u` la exporta como playlist.
+
+### Loudness de album
+
+- `ch_engine_album_loudness` y `ch_engine_normalize_album` normalizan por LUFS
+  el promedio del album.
+
+### Fades y gap
+
+- `ch_engine_set_fade_in/out` (fundido de entrada/salida) y `ch_engine_set_gap`
+  (silencio entre pistas).

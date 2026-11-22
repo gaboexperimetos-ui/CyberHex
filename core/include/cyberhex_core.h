@@ -54,6 +54,10 @@ int32_t ch_engine_set_trim_silence(ch_engine* engine, int32_t enabled, float thr
 int32_t ch_engine_trim_silence(ch_engine* engine, float* threshold_db);
 int32_t ch_engine_set_fade_out(ch_engine* engine, float seconds); /* 0 .. 30 */
 float   ch_engine_fade_out(ch_engine* engine);
+int32_t ch_engine_set_fade_in(ch_engine* engine, float seconds); /* 0 .. 30 */
+float   ch_engine_fade_in(ch_engine* engine);
+int32_t ch_engine_set_gap(ch_engine* engine, float seconds); /* 0 .. 30 */
+float   ch_engine_gap(ch_engine* engine);
 int32_t ch_engine_set_8d(ch_engine* engine, int32_t enabled, float speed, float depth);
 int32_t ch_engine_8d(ch_engine* engine, float* speed, float* depth);
 int32_t ch_engine_set_reverb(ch_engine* engine, int32_t enabled, float mix);
@@ -66,8 +70,22 @@ int32_t ch_engine_set_hrtf(ch_engine* engine, int32_t enabled, float angle);
 int32_t ch_engine_hrtf(ch_engine* engine, float* angle);
 int32_t ch_engine_stats(ch_engine* engine, uint64_t* play_count, double* listen_seconds);
 int32_t ch_engine_set_tag(ch_engine* engine, const char* key, const char* value);
+int32_t ch_library_export_json(const void* lib, const char* path);
+int32_t ch_engine_queue_prune(ch_engine* engine);
+int32_t ch_engine_queue_dedup(ch_engine* engine);
+int32_t ch_engine_favorites_add(ch_engine* engine, const char* path);
+int32_t ch_engine_favorites_remove(ch_engine* engine, const char* path);
+int32_t ch_engine_favorites_count(ch_engine* engine);
+const char* ch_engine_favorites_path(ch_engine* engine, int32_t index);
+int32_t ch_engine_favorites_save(ch_engine* engine, const char* path);
+int32_t ch_engine_favorites_load(ch_engine* engine, const char* path);
+int32_t ch_engine_favorites_export_m3u(ch_engine* engine, const char* path);
+int32_t ch_engine_queue_filter_dir(ch_engine* engine, const char* dir);
+int32_t ch_engine_queue_dedup_hash(ch_engine* engine);
 int32_t ch_engine_analyze_current(ch_engine* engine, double* lufs, double* peak_db);
 int32_t ch_engine_normalize_current(ch_engine* engine, double target_lufs, double* applied_db);
+int32_t ch_engine_album_loudness(ch_engine* engine, double* lufs_out);
+int32_t ch_engine_normalize_album(ch_engine* engine, double target_lufs, double* applied_db);
 int32_t ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
 
 /* Bucle A-B en segundos (a < b). */

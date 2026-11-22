@@ -341,8 +341,13 @@ pub const Engine = struct {
     trim_enabled: bool = false,
     trim_threshold_db: f32 = -60,
 
+    // Fundido de entrada al abrir pista (segundos, 0 = el de 8 ms por defecto).
+    fade_in_s: f32 = 0,
     // Fundido de salida al llegar al final de la pista (segundos, 0 = corte).
     fade_out_s: f32 = 0,
+    // Silencio entre pistas (segundos, 0 = sin pausa).
+    gap_s: f32 = 0,
+    gap_wait_frames: usize = 0,
 
     // Efecto 8D/espacial: auto-paneo giratorio + reverb.
     spatial_enabled: bool = false,
@@ -391,6 +396,8 @@ pub const Engine = struct {
     stats_lock: SpinLock = .{},
     play_count: u64 = 0,
     listen_frames: u64 = 0,
+    // Favoritos (rutas persistentes).
+    favorites: std.ArrayListUnmanaged([]u8) = .empty,
     sleep_end_ms: u64 = 0,
     sleep_fade_ms: u32 = 8000,
     sleep_fired: bool = false,
@@ -1449,7 +1456,10 @@ fn audibleLyricsOffset(self: *Engine) f64 {
         }
         if (take > 0) {
             var g = self.fade_gain;
-            const fade_frames = self.pauseFadeSeconds() * @as(f32, @floatFromInt(SAMPLE_RATE));
+            const fade_frames = if (self.fade_in_s > 0)
+                self.fade_in_s * @as(f32, @floatFromInt(SAMPLE_RATE))
+            else
+                self.pauseFadeSeconds() * @as(f32, @floatFromInt(SAMPLE_RATE));
             const fade_coeff: f32 = if (fade_frames <= 0)
                 1.0
             else
@@ -1653,6 +1663,18 @@ fn audibleLyricsOffset(self: *Engine) f64 {
                 const p = @atomicLoad(usize, &self.played, .acquire);
                 const tol = SAMPLE_RATE / 5;
                 if (p + tol >= last_end) {
+                    // Gap entre pistas: mantener silencio N segundos antes del salto.
+                    if (self.gap_s > 0 and self.gap_wait_frames == 0 and
+                        self.queue_index + 1 < self.playlist.items.len)
+                    {
+                        self.gap_wait_frames = @intFromFloat(self.gap_s * SAMPLE_RATE);
+                    }
+                    if (self.gap_wait_frames > 0) {
+                        const chunk = @min(self.gap_wait_frames, @as(usize, @intCast(tol)));
+                        self.gap_wait_frames -= chunk;
+                        @atomicStore(usize, &self.played, p, .release);
+                        return;
+                    }
                     @atomicStore(bool, &self.playing, false, .release);
                     self.pushEvent(EV_END, 0, 0, 0);
                     self.pushEvent(EV_STATE, 0, 0, 0);
@@ -1868,6 +1890,8 @@ fn destroyEngine(e: *Engine) void {
     }
     for (e.retired_covers.items) |c| e.allocator.free(c);
     e.retired_covers.deinit(e.allocator);
+    for (e.favorites.items) |f| e.allocator.free(f);
+    e.favorites.deinit(e.allocator);
     for (e.playlist.items) |p| e.allocator.free(p);
     e.playlist.deinit(e.allocator);
     e.order.deinit(e.allocator);
@@ -2235,6 +2259,238 @@ export fn ch_engine_queue_clear(self: ?*Engine) i32 {
     @atomicStore(bool, &e.eof, true, .release);
     e.pushEvent(EV_QUEUE, 0, 0, 0);
     return 0;
+}
+
+/// Elimina de la cola las rutas que ya no existen en disco. Devuelve el numero
+/// de entradas eliminadas.
+export fn ch_engine_queue_prune(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    var removed: i32 = 0;
+    e.list_mutex.lock();
+    var i: usize = 0;
+    while (i < e.playlist.items.len) {
+        const path = e.playlist.items[i];
+        const exists = blk: {
+            var st: std.c.Stat = undefined;
+            break :blk std.c.stat(path.ptr, &st) == 0;
+        };
+        if (!exists) {
+            e.allocator.free(path);
+            _ = e.playlist.orderedRemove(i);
+            removed += 1;
+        } else {
+            i += 1;
+        }
+    }
+    e.list_mutex.unlock();
+    if (removed > 0) {
+        e.pushEvent(EV_QUEUE, removed, 0, 0);
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return removed;
+}
+
+/// Elimina duplicados de la cola (misma ruta). Devuelve el numero eliminado.
+export fn ch_engine_queue_dedup(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    var removed: i32 = 0;
+    e.list_mutex.lock();
+    var i: usize = 0;
+    while (i < e.playlist.items.len) {
+        var dup = false;
+        var j: usize = 0;
+        while (j < i) : (j += 1) {
+            if (std.mem.eql(u8, e.playlist.items[j], e.playlist.items[i])) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            e.allocator.free(e.playlist.items[i]);
+            _ = e.playlist.orderedRemove(i);
+            removed += 1;
+        } else {
+            i += 1;
+        }
+    }
+    e.list_mutex.unlock();
+    if (removed > 0) {
+        e.pushEvent(EV_QUEUE, removed, 0, 0);
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return removed;
+}
+
+/// Favoritos: lista persistente de rutas (una por linea) en un archivo.
+export fn ch_engine_favorites_add(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    const p = std.mem.span(path);
+    if (e.favorites.items.len >= 4096) return -2;
+    for (e.favorites.items) |f| {
+        if (std.mem.eql(u8, f, p)) return 0;
+    }
+    const copy = e.allocator.dupe(u8, p) catch return -2;
+    e.favorites.append(e.allocator, copy) catch {
+        e.allocator.free(copy);
+        return -2;
+    };
+    return 0;
+}
+
+export fn ch_engine_favorites_remove(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return 0;
+    const p = std.mem.span(path);
+    var i: usize = 0;
+    while (i < e.favorites.items.len) {
+        if (std.mem.eql(u8, e.favorites.items[i], p)) {
+            e.allocator.free(e.favorites.items[i]);
+            _ = e.favorites.orderedRemove(i);
+            return 0;
+        }
+        i += 1;
+    }
+    return 0;
+}
+
+export fn ch_engine_favorites_count(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return @intCast(e.favorites.items.len);
+}
+
+export fn ch_engine_favorites_path(self: ?*Engine, index: i32) [*c]const u8 {
+    const e = self orelse return @ptrCast("");
+    if (index < 0 or index >= @as(i32, @intCast(e.favorites.items.len))) return @ptrCast("");
+    return @ptrCast(e.favorites.items[@intCast(index)].ptr);
+}
+
+/// Guarda los favoritos en un archivo de texto (una ruta por linea).
+export fn ch_engine_favorites_save(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+    for (e.favorites.items) |f| {
+        buf.appendSlice(e.allocator, f) catch return -2;
+        buf.append(e.allocator, '\n') catch return -2;
+    }
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Carga los favoritos desde un archivo de texto.
+export fn ch_engine_favorites_load(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var size: u64 = 0;
+    const raw = ch_file_read_all(path, &size) orelse return -2;
+    defer ch_file_free(raw);
+    var it = std.mem.splitScalar(u8, raw[0..@intCast(size)], '\n');
+    while (it.next()) |line| {
+        if (line.len == 0) continue;
+        const copy = e.allocator.dupe(u8, line) catch continue;
+        e.favorites.append(e.allocator, copy) catch {
+            e.allocator.free(copy);
+        };
+    }
+    return 0;
+}
+
+/// Exporta los favoritos a una playlist M3U.
+export fn ch_engine_favorites_export_m3u(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+    buf.appendSlice(e.allocator, "#EXTM3U\n") catch return -2;
+    for (e.favorites.items) |f| {
+        buf.appendSlice(e.allocator, f) catch return -2;
+        buf.append(e.allocator, '\n') catch return -2;
+    }
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Deja en la cola solo las pistas cuya ruta empieza por `dir`. Devuelve el
+/// numero de entradas eliminadas.
+export fn ch_engine_queue_filter_dir(self: ?*Engine, dir: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (dir == null) return -1;
+    const d = std.mem.span(dir);
+    var removed: i32 = 0;
+    e.list_mutex.lock();
+    var i: usize = 0;
+    while (i < e.playlist.items.len) {
+        if (!std.mem.startsWith(u8, e.playlist.items[i], d)) {
+            e.allocator.free(e.playlist.items[i]);
+            _ = e.playlist.orderedRemove(i);
+            removed += 1;
+        } else {
+            i += 1;
+        }
+    }
+    e.list_mutex.unlock();
+    if (removed > 0) {
+        e.pushEvent(EV_QUEUE, removed, 0, 0);
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return removed;
+}
+
+/// Elimina duplicados por contenido (tamano + hash FNV del archivo). Mas fuerte
+/// que por ruta. Devuelve el numero eliminado.
+export fn ch_engine_queue_dedup_hash(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    var removed: i32 = 0;
+    e.list_mutex.lock();
+    var i: usize = 0;
+    while (i < e.playlist.items.len) {
+        const info_i = fileHash(e.playlist.items[i]);
+        var dup = false;
+        if (info_i) |hi| {
+            var j: usize = 0;
+            while (j < i) : (j += 1) {
+                if (fileHash(e.playlist.items[j])) |hj| {
+                    if (hj.size == hi.size and hj.hash == hi.hash) {
+                        dup = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (dup) {
+            e.allocator.free(e.playlist.items[i]);
+            _ = e.playlist.orderedRemove(i);
+            removed += 1;
+        } else {
+            i += 1;
+        }
+    }
+    e.list_mutex.unlock();
+    if (removed > 0) {
+        e.pushEvent(EV_QUEUE, removed, 0, 0);
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return removed;
+}
+
+const FileHash = struct { size: u64, hash: u64 };
+
+/// Hash rapido del contenido (FNV-1a) + tamano. Devuelve null si no se puede leer.
+fn fileHash(path: []const u8) ?FileHash {
+    var size: u64 = 0;
+    const raw = ch_file_read_all(path.ptr, &size) orelse return null;
+    defer ch_file_free(raw);
+    var h: u64 = 1469598103934665603;
+    const data = raw[0..@intCast(size)];
+    for (data) |b| {
+        h ^= b;
+        h *%= 1099511628211;
+    }
+    return .{ .size = size, .hash = h };
 }
 
 export fn ch_engine_queue_move(self: ?*Engine, from: i32, to: i32) i32 {
@@ -2632,6 +2888,31 @@ export fn ch_engine_fade_out(self: ?*Engine) f32 {
     return e.fade_out_s;
 }
 
+/// Fundido de entrada al abrir pista (segundos, 0 = 8 ms por defecto).
+export fn ch_engine_set_fade_in(self: ?*Engine, seconds: f32) i32 {
+    const e = self orelse return -1;
+    e.fade_in_s = std.math.clamp(seconds, 0, 30);
+    return 0;
+}
+
+export fn ch_engine_fade_in(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.fade_in_s;
+}
+
+/// Silencio entre pistas en segundos (0 = sin pausa, max 30).
+export fn ch_engine_set_gap(self: ?*Engine, seconds: f32) i32 {
+    const e = self orelse return -1;
+    e.gap_s = std.math.clamp(seconds, 0, 30);
+    if (e.gap_s == 0) e.gap_wait_frames = 0;
+    return 0;
+}
+
+export fn ch_engine_gap(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.gap_s;
+}
+
 /// Efecto 8D/espacial: auto-paneo giratorio. `speed` en vueltas/seg (0.05..2),
 /// `depth` 0..1. `enabled != 0` lo activa.
 export fn ch_engine_set_8d(self: ?*Engine, enabled: i32, speed: f32, depth: f32) i32 {
@@ -2780,6 +3061,43 @@ export fn ch_engine_normalize_current(self: ?*Engine, target_lufs: f64, applied_
     const e = self orelse return -1;
     var lufs: f64 = 0;
     if (ch_engine_analyze_current(e, &lufs, null) != 0) return -2;
+    const gain = std.math.clamp(target_lufs - lufs, -24, 24);
+    _ = ch_engine_set_gain_db(e, @floatCast(gain));
+    if (applied_db) |out| out.* = gain;
+    return 0;
+}
+
+/// Calcula la sonoridad integrada de todo el album de la pista cargada
+/// (promedio de LUFS de las pistas con el mismo album). Devuelve 0 y escribe
+/// en `lufs_out`.
+export fn ch_engine_album_loudness(self: ?*Engine, lufs_out: ?*f64) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const count = e.playlist.items.len;
+    e.list_mutex.unlock();
+    if (count == 0) return -2;
+
+    var sum: f64 = 0;
+    var n: usize = 0;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        var result: ChLoudness = undefined;
+        if (ch_loudness_scan(e.playlist.items[i].ptr, &result) != 0) continue;
+        sum += result.integrated_lufs;
+        n += 1;
+    }
+    if (n == 0) return -3;
+    const avg = sum / @as(f64, @floatFromInt(n));
+    if (lufs_out) |out| out.* = avg;
+    return 0;
+}
+
+/// Normaliza todo el album a `target_lufs` (aplica la ganancia manual a la
+/// pista actual segun el promedio del album). Devuelve la ganancia aplicada.
+export fn ch_engine_normalize_album(self: ?*Engine, target_lufs: f64, applied_db: ?*f64) i32 {
+    const e = self orelse return -1;
+    var lufs: f64 = 0;
+    if (ch_engine_album_loudness(e, &lufs) != 0) return -2;
     const gain = std.math.clamp(target_lufs - lufs, -24, 24);
     _ = ch_engine_set_gain_db(e, @floatCast(gain));
     if (applied_db) |out| out.* = gain;
@@ -3321,6 +3639,31 @@ export fn ch_library_path(lib: ?*const ch_library, index: i32) [*c]const u8 {
 
 export fn ch_library_removed(lib: ?*const ch_library) i32 {
     return @intCast(c_lib_removed(lib));
+}
+
+/// Exporta la biblioteca a un archivo JSON. Devuelve 0 si ok.
+export fn ch_library_export_json(lib: ?*const ch_library, path: [*c]const u8) i32 {
+    if (lib == null or path == null) return -1;
+    const alloc = std.heap.c_allocator;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(alloc);
+    buf.appendSlice(alloc, "{\n  \"tracks\": [\n") catch return -2;
+    const n = c_lib_count(lib);
+    var i: i32 = 0;
+    while (i < n) : (i += 1) {
+        const p: [*c]const u8 = c_lib_path(lib, i) orelse @ptrCast("");
+        buf.appendSlice(alloc, "    \"") catch return -2;
+        appendJsonString(&buf, alloc, std.mem.span(p)) catch return -2;
+        buf.appendSlice(alloc, "\"") catch return -2;
+        if (i + 1 < n) buf.append(alloc, ',') catch return -2;
+        buf.append(alloc, '\n') catch return -2;
+    }
+    buf.appendSlice(alloc, "  ],\n  \"count\": ") catch return -2;
+    var tmp: [32]u8 = undefined;
+    const num = std.fmt.bufPrint(&tmp, "{d}", .{n}) catch return -2;
+    buf.appendSlice(alloc, num) catch return -2;
+    buf.appendSlice(alloc, "\n}\n") catch return -2;
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
 }
 
 // ---- Estado de reproduccion persistente ----
