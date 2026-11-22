@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../core/automix_engine.dart';
@@ -58,6 +59,9 @@ class _PlayerPageState extends State<PlayerPage>
 
 
   late final ThemeController _theme = widget.theme ?? ThemeController.memory();
+
+  /// Atajo: el motor llega por constructor y no cambia en toda la página.
+  PlayerController get _controller => widget.controller;
 
   /// Modo bolsillo activo (bloquea los toques de esta pantalla).
   bool _pocket = false;

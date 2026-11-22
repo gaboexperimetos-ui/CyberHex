@@ -217,6 +217,12 @@ class SessionStore {
   SessionStore({File? file})
       : file = file ?? File('${StorageDirectory.current.path}/session.json');
 
+  /// Archivo donde vive la sesión (`session.json` por defecto).
+  final File file;
+
+  /// Avisa una sola vez por consola si el disco no deja guardar.
+  bool _warned = false;
+
   /// Lee la sesión. `null` si no hay archivo, está vacío o está corrupto.
   Future<SessionSnapshot?> load() async {
     try {

@@ -140,6 +140,12 @@ typedef _SetLoopNative = Int32 Function(Pointer<Void>, Double, Double);
 typedef _SetLoopDart = int Function(Pointer<Void>, double, double);
 
 // Cola: mover/quitar/insertar llevan índices; añadir y cargar llevan ruta.
+typedef _HandleIndexTextNative = Pointer<Utf8> Function(Pointer<Void>, Int32);
+typedef _HandleIndexTextDart = Pointer<Utf8> Function(Pointer<Void>, int);
+typedef _HandleIndexDoubleNative = Double Function(Pointer<Void>, Int32);
+typedef _HandleIndexDoubleDart = double Function(Pointer<Void>, int);
+typedef _HandleIndexIntNative = Int32 Function(Pointer<Void>, Int32);
+typedef _HandleIndexIntDart = int Function(Pointer<Void>, int);
 typedef _TwoIntsNative = Int32 Function(Pointer<Void>, Int32, Int32);
 typedef _TwoIntsDart = int Function(Pointer<Void>, int, int);
 typedef _IntAndPathNative = Int32 Function(Pointer<Void>, Int32, Pointer<Utf8>);
@@ -320,14 +326,18 @@ List<Map<String, Object?>> _cueInIsolate(String source, bool isText) {
     if (handle == nullptr) return const <Map<String, Object?>>[];
     try {
       final countFn = lib.lookupFunction<_HandleIntNative, _HandleIntDart>('ch_cue_count');
-      final fileFn = lib.lookupFunction<_HandleTextNative, _HandleTextDart>('ch_cue_file');
-      final titleFn = lib.lookupFunction<_HandleTextNative, _HandleTextDart>('ch_cue_title');
+      final fileFn =
+          lib.lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>('ch_cue_file');
+      final titleFn =
+          lib.lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>('ch_cue_title');
       final performerFn =
-          lib.lookupFunction<_HandleTextNative, _HandleTextDart>('ch_cue_performer');
+          lib.lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>('ch_cue_performer');
       final startFn =
-          lib.lookupFunction<_HandleDoubleNative, _HandleDoubleDart>('ch_cue_start');
-      final endFn = lib.lookupFunction<_HandleDoubleNative, _HandleDoubleDart>('ch_cue_end');
-      final numberFn = lib.lookupFunction<_HandleIntNative, _HandleIntDart>('ch_cue_number');
+          lib.lookupFunction<_HandleIndexDoubleNative, _HandleIndexDoubleDart>('ch_cue_start');
+      final endFn =
+          lib.lookupFunction<_HandleIndexDoubleNative, _HandleIndexDoubleDart>('ch_cue_end');
+      final numberFn =
+          lib.lookupFunction<_HandleIndexIntNative, _HandleIndexIntDart>('ch_cue_number');
       final total = countFn(handle);
       final out = <Map<String, Object?>>[];
       for (var i = 0; i < total; i++) {
@@ -1887,7 +1897,6 @@ class _Bindings {
   final _SetIntAndFloatDart? setNightMode;
   final _OutFloatDart? nightModeFn;
   final _SetIntDart? setS16;
-  final _IntDart? s16Fn;
   final _IntDart? s16Fn;
   final _SpectrumDart? spectrum;
   final _SetIntDart? setReplayGain;
