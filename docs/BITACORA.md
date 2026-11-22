@@ -18,6 +18,59 @@ Formato:
 
 ---
 
+## 2026-11-21 · turno 24 · La CI arranca de verdad: de 37 fallos a 5
+
+- **PEDIDO:** seguir el cierre maestro (pedido 10): dejar la CI corriendo y
+  verde, y poner el informe al día con el estado real.
+- **HECHO:** la primera ejecución real de `.github/workflows/ci.yml` destapó
+  todo lo que se había escrito a ciegas. Se arregló por tandas:
+  - **Runner:** ALSA nulo (`pcm.!default { type null }` en `$RUNNER_TEMP`) y
+    `zig build -Ddecoder=miniaudio` antes de comprobar que existe
+    `zig-out/lib/libcyberhex_core.so` (el `zig build test` no instala
+    artefactos). `Núcleo` y `Estático` quedaron en verde.
+  - **Compilación Dart:** `CyberHexPalette` pasó a `ThemeExtension` con
+    `copyWith`/`lerp`; `directory` mutable en el descargador; `slot.paths.length`;
+    el resto de errores de tipos que marcó `flutter analyze`.
+  - **Desbordes:** `_ModeRow` pasó de `Row` a `Wrap` (13 px de más con etiquetas
+    largas) y la tarjeta del laboratorio es `Material` en vez de `Container` con
+    `BoxDecoration` (el `ListTile` pinta sobre el `Material` más cercano).
+  - **Bugs de verdad que destaparon los tests:** el lector APIC se comía el MIME
+    y devolvía 61 de 70 bytes de carátula; la posición se quedaba en 30 s al
+    cambiar de pista (`EV_TRACK`); el automix estiraba ×1,08 cuando 90→180 es el
+    mismo patrón (ahora normaliza a la octava con corte √2); el acento dinámico
+    no se aclaraba para leerse (`withAccent` itera sobre HSL hasta 3:1 y brillo
+    claro); el `Scrobbler` notificaba después de `dispose()`; el `WebDavClient`
+    mandaba el `PROPFIND` troceado (400 en servidores estrictos) y podía
+    reventar con un `%` suelto en un `href`.
+  - **Tests mal escritos (los escribí a ciegas):** `flutter_test` devuelve 400 a
+    toda petición real, así que los tests con `HttpServer` necesitan
+    `HttpOverrides.global = null`; `PlayerController` construye ya el primer
+    snapshot (sin él, `snapshot.hasTrack` era `false` antes del primer `pump`);
+    etiquetas que no eran («Pista masterizada»), listas que hay que bajar
+    (`ListView` perezoso), el mini-reproductor repitiendo el título en la
+    biblioteca, `ensureVisible` antes de tocar botones de un panel con scroll y
+    un `Timer` de guardado que quedaba pendiente al acabar la prueba.
+  - **Diagnóstico:** el registro del job no se puede descargar desde este
+    entorno (el redirect vive en otro host), así que el paso `Diagnóstico del
+    fallo` publica las excepciones, los `Expected/Actual` y la lista de tests en
+    rojo como **comentario del commit** y como anotaciones. Ese paso es
+    temporal y necesita `contents: write`; cuando la suite esté verde se quita.
+- **VERIFICADO:** 12 ejecuciones de la CI, leyendo anotaciones y comentarios.
+  Última: `Estático` ✅, `Núcleo` ✅, `App` ❌ con **219 de 224** pruebas en
+  verde y cinco rojos (R40): `AudioLabSheet detectar BPM` (la sección
+  «Herramientas» está plegada y el botón no existe en el árbol),
+  `TagEditorSheet` (el guardado no llega al archivo), `Automix` (no pasa a
+  «Mezclando»), `MultiQueueStore` (guardado en disco) y `modo bolsillo` (el
+  botón de la cabecera no muestra el bloqueo).
+- **NO VERIFICABLE AQUÍ:** el resto de plataformas (R33, R38) y cualquier cosa
+  visual: no hay Flutter ni dispositivo en el sandbox.
+- **COMMITS:** `f9b3d7c`, `1836737`, `8da2808`, `7307f9b`, `a2cfb5a`, `ff86f3a`,
+  `f5b6567`, `9bb64fc`, `80b2658`, `b8e716d`, `2742abd`, `d9c7c06`, `2261ebb`
+- **ABIERTO / RIESGOS:** R40 (los cinco tests), R38 (Windows/macOS sin
+  ejecutar), y quitar el paso de diagnóstico cuando la CI esté verde.
+
+---
+
 ## 2026-11-21 · turno 23 · Cierre maestro, pedido 10 de 10: R32, empaquetado y CI
 
 - **PEDIDO:** `BLUETOOTH_CONNECT` (cierra R32), `packaging/windows/build_windows.ps1`
