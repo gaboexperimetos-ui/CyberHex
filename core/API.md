@@ -589,3 +589,12 @@ limitan a 4 por pista en memoria.
 
 - `ch_engine_set_auto_gain(1, -14)` mide LUFS al abrir cada pista y ajusta la
   ganancia manual para alcanzar el objetivo (por defecto -14 LUFS).
+
+### Gestion de cola
+
+- `ch_engine_queue_sort/reverse/shuffle(seed)` reordenan la cola.
+- `ch_engine_queue_insert_sorted(path)` inserta en orden alfabetico.
+- `ch_engine_queue_keep_current()` deja solo la pista actual.
+- `ch_engine_queue_duplicate_current()` la duplica al final.
+- `ch_engine_queue_rotate()` la mueve al final.
+- `ch_engine_queue_count_ext(".flac")` cuenta por extension.

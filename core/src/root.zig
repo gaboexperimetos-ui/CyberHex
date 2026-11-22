@@ -2201,6 +2201,187 @@ export fn ch_engine_load_dir(self: ?*Engine, dir: [*c]const u8) i32 {
     return added;
 }
 
+/// Exporta la cola actual a un archivo JSON (solo rutas). Devuelve 0 si ok.
+export fn ch_engine_queue_export_json(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(e.allocator);
+    buf.appendSlice(e.allocator, "{\n  \"queue\": [\n") catch return -2;
+    e.list_mutex.lock();
+    for (e.playlist.items, 0..) |item, i| {
+        buf.appendSlice(e.allocator, "    \"") catch {};
+        appendJsonString(&buf, e.allocator, item) catch {};
+        buf.appendSlice(e.allocator, "\"") catch {};
+        if (i + 1 < e.playlist.items.len) buf.append(e.allocator, ',') catch {};
+        buf.append(e.allocator, '\n') catch {};
+    }
+    e.list_mutex.unlock();
+    buf.appendSlice(e.allocator, "  ],\n  \"index\": ") catch return -2;
+    var tmp: [32]u8 = undefined;
+    const num = std.fmt.bufPrint(&tmp, "{d}", .{e.queue_index}) catch return -2;
+    buf.appendSlice(e.allocator, num) catch return -2;
+    buf.appendSlice(e.allocator, "\n}\n") catch return -2;
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Ordena la cola alfabeticamente por ruta. Devuelve 0 si ok.
+export fn ch_engine_queue_sort(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    std.mem.sort([:0]u8, e.playlist.items, {}, struct {
+        fn lt(_: void, a: [:0]u8, b: [:0]u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    }.lt);
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Invierte el orden de la cola.
+export fn ch_engine_queue_reverse(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    std.mem.reverse([:0]u8, e.playlist.items);
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Reordena la cola actual aleatoriamente (Fisher-Yates con PRNG).
+export fn ch_engine_queue_shuffle(self: ?*Engine, seed: u32) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    var rng = std.Random.DefaultPrng.init(seed);
+    const r = rng.random();
+    var i: usize = e.playlist.items.len;
+    while (i > 1) {
+        i -= 1;
+        const j = r.intRangeLessThan(usize, 0, i + 1);
+        std.mem.swap([:0]u8, &e.playlist.items[i], &e.playlist.items[j]);
+    }
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return 0;
+}
+
+/// Inserta una pista en la cola manteniendo el orden alfabetico. Devuelve el
+/// indice insertado, o negativo si error.
+export fn ch_engine_queue_insert_sorted(self: ?*Engine, path: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (path == null) return -1;
+    const p = std.mem.span(path);
+    const copy = e.allocator.dupeSentinel(u8, p, 0) catch return -2;
+
+    e.list_mutex.lock();
+    // Encontrar posicion: primera ruta mayor que la nueva.
+    var pos: usize = 0;
+    while (pos < e.playlist.items.len and std.mem.lessThan(u8, e.playlist.items[pos], copy)) : (pos += 1) {}
+    e.playlist.insert(e.allocator, pos, copy) catch {
+        e.list_mutex.unlock();
+        e.allocator.free(copy);
+        return -2;
+    };
+    const idx: i32 = @intCast(pos);
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return idx;
+}
+
+/// Deja en la cola solo la pista que suena ahora. Devuelve el numero eliminado.
+export fn ch_engine_queue_keep_current(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    var removed: i32 = 0;
+    e.list_mutex.lock();
+    const current = e.audibleIndex() orelse e.queue_index;
+    var i: usize = 0;
+    while (i < e.playlist.items.len) {
+        if (i != current) {
+            e.allocator.free(e.playlist.items[i]);
+            _ = e.playlist.orderedRemove(i);
+            removed += 1;
+        } else {
+            i += 1;
+        }
+    }
+    e.queue_index = 0;
+    e.list_mutex.unlock();
+    if (removed > 0) {
+        e.order.clearRetainingCapacity();
+        e.order_pos = 0;
+    }
+    return removed;
+}
+
+/// Duplica la pista actual al final de la cola. Devuelve el nuevo indice.
+export fn ch_engine_queue_duplicate_current(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const current = e.audibleIndex() orelse e.queue_index;
+    if (current >= e.playlist.items.len) {
+        e.list_mutex.unlock();
+        return -1;
+    }
+    const copy = e.allocator.dupeSentinel(u8, e.playlist.items[current], 0) catch {
+        e.list_mutex.unlock();
+        return -2;
+    };
+    e.playlist.append(e.allocator, copy) catch {
+        e.list_mutex.unlock();
+        e.allocator.free(copy);
+        return -2;
+    };
+    const idx: i32 = @intCast(e.playlist.items.len - 1);
+    e.list_mutex.unlock();
+    return idx;
+}
+
+/// Gira la cola: la pista actual pasa al final. Devuelve el numero de entradas.
+export fn ch_engine_queue_rotate(self: ?*Engine) i32 {
+    const e = self orelse return -1;
+    e.list_mutex.lock();
+    const n = e.playlist.items.len;
+    if (n < 2) {
+        e.list_mutex.unlock();
+        return @intCast(n);
+    }
+    const current = e.audibleIndex() orelse e.queue_index;
+    if (current >= n) {
+        e.list_mutex.unlock();
+        return @intCast(n);
+    }
+    // Mover la pista actual al final.
+    const item = e.playlist.orderedRemove(current);
+    e.playlist.append(e.allocator, item) catch {
+        e.list_mutex.unlock();
+        return @intCast(n);
+    };
+    e.queue_index = @intCast(n - 1);
+    e.list_mutex.unlock();
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    return @intCast(n);
+}
+
+/// Cuenta cuantas pistas de la cola tienen la extension `ext` (".flac", ...).
+export fn ch_engine_queue_count_ext(self: ?*Engine, ext: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (ext == null) return 0;
+    const x = std.mem.span(ext);
+    var count: i32 = 0;
+    e.list_mutex.lock();
+    for (e.playlist.items) |item| {
+        if (std.mem.endsWith(u8, item, x)) count += 1;
+    }
+    e.list_mutex.unlock();
+    return count;
+}
+
 export fn ch_engine_play(self: ?*Engine) i32 {
     const e = self orelse return -1;
     if (e.decoder == null) return e.fail("no hay pista cargada", -2);
