@@ -195,7 +195,7 @@ void main() {
       expect(queues.active, 0);
 
       expect(queues.capture(0, <String>['/a', '/b'], 1), isTrue);
-      expect(queues.activeSlot.length, 2);
+      expect(queues.activeSlot.paths.length, 2);
       expect(queues.activeSlot.index, 1);
       // Lo mismo otra vez no ensucia ni notifica.
       expect(queues.capture(0, <String>['/a', '/b'], 1), isFalse);
@@ -538,7 +538,7 @@ void main() {
       expect(find.textContaining('Cola 3'), findsOneWidget);
 
       // Lo que había en la cola 1 quedó guardado.
-      expect(queues.slots[0].length, 2);
+      expect(queues.slots[0].paths.length, 2);
 
       automix.dispose();
       await tester.pumpWidget(const SizedBox());
