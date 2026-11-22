@@ -241,9 +241,13 @@ class AutomixEngine {
   }
 
   Future<void> _blend(String current, String next) async {
+    final startedAt = controller.snapshot.queueIndex;
     try {
       final result = await analyse(current, next);
       if (!enabled) return;
+      // La pista cambió mientras se analizaba: esta mezcla ya no vale y, si
+      // siguiera, volvería a subir el tempo después de haberlo restaurado.
+      if (controller.snapshot.queueIndex != startedAt) return;
       final snapshot = controller.snapshot;
       _lastQueueIndex = snapshot.queueIndex;
       controller.setCrossfade(result.crossfade);

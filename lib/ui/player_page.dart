@@ -64,7 +64,9 @@ class _PlayerPageState extends State<PlayerPage>
   PlayerController get _controller => widget.controller;
 
   /// Modo bolsillo activo (bloquea los toques de esta pantalla).
-  bool _pocket = false;
+  /// El bloqueo vive en el tema: así el interruptor de Ajustes y el botón de la
+  /// cabecera son lo mismo, y sobrevive al reinicio.
+  bool get _pocket => _theme.pocketMode;
 
   /// Posición de la búsqueda fina mientras se arrastra en vertical.
   double? _fineSeek;
@@ -94,7 +96,6 @@ class _PlayerPageState extends State<PlayerPage>
   @override
   void initState() {
     super.initState();
-    _pocket = _theme.pocketMode;
     _controller.addListener(_onSnapshot);
     _dropsSubscription = widget.desktop?.drops.listen(_onDroppedPaths);
     _controller.position.addListener(_rememberPosition);
@@ -626,14 +627,9 @@ class _PlayerPageState extends State<PlayerPage>
         '${millis.toString().padLeft(3, '0')}';
   }
 
-  void _enterPocket() {
-    setState(() => _pocket = true);
-  }
+  void _enterPocket() => _theme.setPocketMode(true);
 
-  void _leavePocket() {
-    if (!mounted) return;
-    setState(() => _pocket = false);
-  }
+  void _leavePocket() => _theme.setPocketMode(false);
 
   void _runAction(PlayerAction action) {
     switch (action) {
