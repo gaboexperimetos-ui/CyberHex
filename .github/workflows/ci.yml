@@ -43,11 +43,35 @@ jobs:
           version: 0.17.1
 
       - name: Tests del núcleo (miniaudio)
-        run: zig build test -Ddecoder=miniaudio
+        # El registro se guarda y se reemite como anotaciones del check: así se
+        # puede leer el fallo desde la API sin descargar el log del job.
+        run: |
+          set +e
+          zig build test -Ddecoder=miniaudio > core-test.log 2>&1
+          code=$?
+          tail -80 core-test.log
+          if [ $code -ne 0 ]; then
+            while IFS= read -r line; do
+              printf '::error::%s\n' "${line//::/:}"
+            done < <(grep -E 'error|failed|panic|expected' core-test.log | head -30)
+          fi
+          exit $code
 
       - name: Prueba de humo con audio real
         # El WAV sintético se escribe en el temporal del runner, no en el repo.
-        run: zig build smoke -Ddecoder=miniaudio -Dsmoke-dir="$RUNNER_TEMP"
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          zig build smoke -Ddecoder=miniaudio -Dsmoke-dir="$RUNNER_TEMP" > core-smoke.log 2>&1
+          code=$?
+          tail -40 core-smoke.log
+          if [ $code -ne 0 ]; then
+            while IFS= read -r line; do
+              printf '::warning::%s\n' "${line//::/:}"
+            done < <(grep -E 'error|failed|panic|dispositivo|device' core-smoke.log | head -20)
+          fi
+          exit $code
 
       - name: La biblioteca dinámica se produce
         run: |
@@ -121,9 +145,44 @@ jobs:
         run: flutter pub get
 
       - name: Analizador
+        id: analizador
         # Los avisos y las notas no rompen el build (hay deuda de estilo
-        # acumulada); los errores sí.
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        # acumulada); los errores sí. Se deja seguir para que los tests se
+        # ejecuten igualmente y cada error quede como anotación del check.
+        continue-on-error: true
+        run: |
+          set +e
+          flutter analyze --no-fatal-infos --no-fatal-warnings > analyze.log 2>&1
+          code=$?
+          tail -60 analyze.log
+          if [ $code -ne 0 ]; then
+            # Formato: "error • mensaje • lib/x.dart:12:5 • code"
+            awk -F ' • ' '/^ *error/ && NF >= 4 {
+              split($3, loc, ":");
+              printf "::error file=%s,line=%s,col=%s::%s (%s)\n", loc[1], loc[2], loc[3], $2, $4
+            }' analyze.log | head -50
+          fi
+          exit $code
 
       - name: Tests de la app
-        run: flutter test --reporter expanded
+        id: tests
+        continue-on-error: true
+        run: |
+          set +e
+          flutter test --reporter expanded > tests.log 2>&1
+          code=$?
+          tail -80 tests.log
+          if [ $code -ne 0 ]; then
+            while IFS= read -r line; do
+              printf '::error::%s\n' "${line//::/:}"
+            done < <(grep -E 'Error|error|failed|Expected|Actual|\[E\]' tests.log | head -40)
+          fi
+          exit $code
+
+      - name: Resumen
+        if: always()
+        run: |
+          echo "analizador: ${{ steps.analizador.outcome }}"
+          echo "tests:      ${{ steps.tests.outcome }}"
+          test "${{ steps.analizador.outcome }}" = "success"
+          test "${{ steps.tests.outcome }}" = "success"
