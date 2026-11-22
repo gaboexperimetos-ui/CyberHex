@@ -189,7 +189,12 @@ void main() {
     });
 
     testWidgets('detectar BPM muestra el valor del motor', (tester) async {
-      final fake = FakePlayer()..bpmValue = 128.3;
+      // Con cola: el panel saca la ruta de la pista actual del snapshot, y sin
+      // ella ni siquiera llega a pedir los BPM.
+      final fake = FakePlayer()
+        ..bpmValue = 128.3
+        ..queuePaths.add('/musica/tema.flac')
+        ..queueIndexValue = 0;
       final controller = PlayerController(fake);
       addTearDown(controller.dispose);
       await controller.openFile('/musica/tema.flac');
