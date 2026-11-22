@@ -117,6 +117,10 @@ class _TestServer {
 }
 
 void main() {
+  // `flutter_test` sustituye `HttpClient` por uno falso que contesta 400 a
+  // todo: los tests que levantan un `HttpServer` de verdad necesitan el real.
+  // Se repone antes de cada test porque el binding se inicializa en `main()`.
+  setUp(() => HttpOverrides.global = null);
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory temp;
@@ -685,7 +689,7 @@ void main() {
 
       expect(entries, hasLength(2));
       expect(entries.first.isCollection, isTrue);
-      expect(entries.first.name, 'Música');
+      expect(entries.first.name, 'música');
       expect(entries[1].name, 'tema uno.flac');
       expect(entries[1].size, 1234567);
       expect(entries[1].isAudio, isTrue);

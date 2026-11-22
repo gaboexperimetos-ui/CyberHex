@@ -88,10 +88,15 @@ class PlayerController extends ChangeNotifier {
   ///
   /// Lo llama el temporizador; las pruebas pueden llamarlo a mano y así no
   /// dependen de relojes reales.
+  /// `true` si en este tick entró una pista nueva: la posición ya se puso a 0
+  /// y no hay que pisarla con la que aún reporta el motor.
+  bool _trackJustChanged = false;
+
   void pump() {
     if (_disposed) return;
+    _trackJustChanged = false;
     _drainEvents();
-    position.value = _player.position;
+    if (!_trackJustChanged) position.value = _player.position;
     _refresh();
   }
 
@@ -108,6 +113,7 @@ class PlayerController extends ChangeNotifier {
         case PlayerEventKind.track:
           _player.syncTrackInfo();
           position.value = 0;
+          _trackJustChanged = true;
           _refreshQueue();
         case PlayerEventKind.queue:
           _refreshQueue();

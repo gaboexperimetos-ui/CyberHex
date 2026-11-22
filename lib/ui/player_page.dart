@@ -1201,8 +1201,12 @@ class _ModeRow extends StatelessWidget {
       2 => 'Repetir: una',
       _ => 'Repetir: no',
     };
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    // `Wrap` y no `Row`: con etiquetas largas (o fuentes grandes) los dos
+    // botones no caben en una línea y un `Row` desborda.
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 10,
+      runSpacing: 6,
       children: [
         _ModeButton(
           icon: Icons.shuffle_rounded,
@@ -1213,7 +1217,6 @@ class _ModeRow extends StatelessWidget {
               : 'Aleatorio desactivado (toca para activar)',
           onPressed: onToggleShuffle,
         ),
-        const SizedBox(width: 10),
         _ModeButton(
           icon: repeat == 2 ? Icons.repeat_one_rounded : Icons.repeat_rounded,
           label: repeatLabel,

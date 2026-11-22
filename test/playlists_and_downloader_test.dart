@@ -61,6 +61,10 @@ class _FakeDownloader extends AudioDownloader {
 }
 
 void main() {
+  // `flutter_test` sustituye `HttpClient` por uno falso que contesta 400 a
+  // todo: los tests que levantan un `HttpServer` de verdad necesitan el real.
+  // Se repone antes de cada test porque el binding se inicializa en `main()`.
+  setUp(() => HttpOverrides.global = null);
   group('PlaylistStore', () {
     test('crear, renombrar, duplicar y borrar', () {
       final store = PlaylistStore.memory();

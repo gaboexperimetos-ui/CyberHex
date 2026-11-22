@@ -462,9 +462,12 @@ abstract final class TagEditor {
     for (final frame in Id3v2.frames(bytes)) {
       if (frame.id != 'APIC' || frame.data.length < 4) continue;
       final data = frame.data;
-      var pos = 1 + _indexOf(data, 0, 1) + 1; // codificación + mime
-      if (pos <= 1 || pos >= data.length) continue;
-      pos += 1; // tipo de imagen
+      // Tras la codificación va el MIME terminado en 0: el byte siguiente es el
+      // tipo de imagen y el otro, la descripción (que también acaba en 0). La
+      // carátula empieza justo después de esa segunda marca.
+      var pos = _indexOf(data, 0, 1) + 1; // tipo de imagen
+      if (pos < 2 || pos >= data.length) continue;
+      pos += 1; // descripción
       final descEnd = _terminatorEnd(data, pos, data[0]);
       if (descEnd < 0) continue;
       final image = Uint8List.sublistView(data, descEnd);
