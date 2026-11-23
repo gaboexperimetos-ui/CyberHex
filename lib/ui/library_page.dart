@@ -44,6 +44,7 @@ class LibraryPage extends StatefulWidget {
     this.playlists,
     this.stats,
     this.longTracks,
+    this.onOpenPlayer,
   });
 
   final PlayerController controller;
@@ -59,6 +60,10 @@ class LibraryPage extends StatefulWidget {
 
   /// Carpeta a escanear nada más abrir. Solo lo usan las pruebas.
   final String? initialRoot;
+
+  /// Abre el reproductor completo desde el mini-reproductor. Si falta (página
+  /// usada suelta), se vuelve a la raíz de la pila.
+  final VoidCallback? onOpenPlayer;
 
   @override
   State<LibraryPage> createState() => _LibraryPageState();
@@ -165,7 +170,11 @@ class _LibraryPageState extends State<LibraryPage>
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) => RadioPage(store: store, controller: _controller),
+            builder: (_) => RadioPage(
+              store: store,
+              controller: _controller,
+              onOpenPlayer: widget.onOpenPlayer,
+            ),
           ),
         )
         .whenComplete(store.dispose);
@@ -177,7 +186,11 @@ class _LibraryPageState extends State<LibraryPage>
     Navigator.of(context)
         .push(
           MaterialPageRoute<void>(
-            builder: (_) => NetworkPage(store: store, controller: _controller),
+            builder: (_) => NetworkPage(
+              store: store,
+              controller: _controller,
+              onOpenPlayer: widget.onOpenPlayer,
+            ),
           ),
         )
         .whenComplete(store.dispose);
@@ -522,7 +535,8 @@ class _LibraryPageState extends State<LibraryPage>
           Expanded(child: _body()),
           MiniPlayer(
             controller: _controller,
-            onOpen: () => Navigator.of(context).popUntil((route) => route.isFirst),
+            onOpen: widget.onOpenPlayer ??
+                () => Navigator.of(context).popUntil((route) => route.isFirst),
           ),
         ],
       ),

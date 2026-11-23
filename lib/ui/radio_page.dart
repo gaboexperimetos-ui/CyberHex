@@ -15,10 +15,18 @@ import 'mini_player.dart';
 /// temporal con [RadioStore.buffer] (una ventana de audio) y se reproduce desde
 /// ahí. La UI lo dice tal cual: «Flujo bajado: N MB».
 class RadioPage extends StatefulWidget {
-  const RadioPage({super.key, required this.store, required this.controller});
+  const RadioPage({
+    super.key,
+    required this.store,
+    required this.controller,
+    this.onOpenPlayer,
+  });
 
   final RadioStore store;
   final PlayerController controller;
+
+  /// Abre el reproductor completo desde el mini-reproductor.
+  final VoidCallback? onOpenPlayer;
 
   @override
   State<RadioPage> createState() => _RadioPageState();
@@ -293,7 +301,8 @@ class _RadioPageState extends State<RadioPage> {
           ),
           MiniPlayer(
             controller: widget.controller,
-            onOpen: () => Navigator.of(context).popUntil((route) => route.isFirst),
+            onOpen: widget.onOpenPlayer ??
+                () => Navigator.of(context).popUntil((route) => route.isFirst),
           ),
         ],
       ),

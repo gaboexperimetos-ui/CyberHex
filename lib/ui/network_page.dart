@@ -441,6 +441,7 @@ class NetworkPage extends StatefulWidget {
     required this.store,
     required this.controller,
     this.client,
+    this.onOpenPlayer,
   });
 
   final NetworkStore store;
@@ -448,6 +449,9 @@ class NetworkPage extends StatefulWidget {
 
   /// Inyectable en tests (apunta a un servidor local).
   final WebDavClient? client;
+
+  /// Abre el reproductor completo desde el mini-reproductor.
+  final VoidCallback? onOpenPlayer;
 
   @override
   State<NetworkPage> createState() => _NetworkPageState();
@@ -720,7 +724,8 @@ class _NetworkPageState extends State<NetworkPage> {
           Expanded(child: server == null ? _serversView(palette) : _browserView(palette, server)),
           MiniPlayer(
             controller: widget.controller,
-            onOpen: () => Navigator.of(context).popUntil((route) => route.isFirst),
+            onOpen: widget.onOpenPlayer ??
+                () => Navigator.of(context).popUntil((route) => route.isFirst),
           ),
         ],
       ),

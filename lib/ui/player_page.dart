@@ -206,6 +206,7 @@ class _PlayerPageState extends State<PlayerPage>
           playlists: _playlists,
           stats: _stats,
           longTracks: _longTracks,
+          onOpenPlayer: () => Navigator.of(context).pop(),
         ),
       ),
     );
@@ -812,6 +813,12 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
+        if (Navigator.of(context).canPop())
+          IconButton(
+            onPressed: () => Navigator.of(context).maybePop(),
+            tooltip: 'Cerrar reproductor',
+            icon: Icon(Icons.keyboard_arrow_down_rounded, color: palette.muted),
+          ),
         Flexible(
           child: Text(
             'CYBERHEX',

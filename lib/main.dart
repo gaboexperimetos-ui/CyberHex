@@ -14,7 +14,7 @@ import 'platform/desktop_channel.dart';
 import 'platform/media_session_channel.dart';
 import 'theme.dart';
 import 'ui/core_error_screen.dart';
-import 'ui/player_page.dart';
+import 'ui/home_shell.dart';
 
 Future<void> main() async {
   // El canal `cyberhex/storage` (filesDir) es asíncrono y el resto de la app
@@ -197,7 +197,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
         theme: _theme.themeData,
         home: controller == null
             ? CoreErrorScreen(message: _error ?? 'no se pudo iniciar el motor')
-            : PlayerPage(
+            : HomeShell(
                 controller: controller,
                 theme: _theme,
                 desktop: _desktop,
