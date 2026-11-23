@@ -46,36 +46,53 @@ class HomePage extends StatelessWidget {
         final snapshot = controller.snapshot;
         return Scaffold(
           backgroundColor: palette.background,
-          body: SafeArea(
-            bottom: false,
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
-              children: [
-                _Header(palette: palette),
-                const SizedBox(height: 20),
-                _ContinueCard(
-                  snapshot: snapshot,
-                  position: controller.position,
-                  palette: palette,
-                  onOpen: onOpenPlayer,
-                  onToggle: controller.toggle,
-                  onOpenLibrary: onOpenLibrary,
-                ),
-                const SizedBox(height: 26),
-                _SectionTitle('Explorar', palette: palette),
-                const SizedBox(height: 12),
-                _Shortcuts(
-                  palette: palette,
-                  onLibrary: onOpenLibrary,
-                  onPlaylists: onOpenPlaylists,
-                  onRadio: onOpenRadio,
-                  onStats: onOpenStats,
-                ),
-                const SizedBox(height: 26),
-                _SectionTitle('Tu actividad', palette: palette),
-                const SizedBox(height: 12),
-                _ActivityCard(stats: stats, palette: palette, onOpen: onOpenStats),
-              ],
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: <Color>[
+                  Color.lerp(palette.background, palette.primary, 0.38)!,
+                  palette.background,
+                ],
+                stops: const <double>[0, 0.45],
+              ),
+            ),
+            child: SafeArea(
+              bottom: false,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
+                children: [
+                  _Header(palette: palette),
+                  const SizedBox(height: 20),
+                  _ContinueCard(
+                    snapshot: snapshot,
+                    position: controller.position,
+                    palette: palette,
+                    onOpen: onOpenPlayer,
+                    onToggle: controller.toggle,
+                    onOpenLibrary: onOpenLibrary,
+                  ),
+                  const SizedBox(height: 26),
+                  _SectionTitle('Explorar', palette: palette),
+                  const SizedBox(height: 12),
+                  _Shortcuts(
+                    palette: palette,
+                    onLibrary: onOpenLibrary,
+                    onPlaylists: onOpenPlaylists,
+                    onRadio: onOpenRadio,
+                    onStats: onOpenStats,
+                  ),
+                  const SizedBox(height: 26),
+                  _SectionTitle('Tu actividad', palette: palette),
+                  const SizedBox(height: 12),
+                  _ActivityCard(
+                    stats: stats,
+                    palette: palette,
+                    onOpen: onOpenStats,
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -96,13 +113,29 @@ class _Header extends StatelessWidget {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'CYBERHEX',
-              style: TextStyle(
-                fontFamily: 'Righteous',
-                fontSize: 26,
-                letterSpacing: 4,
-                color: palette.foreground,
+            RichText(
+              text: TextSpan(
+                style: TextStyle(
+                  fontFamily: 'Righteous',
+                  fontSize: 26,
+                  letterSpacing: 4,
+                  color: palette.foreground,
+                ),
+                children: [
+                  const TextSpan(text: 'CYBER'),
+                  TextSpan(
+                    text: 'HEX',
+                    style: TextStyle(
+                      color: palette.accent,
+                      shadows: [
+                        Shadow(
+                          color: palette.accent.withValues(alpha: 0.55),
+                          blurRadius: 14,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 2),
@@ -121,7 +154,11 @@ class _Header extends StatelessWidget {
             color: palette.accent.withValues(alpha: 0.14),
             border: Border.all(color: palette.accent.withValues(alpha: 0.35)),
           ),
-          child: Icon(Icons.graphic_eq_rounded, color: palette.accent, size: 22),
+          child: Icon(
+            Icons.graphic_eq_rounded,
+            color: palette.accent,
+            size: 22,
+          ),
         ),
       ],
     );
@@ -204,8 +241,8 @@ class _ContinueCard extends StatelessWidget {
                           Text(
                             hasTrack
                                 ? (snapshot.title.isEmpty
-                                    ? 'Sin título'
-                                    : snapshot.title)
+                                      ? 'Sin título'
+                                      : snapshot.title)
                                 : 'Aún no hay nada sonando',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -219,12 +256,15 @@ class _ContinueCard extends StatelessWidget {
                           Text(
                             hasTrack
                                 ? (snapshot.artist.isEmpty
-                                    ? 'Desconocido'
-                                    : snapshot.artist)
+                                      ? 'Desconocido'
+                                      : snapshot.artist)
                                 : 'Escanea una carpeta o abre un archivo',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 12, color: palette.muted),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: palette.muted,
+                            ),
                           ),
                         ],
                       ),
@@ -259,7 +299,9 @@ class _ContinueCard extends StatelessWidget {
                     valueListenable: position,
                     builder: (context, value, _) {
                       final progress = snapshot.duration > 0
-                          ? (value / snapshot.duration).clamp(0.0, 1.0).toDouble()
+                          ? (value / snapshot.duration)
+                                .clamp(0.0, 1.0)
+                                .toDouble()
                           : 0.0;
                       return ClipRRect(
                         borderRadius: BorderRadius.circular(99),
@@ -299,7 +341,11 @@ class _Cover extends StatelessWidget {
         child: image == null
             ? ColoredBox(
                 color: palette.surface,
-                child: Icon(Icons.album_rounded, color: palette.accent, size: 30),
+                child: Icon(
+                  Icons.album_rounded,
+                  color: palette.accent,
+                  size: 30,
+                ),
               )
             : Image.memory(
                 image,
@@ -308,7 +354,11 @@ class _Cover extends StatelessWidget {
                 cacheWidth: 160,
                 errorBuilder: (_, __, ___) => ColoredBox(
                   color: palette.surface,
-                  child: Icon(Icons.album_rounded, color: palette.accent, size: 30),
+                  child: Icon(
+                    Icons.album_rounded,
+                    color: palette.accent,
+                    size: 30,
+                  ),
                 ),
               ),
       ),
@@ -333,32 +383,33 @@ class _Shortcuts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items = <({IconData icon, String label, String hint, VoidCallback onTap})>[
-      (
-        icon: Icons.library_music_rounded,
-        label: 'Biblioteca',
-        hint: 'Escanea y ordena',
-        onTap: onLibrary,
-      ),
-      (
-        icon: Icons.queue_music_rounded,
-        label: 'Listas',
-        hint: 'Tus colecciones',
-        onTap: onPlaylists,
-      ),
-      (
-        icon: Icons.radio_rounded,
-        label: 'Radio',
-        hint: 'Emisoras online',
-        onTap: onRadio,
-      ),
-      (
-        icon: Icons.insights_rounded,
-        label: 'Estadísticas',
-        hint: 'Lo que escuchas',
-        onTap: onStats,
-      ),
-    ];
+    final items =
+        <({IconData icon, String label, String hint, VoidCallback onTap})>[
+          (
+            icon: Icons.library_music_rounded,
+            label: 'Biblioteca',
+            hint: 'Escanea y ordena',
+            onTap: onLibrary,
+          ),
+          (
+            icon: Icons.queue_music_rounded,
+            label: 'Listas',
+            hint: 'Tus colecciones',
+            onTap: onPlaylists,
+          ),
+          (
+            icon: Icons.radio_rounded,
+            label: 'Radio',
+            hint: 'Emisoras online',
+            onTap: onRadio,
+          ),
+          (
+            icon: Icons.insights_rounded,
+            label: 'Estadísticas',
+            hint: 'Lo que escuchas',
+            onTap: onStats,
+          ),
+        ];
     return GridView.count(
       crossAxisCount: 2,
       shrinkWrap: true,

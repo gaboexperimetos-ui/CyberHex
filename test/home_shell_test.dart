@@ -24,7 +24,7 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
-    expect(find.text('CYBERHEX'), findsOneWidget);
+    expect(find.text('Tu música, tu máquina'), findsOneWidget);
     expect(find.text('Explorar'), findsOneWidget);
 
     int? index() => tester.widget<IndexedStack>(find.byType(IndexedStack)).index;

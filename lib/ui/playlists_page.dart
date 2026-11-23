@@ -21,6 +21,7 @@ class PlaylistsPage extends StatefulWidget {
     this.store,
     this.stats,
     this.onOpenPlayer,
+    this.showMiniPlayer = true,
   });
 
   final PlayerController controller;
@@ -31,6 +32,9 @@ class PlaylistsPage extends StatefulWidget {
 
   /// Abre el reproductor completo desde el mini-reproductor.
   final VoidCallback? onOpenPlayer;
+
+  /// Si es `false`, el mini-reproductor lo dibuja el armazón contenedor.
+  final bool showMiniPlayer;
 
   @override
   State<PlaylistsPage> createState() => _PlaylistsPageState();
@@ -195,11 +199,12 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
       body: Column(
         children: [
           Expanded(child: _list()),
-          MiniPlayer(
-            controller: _controller,
-            onOpen: widget.onOpenPlayer ??
-                () => Navigator.of(context).popUntil((route) => route.isFirst),
-          ),
+          if (widget.showMiniPlayer)
+            MiniPlayer(
+              controller: _controller,
+              onOpen: widget.onOpenPlayer ??
+                  () => Navigator.of(context).popUntil((route) => route.isFirst),
+            ),
         ],
       ),
     );

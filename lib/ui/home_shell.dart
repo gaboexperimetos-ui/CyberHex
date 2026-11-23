@@ -13,6 +13,7 @@ import '../platform/desktop_channel.dart';
 import '../theme.dart';
 import 'home_page.dart';
 import 'library_page.dart';
+import 'mini_player.dart';
 import 'now_playing_route.dart';
 import 'playlists_page.dart';
 import 'radio_page.dart';
@@ -103,50 +104,59 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _openStats() async {
     await _stats.load();
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => StatsPage(stats: _stats),
-      ),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => StatsPage(stats: _stats)));
   }
 
   @override
   Widget build(BuildContext context) {
     final palette = widget.theme.palette;
     return Scaffold(
-      body: IndexedStack(
-        index: _index,
+      body: Column(
         children: [
-          HomePage(
-            controller: widget.controller,
-            theme: widget.theme,
-            stats: _stats,
-            onOpenPlayer: _openPlayer,
-            onOpenLibrary: () => _select(1),
-            onOpenPlaylists: () => _select(2),
-            onOpenRadio: _openRadio,
-            onOpenStats: () => unawaited(_openStats()),
+          Expanded(
+            child: IndexedStack(
+              index: _index,
+              children: [
+                HomePage(
+                  controller: widget.controller,
+                  theme: widget.theme,
+                  stats: _stats,
+                  onOpenPlayer: _openPlayer,
+                  onOpenLibrary: () => _select(1),
+                  onOpenPlaylists: () => _select(2),
+                  onOpenRadio: _openRadio,
+                  onOpenStats: () => unawaited(_openStats()),
+                ),
+                LibraryPage(
+                  controller: widget.controller,
+                  playlists: _playlists,
+                  stats: _stats,
+                  favorites: _favorites,
+                  longTracks: _longTracks,
+                  onOpenPlayer: _openPlayer,
+                  showMiniPlayer: false,
+                ),
+                PlaylistsPage(
+                  controller: widget.controller,
+                  store: _playlists,
+                  stats: _stats,
+                  onOpenPlayer: _openPlayer,
+                  showMiniPlayer: false,
+                ),
+                SettingsPage(
+                  theme: widget.theme,
+                  player: widget.controller,
+                  desktop: widget.desktop,
+                  connections: widget.connections,
+                ),
+              ],
+            ),
           ),
-          LibraryPage(
-            controller: widget.controller,
-            playlists: _playlists,
-            stats: _stats,
-            favorites: _favorites,
-            longTracks: _longTracks,
-            onOpenPlayer: _openPlayer,
-          ),
-          PlaylistsPage(
-            controller: widget.controller,
-            store: _playlists,
-            stats: _stats,
-            onOpenPlayer: _openPlayer,
-          ),
-          SettingsPage(
-            theme: widget.theme,
-            player: widget.controller,
-            desktop: widget.desktop,
-            connections: widget.connections,
-          ),
+          // Un único mini-reproductor para todas las pestañas: vive encima de
+          // la barra de navegación y no se re-monta al cambiar de sección.
+          MiniPlayer(controller: widget.controller, onOpen: _openPlayer),
         ],
       ),
       bottomNavigationBar: DecoratedBox(

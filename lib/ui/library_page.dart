@@ -45,6 +45,7 @@ class LibraryPage extends StatefulWidget {
     this.stats,
     this.longTracks,
     this.onOpenPlayer,
+    this.showMiniPlayer = true,
   });
 
   final PlayerController controller;
@@ -64,6 +65,10 @@ class LibraryPage extends StatefulWidget {
   /// Abre el reproductor completo desde el mini-reproductor. Si falta (página
   /// usada suelta), se vuelve a la raíz de la pila.
   final VoidCallback? onOpenPlayer;
+
+  /// Si es `false`, el mini-reproductor lo dibuja el armazón que contiene la
+  /// página (así no se duplica cuando la biblioteca es una pestaña).
+  final bool showMiniPlayer;
 
   @override
   State<LibraryPage> createState() => _LibraryPageState();
@@ -533,11 +538,12 @@ class _LibraryPageState extends State<LibraryPage>
       body: Column(
         children: [
           Expanded(child: _body()),
-          MiniPlayer(
-            controller: _controller,
-            onOpen: widget.onOpenPlayer ??
-                () => Navigator.of(context).popUntil((route) => route.isFirst),
-          ),
+          if (widget.showMiniPlayer)
+            MiniPlayer(
+              controller: _controller,
+              onOpen: widget.onOpenPlayer ??
+                  () => Navigator.of(context).popUntil((route) => route.isFirst),
+            ),
         ],
       ),
     );
