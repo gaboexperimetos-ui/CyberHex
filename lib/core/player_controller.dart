@@ -3,8 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'player_api.dart';
-import 'services/lyrics_service.dart';
-import 'services/music_downloader.dart';
 
 /// Estado y acciones del reproductor para la UI.
 ///
@@ -16,7 +14,12 @@ import 'services/music_downloader.dart';
 ///
 /// Así se puede refrescar la posición a 12,5 Hz sin reconstruir la pantalla.
 class PlayerController extends ChangeNotifier {
-  PlayerController(this._player);
+  PlayerController(this._player) {
+    // El primer snapshot se construye aquí: sin esto, quien lo consulte antes
+    // del primer `pump()` ve un `PlayerSnapshot()` vacío (sin pista ni cola).
+    _refreshQueue();
+    _refresh();
+  }
 
   final PlayerApi _player;
 
@@ -31,16 +34,50 @@ class PlayerController extends ChangeNotifier {
   Future<bool>? _loading;
   String? _error;
   double _volume = 1;
+  bool _queueProtected = false;
+  List<QueueItem> _queue = const <QueueItem>[];
+  int _queueIndex = -1;
+  List<LibraryTrack> _libraryTracks = const <LibraryTrack>[];
   bool _disposed = false;
-  List<String> _libraryTracks = const [];
-  double? _pendingRestorePosition;
-  DateTime? _restoreStartedAt;
 
   PlayerSnapshot get snapshot => _snapshot;
 
-  List<String> get libraryTracks => _libraryTracks;
+  /// ¿La cola está protegida? Con el flag activo, abrir un archivo suelto lo
+  /// añade al final y lo reproduce **sin** vaciar lo que ya había.
+  bool get queueProtected => _queueProtected;
+
+  set queueProtected(bool value) {
+    if (_disposed || value == _queueProtected) return;
+    _queueProtected = value;
+    _refresh();
+  }
+
+  /// Último resultado de [scanDirectory]; la vista de biblioteca lo usa para no
+  /// repetir el escaneo al volver de la pantalla de reproducción.
+  List<LibraryTrack> get libraryTracks => _libraryTracks;
+
+  /// Pistas que el último escaneo dio por desaparecidas.
+  int get libraryRemoved => _player.libraryRemoved;
 
   List<double> get eqGains => _player.eqGains;
+
+  /// Se avisa cuando cambia un ajuste que hay que persistir (DSP, mezcla,
+  /// paisaje, ReplayGain, crossfade, velocidad, tono). El `SessionKeeper` lo
+  /// escucha para guardar sin esperar a que cambie de pista.
+  final List<void Function()> _audioListeners = <void Function()>[];
+
+  void addAudioListener(void Function() listener) =>
+      _audioListeners.add(listener);
+
+  void removeAudioListener(void Function() listener) =>
+      _audioListeners.remove(listener);
+
+  void _audioChanged() {
+    for (final listener in List<void Function()>.of(_audioListeners)) {
+      listener();
+    }
+    _refresh();
+  }
 
   List<double> get eqBandFrequencies => _player.eqBandFrequencies;
 
@@ -49,38 +86,27 @@ class PlayerController extends ChangeNotifier {
     if (_disposed) return;
     _timer ??= Timer.periodic(_tickInterval, (_) => pump());
     pump();
+    _refreshQueue();
   }
 
   /// Procesa eventos y refresca el estado una vez.
   ///
   /// Lo llama el temporizador; las pruebas pueden llamarlo a mano y así no
   /// dependen de relojes reales.
+  /// `true` si en este tick entró una pista nueva: la posición ya se puso a 0
+  /// y no hay que pisarla con la que aún reporta el motor.
+  bool _trackJustChanged = false;
+
   void pump() {
     if (_disposed) return;
-    final restarted = _drainEvents();
-    // Si el motor acaba de cambiar de pista, la posición es la de la pista
-    // nueva (0) y no la vieja que todavía devuelve el getter.
-    if (!restarted) {
-      final nativePosition = _player.position;
-      final restoreTarget = _pendingRestorePosition;
-      if (restoreTarget == null) {
-        position.value = nativePosition;
-      } else if ((nativePosition - restoreTarget).abs() < 0.5 ||
-          DateTime.now().difference(_restoreStartedAt!) >
-              const Duration(seconds: 3)) {
-        _pendingRestorePosition = null;
-        _restoreStartedAt = null;
-        position.value = nativePosition;
-      } else {
-        position.value = restoreTarget;
-      }
-    }
-    _refresh(force: restarted);
+    _trackJustChanged = false;
+    _drainEvents();
+    if (!_trackJustChanged) position.value = _player.position;
+    _refresh();
   }
 
-  bool _drainEvents() {
+  void _drainEvents() {
     var processed = 0;
-    var restarted = false;
     while (processed < _maxEventsPerTick) {
       final event = _player.pollEvent();
       if (event == null) break;
@@ -88,16 +114,48 @@ class PlayerController extends ChangeNotifier {
       // El motor avisa cuando entra una pista nueva (también en gapless o
       // crossfade): hay que releer etiquetas y carátula, porque pueden haber
       // cambiado sin pasar por load().
-      if (event.kind == PlayerEventKind.track) {
-        _player.syncTrackInfo();
-        if (_pendingRestorePosition == null) position.value = 0;
-        restarted = true;
+      switch (event.kind) {
+        case PlayerEventKind.track:
+          _player.syncTrackInfo();
+          position.value = 0;
+          _trackJustChanged = true;
+          _refreshQueue();
+        case PlayerEventKind.queue:
+          _refreshQueue();
+        case PlayerEventKind.state:
+        case PlayerEventKind.end:
+        case PlayerEventKind.sleep:
+        case PlayerEventKind.unknown:
+          break;
       }
     }
-    return restarted;
   }
 
-  void _refresh({bool force = false}) {
+  /// Relee la cola del motor y notifica solo si cambió.
+  ///
+  /// Construir `QueueItem`s cuesta (recorre rutas y nombres), así que no se
+  /// hace en cada tick de 80 ms: solo cuando llega `EV_QUEUE`/`EV_TRACK` o tras
+  /// una mutación nuestra.
+  void _refreshQueue() {
+    if (_disposed) return;
+    final items = _player.queueItems;
+    final index = _player.queueIndex;
+    if (index == _queueIndex && _sameQueue(items, _queue)) return;
+    _queue = items;
+    _queueIndex = index;
+    _refresh();
+  }
+
+  static bool _sameQueue(List<QueueItem> a, List<QueueItem> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  void _refresh() {
     if (_disposed) return;
     final next = PlayerSnapshot(
       hasTrack: _player.hasTrack,
@@ -109,9 +167,25 @@ class PlayerController extends ChangeNotifier {
       playing: _player.isPlaying,
       busy: _loading != null,
       volume: _volume,
+      repeatMode: _player.repeatMode,
+      shuffle: _player.shuffle,
+      queue: _queue,
+      queueIndex: _queueIndex,
+      queueProtected: _queueProtected,
+      nineDEnabled: _player.nineDEnabled,
+      nineDSpeed: _player.nineDSpeed,
+      nineDDepth: _player.nineDDepth,
+      stereoWidth: _player.stereoWidth,
+      bassPunch: _player.bassPunch,
+      vocalCut: _player.vocalCut,
+      crossfeedEnabled: _player.crossfeedEnabled,
+      crossfeedLevel: _player.crossfeedLevel,
+      nightModeEnabled: _player.nightModeEnabled,
+      nightModeAmount: _player.nightModeAmount,
+      s16Output: _player.s16Output,
       error: _error,
     );
-    if (force || next != _snapshot) {
+    if (next != _snapshot) {
       _snapshot = next;
       notifyListeners();
     }
@@ -122,9 +196,10 @@ class PlayerController extends ChangeNotifier {
   /// Devuelve `null` si fue bien, o el mensaje de error para enseñarlo.
   Future<String?> openFile(String path) async {
     if (_disposed || _loading != null) return null;
-    final future = _player.loadAsync(path);
-    _pendingRestorePosition = null;
-    _restoreStartedAt = null;
+    // Con la cola protegida, `load_add` añade al final y reproduce sin vaciar;
+    // sin ella, `load` deja la cola con esta única pista.
+    final future =
+        _queueProtected ? _player.loadAndPlayAsync(path) : _player.loadAsync(path);
     _loading = future;
     _refresh();
     final ok = await future;
@@ -136,7 +211,8 @@ class PlayerController extends ChangeNotifier {
     } else {
       _error = _player.lastError;
     }
-    _refresh(force: ok);
+    _refreshQueue();
+    _refresh();
     return ok ? null : _error;
   }
 
@@ -165,46 +241,21 @@ class PlayerController extends ChangeNotifier {
   /// llega por `CH_EVENT_TRACK`, no aquí.
   void next() {
     if (_disposed) return;
-    _pendingRestorePosition = null;
-    _restoreStartedAt = null;
     _player.next();
     _refresh();
   }
 
   /// Pista anterior de la cola.
-  ///
-  /// Si ya se han escuchado más de [_restartThreshold] segundos, primero
-  /// reinicia la pista actual: es lo que espera cualquiera que venga de
-  /// Spotify, Strawberry o Tauon.
   void previous() {
     if (_disposed) return;
-    _pendingRestorePosition = null;
-    _restoreStartedAt = null;
-    if (position.value > _restartThreshold) {
-      seek(0);
-      return;
-    }
     _player.previous();
     _refresh();
   }
 
-  static const double _restartThreshold = 3;
-
-  /// Mueve la posición, siempre dentro de `[0, duración]`.
-  ///
-  /// El acotado vive aquí y no en quien llama porque este es el único punto por
-  /// el que pasan la UI, el canal de medios y cualquier control externo, y la
-  /// duración se consulta al motor en vivo (el snapshot puede estar viejo).
   void seek(double seconds) {
     if (_disposed) return;
-    final duration = _player.duration;
-    var target = seconds.isFinite ? seconds : 0.0;
-    if (target < 0) target = 0;
-    if (duration > 0 && target > duration) target = duration;
-    _player.seek(target);
-    _pendingRestorePosition = null;
-    _restoreStartedAt = null;
-    position.value = target;
+    _player.seek(seconds);
+    position.value = seconds;
     _refresh();
   }
 
@@ -212,11 +263,451 @@ class PlayerController extends ChangeNotifier {
     if (_disposed) return;
     _volume = value.clamp(0, 1).toDouble();
     _player.setVolume(_volume);
+    _audioChanged();
+  }
+
+  /// Fija el modo de repetición (0 apagado, 1 todo, 2 una).
+  void setRepeatMode(int mode) {
+    if (_disposed) return;
+    _player.setRepeatMode(mode);
     _refresh();
   }
 
-  /// Volumen efectivo del motor; puede diferir del pedido si el núcleo acota.
-  double get volume => _player.volume;
+  /// Fija el aleatorio sin alternarlo (lo usa la restauración de sesión).
+  void setShuffle(bool enabled) {
+    if (_disposed) return;
+    _player.setShuffle(enabled);
+    _refresh();
+  }
+
+  /// Cicla el modo de repetición: apagado → todo → una → apagado.
+  void cycleRepeat() {
+    if (_disposed) return;
+    _player.cycleRepeat();
+    _refresh();
+  }
+
+  /// Activa o desactiva la reproducción aleatoria.
+  void toggleShuffle() {
+    if (_disposed) return;
+    _player.toggleShuffle();
+    _refresh();
+  }
+
+  // ---------------------------------------------------------------------
+  // Fase 2: núcleo DSP audiófilo
+  // ---------------------------------------------------------------------
+
+  /// 9D espacial. Solo se envía lo que cambia: `null` deja el valor del motor.
+  void set9D({bool? enabled, double? speed, double? depth}) {
+    if (_disposed) return;
+    _player.set9D(
+      enabled ?? _player.nineDEnabled,
+      speed ?? _player.nineDSpeed,
+      depth ?? _player.nineDDepth,
+    );
+    _audioChanged();
+  }
+
+  void toggle9D() => set9D(enabled: !_player.nineDEnabled);
+
+  /// Potenciador estéreo: ancho (0..2) y punch de graves (0..1).
+  void setStereoEnhance({double? width, double? bassPunch}) {
+    if (_disposed) return;
+    _player.setStereoEnhance(
+      width ?? _player.stereoWidth,
+      bassPunch ?? _player.bassPunch,
+    );
+    _audioChanged();
+  }
+
+  /// Karaoke: 0 apagado, 1 voz fuera (los subgraves se conservan).
+  void setVocalCut(double amount) {
+    if (_disposed) return;
+    _player.setVocalCut(amount);
+    _audioChanged();
+  }
+
+  void toggleVocalCut() => setVocalCut(_player.vocalCut > 0 ? 0 : 0.85);
+
+  void setCrossfeed({bool? enabled, double? level}) {
+    if (_disposed) return;
+    _player.setCrossfeed(
+      enabled ?? _player.crossfeedEnabled,
+      level ?? _player.crossfeedLevel,
+    );
+    _audioChanged();
+  }
+
+  void toggleCrossfeed() =>
+      setCrossfeed(enabled: !_player.crossfeedEnabled);
+
+  void setNightMode({bool? enabled, double? amount}) {
+    if (_disposed) return;
+    _player.setNightMode(
+      enabled ?? _player.nightModeEnabled,
+      amount ?? _player.nightModeAmount,
+    );
+    _audioChanged();
+  }
+
+  void toggleNightMode() =>
+      setNightMode(enabled: !_player.nightModeEnabled);
+
+  /// Salida S16 con dither TPDF (por defecto, f32).
+  void setS16Output(bool enabled) {
+    if (_disposed) return;
+    _player.setS16Output(enabled);
+    _audioChanged();
+  }
+
+  // ---------------------------------------------------------------------
+  // Fase 3: medición, mezcla fina y ajustes que se guardan
+  // ---------------------------------------------------------------------
+
+  /// Niveles de salida para el vúmetro.
+  PlayerLevels levels() => _player.levels();
+
+  /// Espectro de 20 Hz a 20 kHz, `bands` valores 0..1.
+  List<double> spectrum([int bands = 32]) => _player.spectrum(bands);
+
+  double get balance => _player.balance;
+
+  void setBalance(double value) {
+    if (_disposed) return;
+    _player.setBalance(value);
+    _audioChanged();
+  }
+
+  int get channelMode => _player.channelMode;
+
+  void setChannelMode(int mode) {
+    if (_disposed) return;
+    _player.setChannelMode(mode);
+    _audioChanged();
+  }
+
+  bool get replayGainEnabled => _player.replayGainEnabled;
+
+  void setReplayGain(bool enabled) {
+    if (_disposed) return;
+    _player.setReplayGain(enabled);
+    _audioChanged();
+  }
+
+  bool get replayGainAlbum => _player.replayGainAlbum;
+
+  void setReplayGainAlbum(bool album) {
+    if (_disposed) return;
+    _player.setReplayGainAlbum(album);
+    _audioChanged();
+  }
+
+  double get replayGainGainDb => _player.replayGainGainDb;
+
+  double get replayGainPeak => _player.replayGainPeak;
+
+  double get speed => _player.speed;
+
+  void setSpeed(double value) {
+    if (_disposed) return;
+    _player.setSpeed(value);
+    _audioChanged();
+  }
+
+  double get pitch => _player.pitch;
+
+  void setPitch(double semitones) {
+    if (_disposed) return;
+    _player.setPitch(semitones);
+    _audioChanged();
+  }
+
+  double get crossfade => _player.crossfade;
+
+  void setCrossfade(double seconds) {
+    if (_disposed) return;
+    _player.setCrossfade(seconds);
+    _audioChanged();
+  }
+
+  bool get gapless => _player.gapless;
+
+  void setGapless(bool enabled) {
+    if (_disposed) return;
+    _player.setGapless(enabled);
+    _audioChanged();
+  }
+
+  bool get loopActive => _player.loopActive;
+
+  double get loopStart => _player.loopStart;
+
+  double get loopEnd => _player.loopEnd;
+
+  /// Loop A-B en segundos. `end <= start` lo desactiva.
+  void setLoop(double start, double end) {
+    if (_disposed) return;
+    _player.setLoop(start, end);
+    _refresh();
+  }
+
+  void clearLoop() {
+    if (_disposed) return;
+    _player.clearLoop();
+    _refresh();
+  }
+
+  /// Paisaje sonoro bajo la música.
+  SoundscapePreset get soundscape => _player.soundscape;
+
+  double get soundscapeLevel => _player.soundscapeLevel;
+
+  void setSoundscape(SoundscapePreset preset, {double? level}) {
+    if (_disposed) return;
+    _player.setSoundscape(preset, level: level);
+    _audioChanged();
+  }
+
+  /// Cicla los paisajes: off → lluvia → marrón → vinilo → off.
+  void cycleSoundscape() {
+    final next = SoundscapePreset.values[
+        (soundscape.index + 1) % SoundscapePreset.values.length];
+    setSoundscape(next, level: next == SoundscapePreset.off ? 0 : null);
+  }
+
+  // Marcadores
+
+  bool loadMarkers(String path) => _player.loadMarkers(path);
+
+  bool saveMarkers(String path) {
+    final ok = _player.saveMarkers(path);
+    if (ok) _audioChanged();
+    return ok;
+  }
+
+  List<AudioMarker> markersOf(String trackPath) => _player.markersOf(trackPath);
+
+  bool addMarker(String trackPath, double position, String name) {
+    final ok = _player.addMarker(trackPath, position, name);
+    if (ok) _audioChanged();
+    return ok;
+  }
+
+  bool removeMarker(String trackPath, int index) {
+    final ok = _player.removeMarker(trackPath, index);
+    if (ok) _audioChanged();
+    return ok;
+  }
+
+  void clearMarkers(String trackPath) {
+    _player.clearMarkers(trackPath);
+    _audioChanged();
+  }
+
+  /// Marca la posición actual de la pista audible.
+  bool addMarkerHere([String name = '']) {
+    final path = snapshot.queueIndex >= 0 &&
+            snapshot.queueIndex < snapshot.queue.length
+        ? snapshot.queue[snapshot.queueIndex].path
+        : '';
+    if (path.isEmpty) return false;
+    return addMarker(path, position.value, name);
+  }
+
+  // Temporizador, silencio y dispositivo
+
+  void setSleepTimer(double seconds, {double fadeSeconds = 8}) {
+    if (_disposed) return;
+    _player.setSleepTimer(seconds, fadeSeconds: fadeSeconds);
+    _refresh();
+  }
+
+  double get sleepRemaining => _player.sleepRemaining;
+
+  Future<SilenceTrim?> detectSilence(String path, {double thresholdDb = -60}) =>
+      _player.detectSilence(path, thresholdDb: thresholdDb);
+
+  List<AudioDevice> get outputDevices => _player.outputDevices;
+
+  int get outputDevice => _player.outputDevice;
+
+  bool setOutputDevice(int index) {
+    if (_disposed) return false;
+    final ok = _player.setOutputDevice(index);
+    if (ok) _refresh();
+    return ok;
+  }
+
+  int get lyricLineCount => _player.lyricLineCount;
+
+  String get currentLyricLine => _player.currentLyricLine;
+
+  // Análisis y exportación
+
+  Future<double> detectBpm(String path) => _player.detectBpm(path);
+
+  Future<bool> renderWav(
+    String sourcePath,
+    String destinationPath, {
+    double start = 0,
+    double end = 0,
+    bool withDsp = true,
+  }) async {
+    if (_disposed) return false;
+    final ok = await _player.renderWav(
+      sourcePath,
+      destinationPath,
+      start: start,
+      end: end,
+      withDsp: withDsp,
+    );
+    if (_disposed) return ok;
+    if (!ok) _error = _player.lastError;
+    _refresh();
+    return ok;
+  }
+
+  List<CueTrack> readCue(String path) => _player.readCue(path);
+
+  List<CueTrack> parseCue(String text) => _player.parseCue(text);
+
+  /// Ajustes que se guardan en la sesión (decisión del arquitecto,
+  /// 2026-11-21: el DSP vive en `SessionStore`, no en el estado del motor).
+  AudioSettings audioSettings() => AudioSettings(
+        nineDEnabled: _player.nineDEnabled,
+        nineDSpeed: _player.nineDSpeed,
+        nineDDepth: _player.nineDDepth,
+        stereoWidth: _player.stereoWidth,
+        bassPunch: _player.bassPunch,
+        vocalCut: _player.vocalCut,
+        crossfeedEnabled: _player.crossfeedEnabled,
+        crossfeedLevel: _player.crossfeedLevel,
+        nightModeEnabled: _player.nightModeEnabled,
+        nightModeAmount: _player.nightModeAmount,
+        balance: _player.balance,
+        channelMode: _player.channelMode,
+        replayGainEnabled: _player.replayGainEnabled,
+        replayGainAlbum: _player.replayGainAlbum,
+        crossfade: _player.crossfade,
+        gapless: _player.gapless,
+        speed: _player.speed,
+        pitch: _player.pitch,
+        soundscape: _player.soundscape,
+        soundscapeLevel: _player.soundscapeLevel,
+      );
+
+  /// Vuelca unos ajustes al motor con una sola notificación.
+  void applyAudioSettings(AudioSettings settings) {
+    if (_disposed) return;
+    _player.set9D(settings.nineDEnabled, settings.nineDSpeed, settings.nineDDepth);
+    _player.setStereoEnhance(settings.stereoWidth, settings.bassPunch);
+    _player.setVocalCut(settings.vocalCut);
+    _player.setCrossfeed(settings.crossfeedEnabled, settings.crossfeedLevel);
+    _player.setNightMode(settings.nightModeEnabled, settings.nightModeAmount);
+    _player.setBalance(settings.balance);
+    _player.setChannelMode(settings.channelMode);
+    _player.setReplayGain(settings.replayGainEnabled);
+    _player.setReplayGainAlbum(settings.replayGainAlbum);
+    _player.setCrossfade(settings.crossfade);
+    _player.setGapless(settings.gapless);
+    _player.setSpeed(settings.speed);
+    _player.setPitch(settings.pitch);
+    _player.setSoundscape(settings.soundscape, level: settings.soundscapeLevel);
+    _refresh();
+  }
+
+  // ---------------------------------------------------------------------
+  // Cola
+  // ---------------------------------------------------------------------
+
+  /// Salta a la pista `index` de la cola y la reproduce.
+  ///
+  /// Devuelve `false` si el índice no existe o el motor no pudo abrirla.
+  bool playAt(int index) {
+    if (_disposed) return false;
+    if (index < 0 || index >= _player.queueLength) return false;
+    final ok = _player.playAt(index);
+    if (ok) {
+      position.value = 0;
+      _error = null;
+      _loading = null;
+    } else {
+      _error = _player.lastError;
+    }
+    _refreshQueue();
+    _refresh();
+    return ok;
+  }
+
+  /// Añade `path` al final de la cola sin tocar lo que suena.
+  bool enqueue(String path) {
+    if (_disposed) return false;
+    final ok = _player.enqueue(path);
+    _refreshQueue();
+    return ok;
+  }
+
+  /// Inserta `path` justo después de la pista actual.
+  bool playNext(String path) {
+    if (_disposed) return false;
+    final ok = _player.playNext(path);
+    _refreshQueue();
+    return ok;
+  }
+
+  /// Añade al final y reproduce, conservando la cola.
+  Future<bool> loadAndPlay(String path) async {
+    if (_disposed) return false;
+    final ok = await _player.loadAndPlayAsync(path);
+    if (_disposed) return false;
+    if (ok) {
+      position.value = 0;
+      _error = null;
+    } else {
+      _error = _player.lastError;
+    }
+    _refreshQueue();
+    _refresh();
+    return ok;
+  }
+
+  bool moveQueueItem(int from, int to) {
+    if (_disposed) return false;
+    final ok = _player.moveQueueItem(from, to);
+    _refreshQueue();
+    return ok;
+  }
+
+  bool removeQueueItem(int index) {
+    if (_disposed) return false;
+    final ok = _player.removeQueueItem(index);
+    _refreshQueue();
+    _refresh();
+    return ok;
+  }
+
+  void clearQueue() {
+    if (_disposed) return;
+    _player.clearQueue();
+    position.value = 0;
+    _refreshQueue();
+    _refresh();
+  }
+
+  // ---------------------------------------------------------------------
+  // Biblioteca
+  // ---------------------------------------------------------------------
+
+  /// Escanea `root` de forma recursiva y cachea el resultado.
+  Future<List<LibraryTrack>> scanDirectory(String root) async {
+    if (_disposed) return const <LibraryTrack>[];
+    final tracks = await _player.scanDirectory(root);
+    if (_disposed) return tracks;
+    _libraryTracks = tracks;
+    notifyListeners();
+    return tracks;
+  }
 
   void setBand(int index, double db) {
     if (_disposed) return;
@@ -226,370 +717,6 @@ class PlayerController extends ChangeNotifier {
   void resetEq() {
     if (_disposed) return;
     _player.resetEq();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Cola y modos de reproducción
-  // ---------------------------------------------------------------------------
-
-  int get queueCount => _player.queueCount;
-
-  int get queueIndex => _player.queueIndex;
-
-  String get currentTrackPath {
-    final index = queueIndex;
-    if (index < 0 || index >= queueCount) return '';
-    return queueItem(index);
-  }
-
-  String queueItem(int index) => _player.queueItem(index);
-
-  int get repeatMode => _player.repeatMode;
-
-  set repeatMode(int mode) {
-    if (_disposed) return;
-    _player.repeatMode = mode;
-    _refresh();
-  }
-
-  bool get shuffle => _player.shuffle;
-
-  set shuffle(bool enabled) {
-    if (_disposed) return;
-    _player.shuffle = enabled;
-    _refresh();
-  }
-
-  void setShuffleSeed(int seed) {
-    if (_disposed) return;
-    _player.setShuffleSeed(seed);
-  }
-
-  bool get gapless => _player.gapless;
-
-  set gapless(bool enabled) {
-    if (_disposed) return;
-    _player.gapless = enabled;
-  }
-
-  double get crossfadeSeconds => _player.crossfadeSeconds;
-
-  set crossfadeSeconds(double seconds) {
-    if (_disposed) return;
-    _player.crossfadeSeconds = seconds;
-  }
-
-  double get speed => _player.speed;
-
-  set speed(double value) {
-    if (_disposed) return;
-    _player.speed = value;
-  }
-
-  double get pitch => _player.pitch;
-
-  set pitch(double value) {
-    if (_disposed) return;
-    _player.pitch = value;
-  }
-
-  /// Añade una pista al final de la cola sin cortar la que suena.
-  bool enqueue(String path) {
-    if (_disposed) return false;
-    final ok = _player.queueAdd(path);
-    if (ok) _refresh();
-    return ok;
-  }
-
-  /// Añade una pista al final de la cola y la reproduce.
-  bool loadAndPlay(String path) {
-    if (_disposed) return false;
-    _pendingRestorePosition = null;
-    _restoreStartedAt = null;
-    final ok = _player.loadAdd(path);
-    if (ok) {
-      position.value = 0;
-      _error = null;
-      _refresh(force: true);
-    }
-    return ok;
-  }
-
-  /// Salta a una pista de la cola. El título nuevo llega por `CH_EVENT_TRACK`.
-  bool playIndex(int index) {
-    if (_disposed) return false;
-    _pendingRestorePosition = null;
-    _restoreStartedAt = null;
-    final ok = _player.playIndex(index);
-    if (ok) position.value = 0;
-    _refresh();
-    return ok;
-  }
-
-  bool queueInsert(int index, String path) {
-    if (_disposed) return false;
-    final ok = _player.queueInsert(index, path);
-    if (ok) _refresh();
-    return ok;
-  }
-
-  bool queueMove(int from, int to) {
-    if (_disposed) return false;
-    final ok = _player.queueMove(from, to);
-    if (ok) _refresh();
-    return ok;
-  }
-
-  bool queueRemove(int index) {
-    if (_disposed) return false;
-    final ok = _player.queueRemove(index);
-    if (ok) _refresh();
-    return ok;
-  }
-
-  bool queueClear() {
-    if (_disposed) return false;
-    final ok = _player.queueClear();
-    if (ok) _refresh();
-    return ok;
-  }
-
-  int queueImport(String path) => _disposed ? -1 : _player.queueImport(path);
-
-  bool queueExport(String path) =>
-      _disposed ? false : _player.queueExport(path);
-
-  void setSleepTimer(double seconds, {double fadeSeconds = 5}) {
-    if (_disposed) return;
-    _player.setSleepTimer(seconds, fadeSeconds: fadeSeconds);
-  }
-
-  double get sleepRemaining => _player.sleepRemaining;
-
-  bool saveState(String path) => _disposed ? false : _player.saveState(path);
-
-  // ---------------------------------------------------------------------------
-  // Medición y DSP
-  // ---------------------------------------------------------------------------
-
-  List<double> get levels => _player.levels;
-
-  List<double> get meterLevels => _player.meterLevels;
-
-  List<double> spectrum(int bands) => _player.spectrum(bands);
-
-  double get eqPreamp => _player.eqPreamp;
-
-  set eqPreamp(double db) {
-    if (_disposed) return;
-    _player.eqPreamp = db;
-  }
-
-  bool setBandGain(int band, double db) =>
-      _disposed ? false : _player.setBandGain(band, db);
-
-  void setLimiter(bool enabled, {double ceilingDb = -1}) {
-    if (_disposed) return;
-    _player.setLimiter(enabled, ceilingDb: ceilingDb);
-  }
-
-  bool get limiter => _player.limiter;
-
-  void setCrossfeed(bool enabled, {double strength = 0.5}) {
-    if (_disposed) return;
-    _player.setCrossfeed(enabled, strength: strength);
-  }
-
-  ({bool enabled, double strength}) get crossfeed => _player.crossfeed;
-
-  double get gainDb => _player.gainDb;
-
-  set gainDb(double db) {
-    if (_disposed) return;
-    _player.gainDb = db;
-  }
-
-  double get stereoWidth => _player.stereoWidth;
-
-  set stereoWidth(double width) {
-    if (_disposed) return;
-    _player.stereoWidth = width;
-  }
-
-  void setTrimSilence(bool enabled, {double thresholdDb = -60}) {
-    if (_disposed) return;
-    _player.setTrimSilence(enabled, thresholdDb: thresholdDb);
-  }
-
-  ({bool enabled, double thresholdDb}) get trimSilence => _player.trimSilence;
-
-  void setReplayGain(bool enabled) {
-    if (_disposed) return;
-    _player.setReplayGain(enabled);
-  }
-
-  double get replayGainGainDb => _player.replayGainGainDb;
-
-  double get replayGainPeak => _player.replayGainPeak;
-
-  void setMono(bool enabled) {
-    if (_disposed) return;
-    _player.setMono(enabled);
-  }
-
-  bool get mono => _player.mono;
-
-  void setAbLoop(double start, double end) {
-    if (_disposed) return;
-    _player.setAbLoop(start, end);
-  }
-
-  void clearAbLoop() {
-    if (_disposed) return;
-    _player.clearAbLoop();
-  }
-
-  ({double start, double end}) get abLoop => _player.abLoop;
-
-  ({double lufs, double peakDb})? analyzeCurrent() =>
-      _disposed ? null : _player.analyzeCurrent();
-
-  double? normalizeCurrent(double targetLufs) =>
-      _disposed ? null : _player.normalizeCurrent(targetLufs);
-
-  double get bufferedSeconds => _player.bufferedSeconds;
-
-  int get bufferUnderflows => _player.bufferUnderflows;
-
-  // ---------------------------------------------------------------------------
-  // Biblioteca, marcadores, CUE y utilidades de archivo
-  // ---------------------------------------------------------------------------
-
-  ({List<String> tracks, int removed})? scanLibrary(String root) {
-    if (_disposed) return null;
-    final result = _player.scanLibrary(root);
-    if (result != null) {
-      _libraryTracks = List.unmodifiable(result.tracks);
-      notifyListeners();
-    }
-    return result;
-  }
-
-  List<TrackMarker> loadMarkers(String path, String track) =>
-      _disposed ? const [] : _player.loadMarkers(path, track);
-
-  bool saveMarkers(String path, String track, List<TrackMarker> markers) =>
-      _disposed ? false : _player.saveMarkers(path, track, markers);
-
-  bool removeMarker(String path, String track, int index) =>
-      _disposed ? false : _player.removeMarker(path, track, index);
-
-  bool clearMarkers(String path, String track) =>
-      _disposed ? false : _player.clearMarkers(path, track);
-
-  CueSheet? readCue(String path) => _disposed ? null : _player.readCue(path);
-
-  List<String> get outputDevices => _player.outputDevices;
-
-  int get outputDevice => _player.outputDevice;
-
-  set outputDevice(int index) {
-    if (_disposed) return;
-    _player.outputDevice = index;
-  }
-
-  ({double lufs, double peakDb, double duration})? scanLoudness(String path) =>
-      _disposed ? null : _player.scanLoudness(path);
-
-  List<double> waveform(String path, int buckets) =>
-      _disposed ? const [] : _player.waveform(path, buckets);
-
-  Future<List<double>> waveformAsync(String path, int buckets) =>
-      _disposed ? Future.value(const []) : _player.waveformAsync(path, buckets);
-
-  String get coreVersion => _player.coreVersion;
-
-  ({double lead, double tail})? detectSilence(
-    String path, {
-    double thresholdDb = -60,
-  }) =>
-      _disposed ? null : _player.detectSilence(path, thresholdDb: thresholdDb);
-
-  // ---------------------------------------------------------------------------
-  // Metadatos completos, letras y carátulas
-  // ---------------------------------------------------------------------------
-
-  String get date => _player.date;
-
-  String get genre => _player.genre;
-
-  String get composer => _player.composer;
-
-  int get trackNumber => _player.trackNumber;
-
-  int get discNumber => _player.discNumber;
-
-  String tag(String key) => _player.tag(key);
-
-  int get sampleRate => _player.sampleRate;
-
-  int get channels => _player.channels;
-
-  int get lyricsCount => _player.lyricsCount;
-
-  String get activeLyricLine => _player.activeLyricLine;
-
-  bool saveCover(int index, String path) =>
-      _disposed ? false : _player.saveCover(index, path);
-
-  // ---------------------------------------------------------------------------
-  // Letras y descarga (servicios Dart; requieren red)
-  // ---------------------------------------------------------------------------
-
-  /// Busca la letra de la pista actual en Lrclib y, si [useAiFallback] y hay un
-  /// [aiEndpoint] configurado, usa IA de respaldo. Devuelve null si no hay.
-  Future<LyricsResult?> fetchLyrics({
-    bool useAiFallback = false,
-    String? aiEndpoint,
-    String? aiApiKey,
-  }) async {
-    final service = LyricsService(aiEndpoint: aiEndpoint, aiApiKey: aiApiKey);
-    return service.fetch(
-      title: _player.title,
-      artist: _player.artist,
-      album: _player.album,
-      durationSeconds: _player.duration,
-      useAiFallback: useAiFallback,
-    );
-  }
-
-  /// Descarga `url` a `destPath`. `referer` opcional. Devuelve el resultado o
-  /// null si falla.
-  Future<DownloadResult?> downloadTrack({
-    required String url,
-    required String destPath,
-    String? referer,
-  }) {
-    final dl = MusicDownloader(jamendoClientId: null);
-    return dl.downloadUrl(url: url, destPath: destPath, referer: referer);
-  }
-
-  /// Restaura el estado y deja la posición en la pista recuperada.
-  double? loadState(String path) {
-    if (_disposed) return null;
-    final seconds = _player.loadState(path);
-    if (seconds == null) return null;
-    var restoredPosition = seconds.isFinite ? seconds : 0.0;
-    if (restoredPosition < 0) restoredPosition = 0;
-    final duration = _player.duration;
-    if (duration > 0 && restoredPosition > duration) {
-      restoredPosition = duration;
-    }
-    _pendingRestorePosition = restoredPosition > 0 ? restoredPosition : null;
-    _restoreStartedAt = restoredPosition > 0 ? DateTime.now() : null;
-    position.value = restoredPosition;
-    _refresh(force: true);
-    return restoredPosition;
   }
 
   @override

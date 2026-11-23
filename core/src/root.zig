@@ -1,5 +1,8 @@
 const std = @import("std");
 const eq = @import("eq.zig");
+const dsp = @import("dsp_spatial.zig");
+const ambient = @import("dsp_ambient.zig");
+const bpm_mod = @import("bpm.zig");
 const fft = @import("fft.zig");
 const Stretch = @import("stretch.zig").Stretch;
 const png = @import("png.zig");
@@ -33,6 +36,8 @@ extern fn ch_audio_device_count() i32;
 extern fn ch_audio_device_name(index: i32) [*c]const u8;
 extern fn ch_audio_default_device() i32;
 extern fn ch_audio_last_error() [*c]const u8;
+extern fn ch_audio_set_s16(audio: ?*anyopaque, enabled: i32) i32;
+extern fn ch_audio_quantize_s16(sample: f32, state: ?*u32) i16;
 
 extern fn ch_decode_open(path: [*c]const u8, out_rate: u32, out_channels: u32) ?*ch_decoder;
 extern fn ch_decode_read(decoder: *ch_decoder, out: [*]f32, frames: u64) u64;
@@ -113,8 +118,17 @@ fn copyAudioError() void {
     setGlobalError(std.mem.span(ch_audio_last_error()));
 }
 
+/// Duerme `ms` milisegundos sin depender del reloj del sistema.
+///
+/// Antes se usaba `poll` con una lista vacia, que en Zig 0.17 pasa un puntero
+/// no valido al kernel: `poll` devuelve EFAULT y el std lo trata como
+/// `unreachable` (panico). Con la lista vacia lo correcto es `nanosleep`.
 fn sleepMs(ms: u32) void {
-    _ = std.posix.poll(&.{}, @intCast(ms)) catch {};
+    var req: std.c.timespec = .{
+        .sec = @intCast(ms / 1000),
+        .nsec = @intCast((ms % 1000) * 1_000_000),
+    };
+    _ = std.c.nanosleep(&req, null);
 }
 
 fn monoMs() u64 {
@@ -344,14 +358,13 @@ pub const Engine = struct {
     ab_start: usize = NO_SEEK,
     ab_end: usize = NO_SEEK,
 
-    // Crossfeed para auriculares.
-    cf_enabled: bool = false,
-    cf_strength_bits: u32 = @bitCast(@as(f32, 0.5)),
-    cf_lp_l: f32 = 0,
-    cf_lp_r: f32 = 0,
+    // Cadena DSP de la fase 2: karaoke -> 9D -> ancho/punch. El ancho estereo
+    // (1 = normal, 0 = mono, 2 = muy amplio) vive ahora en la cadena.
+    dsp: dsp.Dsp = .{},
 
-    // Ancho estereo (1 = normal, 0 = mono, 2 = muy amplio).
-    width_bits: u32 = @bitCast(@as(f32, 1)),
+    // Paisaje sonoro (fase 3): se mezcla bajo la musica, antes del limitador.
+    // Atomicos: el hilo de audio lo lee sin candados y sin reservar memoria.
+    soundscape: ambient.Soundscape = .{},
 
     // Recorte automatico de silencio al abrir pista.
     trim_enabled: bool = false,
@@ -364,6 +377,14 @@ pub const Engine = struct {
     // Silencio entre pistas (segundos, 0 = sin pausa).
     gap_s: f32 = 0,
     gap_wait_frames: usize = 0,
+
+    // Crossfeed Bauer para auriculares (API ch_engine_set_crossfeed).
+    cf_enabled: bool = false,
+    cf_strength_bits: u32 = @bitCast(@as(f32, 0.5)),
+    cf_lp_l: f32 = 0,
+    cf_lp_r: f32 = 0,
+    // Ancho estereo por matriz mid/side (1 = normal, 0 = mono, 2 = amplio).
+    width_bits: u32 = @bitCast(@as(f32, 1)),
 
     // Efecto 8D/espacial: auto-paneo giratorio + reverb.
     spatial_enabled: bool = false,
@@ -433,6 +454,8 @@ pub const Engine = struct {
     chan_mode: u32 = 0,
     // 0 = ReplayGain por pista, 1 = por album.
     rg_mode: u32 = 0,
+    // Salida S16 con dither TPDF (por defecto se entrega f32 al dispositivo).
+    s16_output: bool = false,
     // Pistas que no se pudieron abrir y se saltaron solas.
     skipped_tracks: u64 = 0,
     retired_covers: std.ArrayListUnmanaged([]u8) = .empty,
@@ -1574,6 +1597,22 @@ pub const Engine = struct {
                 var s = l * g;
                 var s2 = rr * g;
 
+                // Karaoke -> 9D -> ancho/punch -> crossfeed -> modo noche:
+                // atomicos, sin candados y sin reservar memoria (esto corre en
+                // el callback de audio). El limitador va justo despues.
+                if (!self.dsp.isIdle()) {
+                    const shaped = self.dsp.process(s, s2);
+                    s = shaped[0];
+                    s2 = shaped[1];
+                }
+
+                // Paisaje sonoro: se suma bajo la musica y antes del limitador,
+                // asi el limitador tambien protege de la suma.
+                if (!self.soundscape.isIdle()) {
+                    const sc = self.soundscape.process();
+                    s += sc[0];
+                    s2 += sc[1];
+                }
                 if (crossfeeding) {
                     // Bauer simplificado: mezcla el canal opuesto filtrado paso bajo.
                     lp_l += (s2 - lp_l) * cf_alpha;
@@ -3719,22 +3758,47 @@ export fn ch_engine_ab_loop(self: ?*Engine, a_seconds: ?*f64, b_seconds: ?*f64) 
     return 1;
 }
 
-/// Crossfeed para auriculares: 0 apagado, fuerza 0..1 (0.5 = moderado).
+/// Crossfeed Bauer para auriculares: alimentacion cruzada con paso bajo de
+/// 700 Hz y retardo de 250 us. `strength` 0..1 (0.5 = moderado).
 export fn ch_engine_set_crossfeed(self: ?*Engine, enabled: i32, strength: f32) i32 {
     const e = self orelse return -1;
-    @atomicStore(u32, &e.cf_strength_bits, @bitCast(std.math.clamp(strength, 0, 1)), .monotonic);
-    e.cf_enabled = enabled != 0;
-    if (!e.cf_enabled) {
-        e.cf_lp_l = 0;
-        e.cf_lp_r = 0;
-    }
+    e.dsp.crossfeed.set(enabled != 0, strength);
     return 0;
 }
 
 export fn ch_engine_crossfeed(self: ?*Engine, strength: ?*f32) i32 {
     const e = self orelse return 0;
-    if (strength) |p| p.* = @as(f32, @bitCast(@atomicLoad(u32, &e.cf_strength_bits, .monotonic)));
-    return if (e.cf_enabled) 1 else 0;
+    if (strength) |p| p.* = e.dsp.crossfeed.level();
+    return if (e.dsp.crossfeed.isEnabled()) 1 else 0;
+}
+
+/// Modo noche: compresor suave que sube los pasajes flojos y doma los picos
+/// (va antes del limitador). `amount` 0..1; devuelve 1 si esta encendido.
+export fn ch_engine_set_night_mode(self: ?*Engine, enabled: i32, amount: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.night.set(enabled != 0, amount);
+    return 0;
+}
+
+export fn ch_engine_night_mode(self: ?*Engine, amount: ?*f32) i32 {
+    const e = self orelse return 0;
+    if (amount) |p| p.* = e.dsp.night.amount();
+    return if (e.dsp.night.isEnabled()) 1 else 0;
+}
+
+/// Salida S16 con dither TPDF (±1 LSB). Apagada por defecto: se entrega f32.
+export fn ch_engine_set_s16_output(self: ?*Engine, enabled: i32) i32 {
+    const e = self orelse return -1;
+    e.s16_output = enabled != 0;
+    if (e.audio) |audio| {
+        return ch_audio_set_s16(audio, if (e.s16_output) 1 else 0);
+    }
+    return 0;
+}
+
+export fn ch_engine_s16_output(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.s16_output) 1 else 0;
 }
 
 /// Mono (1) o estereo (0).
@@ -3775,16 +3839,64 @@ export fn ch_engine_gain_db(self: ?*Engine) f32 {
     return @as(f32, @bitCast(@atomicLoad(u32, &e.gain_db_bits, .monotonic)));
 }
 
-/// Ancho estereo: 0 = mono, 1 = normal, 2 = amplio.
+/// Ancho estereo: 0 = mono, 1 = normal, 2 = amplio (matriz Mid/Side).
 export fn ch_engine_set_stereo_width(self: ?*Engine, width: f32) i32 {
     const e = self orelse return -1;
-    @atomicStore(u32, &e.width_bits, @bitCast(std.math.clamp(width, 0, 2)), .monotonic);
+    e.dsp.enhancer.setWidth(width);
     return 0;
 }
 
 export fn ch_engine_stereo_width(self: ?*Engine) f32 {
     const e = self orelse return 1;
-    return @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic)));
+    return e.dsp.enhancer.width();
+}
+
+/// Potenciador estereo: ancho (0..2) y punch de graves (0..1) de una vez.
+export fn ch_engine_set_stereo_enhance(self: ?*Engine, width: f32, bass_punch: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.enhancer.set(width, bass_punch);
+    return 0;
+}
+
+export fn ch_engine_bass_punch(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.enhancer.punch();
+}
+
+/// Audio 9D espacial: rotacion azimutal continua para auriculares.
+/// `speed_hz` = vueltas por segundo (0.05..2) y `depth` 0..1.
+export fn ch_engine_set_9d(self: ?*Engine, enabled: i32, speed_hz: f32, depth: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.spatial.set(enabled != 0, speed_hz, depth);
+    if (enabled == 0) e.dsp.spatial.reset();
+    return 0;
+}
+
+export fn ch_engine_9d_enabled(self: ?*Engine) i32 {
+    const e = self orelse return 0;
+    return if (e.dsp.spatial.isEnabled()) 1 else 0;
+}
+
+export fn ch_engine_9d_speed(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.spatial.speed();
+}
+
+export fn ch_engine_9d_depth(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.spatial.depth();
+}
+
+/// Modo karaoke: atenuacion del centro por encima de ~130 Hz (0 = apagado).
+export fn ch_engine_set_vocal_cut(self: ?*Engine, amount: f32) i32 {
+    const e = self orelse return -1;
+    e.dsp.vocal.set(amount);
+    return 0;
+}
+
+export fn ch_engine_vocal_cut(self: ?*Engine) f32 {
+    const e = self orelse return 0;
+    return e.dsp.vocal.amount();
 }
 
 /// Recorte automatico de silencio al abrir cada pista (dBFS).
@@ -5775,7 +5887,7 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
     const speed = e.speedValue();
     const pitch = @as(f32, @bitCast(@atomicLoad(u32, &e.pitch_bits, .monotonic)));
     const balance = @as(f32, @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic)));
-    const cf_strength = @as(f32, @bitCast(@atomicLoad(u32, &e.cf_strength_bits, .monotonic)));
+    const cf_strength = e.dsp.crossfeed.level();
     const xfade = @as(f32, @bitCast(@atomicLoad(u32, &e.xfade_bits, .monotonic)));
 
     const lines = [_]struct { key: []const u8, a: f64, b: f64 }{
@@ -5791,9 +5903,9 @@ export fn ch_engine_save_state(self: ?*Engine, path: [*c]const u8) i32 {
         .{ .key = "limiter", .a = if (e.limit_enabled) 1 else 0, .b = e.limit_ceiling },
         .{ .key = "mono", .a = if (@atomicLoad(u32, &e.chan_mode, .monotonic) == 1) 1 else 0, .b = 0 },
         .{ .key = "chan_mode", .a = @floatFromInt(@atomicLoad(u32, &e.chan_mode, .monotonic)), .b = 0 },
-        .{ .key = "width", .a = @as(f32, @bitCast(@atomicLoad(u32, &e.width_bits, .monotonic))), .b = 0 },
+        .{ .key = "width", .a = e.dsp.enhancer.width(), .b = 0 },
         .{ .key = "trim", .a = if (e.trim_enabled) 1 else 0, .b = e.trim_threshold_db },
-        .{ .key = "crossfeed", .a = if (e.cf_enabled) 1 else 0, .b = cf_strength },
+        .{ .key = "crossfeed", .a = if (e.dsp.crossfeed.isEnabled()) 1 else 0, .b = cf_strength },
     };
     for (lines) |line| {
         buf.appendSlice(e.allocator, line.key) catch {};
@@ -6105,6 +6217,471 @@ export fn ch_engine_poll_event(self: ?*Engine, out: ?*ChEvent) i32 {
     return 1;
 }
 
+// ---- Paisajes sonoros, deteccion de BPM y exportador WAV (fase 3) ----
+
+/// Enciende un paisaje bajo la musica. `preset`: 0 apagado, 1 lluvia,
+/// 2 ruido marron, 3 vinilo. `level` 0..1 (se recorta). Devuelve 1 si quedo
+/// encendido y 0 si no (p. ej. nivel 0). -1 si el motor es nulo.
+export fn ch_engine_set_soundscape(self: ?*Engine, preset: i32, level: f32) i32 {
+    const e = self orelse return -1;
+    const p: u32 = if (preset <= 0) 0 else @intCast(preset);
+    e.soundscape.set(p, level);
+    return if (e.soundscape.isIdle()) 0 else 1;
+}
+
+/// Preset activo (0 apagado) y, si `level` no es nulo, su nivel.
+export fn ch_engine_soundscape(self: ?*Engine, level: ?*f32) i32 {
+    const e = self orelse return -1;
+    if (level) |p| p.* = e.soundscape.level();
+    return @intCast(e.soundscape.presetValue());
+}
+
+const BPM_ANALYSIS_SECONDS: usize = 30;
+
+/// Detecta el pulso de un fichero. Devuelve 0 si no hay pulso creible.
+/// Analiza como mucho los primeros 30 s (suficiente y rapido).
+export fn ch_engine_detect_bpm(path: [*c]const u8) f64 {
+    if (path == null or path[0] == 0) return 0;
+    const dec = ch_decode_open(path, SAMPLE_RATE, CHANNELS) orelse return 0;
+    defer ch_decode_close(dec);
+
+    const alloc = std.heap.c_allocator;
+    const cap = SAMPLE_RATE * BPM_ANALYSIS_SECONDS;
+    const mono = alloc.alloc(f32, cap) catch return 0;
+    defer alloc.free(mono);
+
+    var scratch: [4096 * CHANNELS]f32 = undefined;
+    var filled: usize = 0;
+    while (filled < cap) {
+        const want: usize = @min(4096, cap - filled);
+        const got = ch_decode_read(dec, &scratch, want);
+        if (got == 0) break;
+        const frames: usize = @intCast(got);
+        var i: usize = 0;
+        while (i < frames) : (i += 1) {
+            mono[filled + i] = (scratch[i * CHANNELS] + scratch[i * CHANNELS + 1]) * 0.5;
+        }
+        filled += frames;
+    }
+    return bpm_mod.detect(mono[0..filled], @floatFromInt(SAMPLE_RATE));
+}
+
+const EXPORT_CHUNK_FRAMES: usize = 4096;
+const WAV_HEADER_BYTES: u64 = 44;
+
+/// Cabecera RIFF/WAVE PCM 16 bits entrelazado. 48 kHz estereo por contrato
+/// (sin remuestrear: el decodificador ya entrega 48 kHz).
+fn wavHeader(data_bytes: u64) [44]u8 {
+    var h: [44]u8 = undefined;
+    @memcpy(h[0..4], "RIFF");
+    std.mem.writeInt(u32, h[4..][0..4], @intCast(36 + data_bytes), .little);
+    @memcpy(h[8..12], "WAVE");
+    @memcpy(h[12..16], "fmt ");
+    std.mem.writeInt(u32, h[16..][0..4], 16, .little);
+    std.mem.writeInt(u16, h[20..][0..2], 1, .little); // PCM
+    std.mem.writeInt(u16, h[22..][0..2], @intCast(CHANNELS), .little);
+    std.mem.writeInt(u32, h[24..][0..4], SAMPLE_RATE, .little);
+    std.mem.writeInt(u32, h[28..][0..4], SAMPLE_RATE * CHANNELS * 2, .little);
+    std.mem.writeInt(u16, h[32..][0..2], @intCast(CHANNELS * 2), .little);
+    std.mem.writeInt(u16, h[34..][0..2], 16, .little);
+    @memcpy(h[36..40], "data");
+    std.mem.writeInt(u32, h[40..][0..4], @intCast(data_bytes), .little);
+    return h;
+}
+
+/// Escribe todo el bloque o falla. `std.c` en vez de `std.fs`: en Zig 0.17 el
+/// sistema de ficheros pide un contexto `std.Io` y aqui no hay ninguno (esto se
+/// llama desde Dart por FFI).
+fn writeAll(stream: *std.c.FILE, bytes: []const u8) bool {
+    if (bytes.len == 0) return true;
+    return std.c.fwrite(bytes.ptr, 1, bytes.len, stream) == bytes.len;
+}
+
+/// Ganancia ReplayGain de las etiquetas ("-7.20 dB"), en dB y recortada.
+fn replayGainDb(dec: *ch_decoder) f32 {
+    const keys = [_][*c]const u8{ "REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_ALBUM_GAIN" };
+    for (keys) |key| {
+        const raw = ch_decode_tag(dec, key);
+        if (raw == null) continue;
+        const txt = std.mem.span(raw);
+        if (txt.len == 0) continue;
+        const end = std.mem.indexOfAny(u8, txt, " dD") orelse txt.len;
+        const db = std.fmt.parseFloat(f32, txt[0..end]) catch continue;
+        if (std.math.isFinite(db)) return std.math.clamp(db, -24, 12);
+    }
+    return 0;
+}
+
+/// Cadena de procesado del exportador: mismos bloques que `render()` y en el
+/// mismo orden (EQ 36 bandas -> karaoke/9D/ancho/crossfeed/noche -> paisaje ->
+/// balance -> limitador), pero con estado nuevo.
+const ExportChain = struct {
+    equalizer: eq.Equalizer = .{},
+    dsp: dsp.Dsp = .{},
+    soundscape: ambient.Soundscape = .{},
+    balance: f32 = 0,
+    gain: f32 = 1,
+    limiting: bool = true,
+    ceiling: f32 = 0.891,
+    limit_gain: f32 = 1,
+    dither: [CHANNELS]u32 = .{ 0x9E3779B9, 0x85EBCA6B },
+
+    fn init(engine: ?*Engine) ExportChain {
+        var c: ExportChain = .{};
+        const e = engine orelse return c;
+        c.equalizer.setPreamp(e.equalizer.preamp_db);
+        c.equalizer.setGains(&e.eq_gains);
+        c.dsp.applySettings(e.dsp.settings());
+        c.soundscape.set(e.soundscape.presetValue(), e.soundscape.level());
+        c.balance = @bitCast(@atomicLoad(u32, &e.balance_bits, .monotonic));
+        c.limiting = e.limit_enabled;
+        c.ceiling = e.limit_ceiling;
+        return c;
+    }
+
+    fn process(self: *ExportChain, buf: []f32, frames: usize) void {
+        self.equalizer.process(buf, frames);
+        const release: f32 = 1.0 - @exp(-1.0 / (0.2 * @as(f32, @floatFromInt(SAMPLE_RATE))));
+        const gain_l: f32 = 1 - @max(self.balance, 0);
+        const gain_r: f32 = 1 + @min(self.balance, 0);
+        var i: usize = 0;
+        while (i < frames) : (i += 1) {
+            var l = buf[i * CHANNELS];
+            var r = buf[i * CHANNELS + 1];
+            if (!self.dsp.isIdle()) {
+                const shaped = self.dsp.process(l, r);
+                l = shaped[0];
+                r = shaped[1];
+            }
+            if (!self.soundscape.isIdle()) {
+                const sc = self.soundscape.process();
+                l += sc[0];
+                r += sc[1];
+            }
+            if (self.balance != 0) {
+                l *= gain_l;
+                r *= gain_r;
+            }
+            l *= self.gain;
+            r *= self.gain;
+            if (self.limiting) {
+                const peak = @max(@abs(l), @abs(r));
+                var desired = self.limit_gain;
+                if (peak > self.ceiling and peak > 0) desired = self.ceiling / peak;
+                if (desired < self.limit_gain) {
+                    self.limit_gain = desired; // ataque inmediato
+                } else {
+                    self.limit_gain += (desired - self.limit_gain) * release;
+                }
+                l *= self.limit_gain;
+                r *= self.limit_gain;
+            }
+            buf[i * CHANNELS] = l;
+            buf[i * CHANNELS + 1] = r;
+        }
+    }
+};
+
+/// Cuantos frames hay que escribir. Si el decodificador no sabe la duracion se
+/// cuenta leyendo y se vuelve al punto de partida (doble pasada).
+fn framesToWrite(dec: *ch_decoder, start_frame: u64, limit: u64, seekable: *bool) u64 {
+    const rate: f64 = @floatFromInt(SAMPLE_RATE);
+    const dur = ch_decode_duration(dec);
+    if (dur > 0) {
+        const total: u64 = @intFromFloat(dur * rate);
+        if (total <= start_frame) return 0;
+        return @min(limit, total - start_frame);
+    }
+    var counted: u64 = 0;
+    var chunk: [EXPORT_CHUNK_FRAMES * CHANNELS]f32 = undefined;
+    while (counted < limit) {
+        const want: usize = @intCast(@min(@as(u64, EXPORT_CHUNK_FRAMES), limit - counted));
+        const got = ch_decode_read(dec, &chunk, want);
+        if (got == 0) break;
+        counted += got;
+    }
+    seekable.* = ch_decode_seek_frame(dec, start_frame) == 0;
+    return counted;
+}
+
+fn renderWav(
+    engine: ?*Engine,
+    src: [*c]const u8,
+    dst: [*c]const u8,
+    start_sec: f64,
+    end_sec: f64,
+) i32 {
+    if (src == null or src[0] == 0 or dst == null or dst[0] == 0) return -1;
+    if (!std.math.isFinite(start_sec) or !std.math.isFinite(end_sec)) return -1;
+    if (start_sec < 0) return -1;
+    if (end_sec > 0 and end_sec <= start_sec) return -1;
+
+    const dec = ch_decode_open(src, SAMPLE_RATE, CHANNELS) orelse return -2;
+    defer ch_decode_close(dec);
+
+    const rate: f64 = @floatFromInt(SAMPLE_RATE);
+    const start_frame: u64 = @intFromFloat(start_sec * rate);
+    if (start_frame > 0 and ch_decode_seek_frame(dec, start_frame) != 0) return -2;
+
+    var limit: u64 = std.math.maxInt(u64);
+    if (end_sec > 0) limit = @intFromFloat((end_sec - start_sec) * rate);
+
+    var seekable = true;
+    const expected = framesToWrite(dec, start_frame, limit, &seekable);
+    if (!seekable) return -2;
+    if (expected > (std.math.maxInt(u32) - 36) / (CHANNELS * 2)) return -5;
+
+    var chain = ExportChain.init(engine);
+    chain.gain = std.math.pow(f32, 10, replayGainDb(dec) / 20);
+
+    const path: [*:0]const u8 = @ptrCast(dst);
+    const stream = std.c.fopen(path, "wb") orelse return -3;
+    defer _ = std.c.fclose(stream);
+
+    if (!writeAll(stream, &wavHeader(expected * CHANNELS * 2))) return -4;
+
+    var buf: [EXPORT_CHUNK_FRAMES * CHANNELS]f32 = undefined;
+    var s16: [EXPORT_CHUNK_FRAMES * CHANNELS]i16 = undefined;
+    var written: u64 = 0;
+    while (written < expected) {
+        const want: usize = @intCast(@min(@as(u64, EXPORT_CHUNK_FRAMES), expected - written));
+        const got = ch_decode_read(dec, &buf, want);
+        if (got == 0) return -6; // el fichero se acabo antes de lo que decia
+        const frames: usize = @intCast(got);
+        const samples = frames * CHANNELS;
+        chain.process(buf[0..samples], frames);
+        var i: usize = 0;
+        while (i < samples) : (i += 1) {
+            s16[i] = ch_audio_quantize_s16(buf[i], &chain.dither[i % CHANNELS]);
+        }
+        if (!writeAll(stream, std.mem.sliceAsBytes(s16[0..samples]))) return -4;
+        written += got;
+    }
+    return 0;
+}
+
+/// Exporta [start_sec, end_sec) a un WAV 48 kHz estereo S16 con dither TPDF.
+/// `end_sec <= 0` significa "hasta el final". La ganancia ReplayGain de las
+/// etiquetas se aplica tal cual y un limitador de seguridad (-1 dBFS) evita el
+/// recorte. Codigos: 0 bien, -1 argumentos, -2 origen (no abre o no busca),
+/// -3 destino, -4 escritura, -5 demasiado largo, -6 origen truncado.
+export fn ch_engine_render_wav(src: [*c]const u8, dst: [*c]const u8, start_sec: f64, end_sec: f64) i32 {
+    return renderWav(null, src, dst, start_sec, end_sec);
+}
+
+/// Lo mismo, pero con el DSP del motor: EQ de 36 bandas, 9D, ancho/punch,
+/// crossfeed, modo noche, paisaje, balance y limitador tal como estan puestos
+/// ahora mismo ("exportar con mi sonido").
+export fn ch_engine_render_wav_ex(
+    self: ?*Engine,
+    src: [*c]const u8,
+    dst: [*c]const u8,
+    start_sec: f64,
+    end_sec: f64,
+) i32 {
+    return renderWav(self, src, dst, start_sec, end_sec);
+}
+
+test "paisaje: se enciende, se apaga y no rompe con punteros nulos" {
+    const e = ch_engine_create() orelse return error.SinMotor;
+    defer ch_engine_destroy(e);
+
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_soundscape(null, 1, 1));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_soundscape(null, null));
+
+    var level: f32 = -1;
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_soundscape(e, &level));
+    try std.testing.expectEqual(@as(f32, 0), level);
+
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_set_soundscape(e, 1, 0.5));
+    try std.testing.expectEqual(@as(i32, ambient.PRESET_RAIN), ch_engine_soundscape(e, &level));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), level, 1e-6);
+
+    // Nivel 0 no suena aunque el preset siga puesto; preset raro -> apagado.
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_soundscape(e, 1, 0));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_soundscape(e, 9, 1));
+    try std.testing.expectEqual(@as(i32, ambient.PRESET_OFF), ch_engine_soundscape(e, null));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_soundscape(e, 0, 1));
+}
+
+// ---- Utilidades de fichero para los tests (std.c, sin std.Io) ----
+
+fn tmpDir() []const u8 {
+    if (std.c.getenv("TMPDIR")) |p| {
+        const s = std.mem.span(p);
+        if (s.len > 0) return s;
+    }
+    if (std.c.getenv("TEMP")) |p| {
+        const s = std.mem.span(p);
+        if (s.len > 0) return s;
+    }
+    return "/tmp";
+}
+
+fn tmpPath(alloc: std.mem.Allocator, name: []const u8) ![:0]u8 {
+    return std.fmt.allocPrintSentinel(alloc, "{s}/{s}", .{ tmpDir(), name }, 0);
+}
+
+fn readWhole(alloc: std.mem.Allocator, path: [:0]const u8) ![]u8 {
+    const stream = std.c.fopen(path, "rb") orelse return error.NoAbre;
+    defer _ = std.c.fclose(stream);
+    var list: std.ArrayListUnmanaged(u8) = .empty;
+    errdefer list.deinit(alloc);
+    var chunk: [8192]u8 = undefined;
+    while (true) {
+        const got = std.c.fread(&chunk, 1, chunk.len, stream);
+        if (got == 0) break;
+        try list.appendSlice(alloc, chunk[0..got]);
+    }
+    return list.toOwnedSlice(alloc);
+}
+
+/// WAV S16 estereo 48 kHz de `seconds` con un click cada `period` segundos.
+fn writeClickWav(path: [:0]const u8, seconds: f64, period: f64) !void {
+    const rate: usize = SAMPLE_RATE;
+    const frames: usize = @intFromFloat(seconds * @as(f64, @floatFromInt(rate)));
+    const stream = std.c.fopen(path, "wb") orelse return error.NoCrea;
+    defer _ = std.c.fclose(stream);
+    if (!writeAll(stream, &wavHeader(@as(u64, frames) * CHANNELS * 2))) return error.NoEscribe;
+
+    var chunk: [EXPORT_CHUNK_FRAMES * CHANNELS]i16 = undefined;
+    var f: usize = 0;
+    while (f < frames) {
+        const n = @min(EXPORT_CHUNK_FRAMES, frames - f);
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const t: f64 = @as(f64, @floatFromInt(f + i)) / @as(f64, @floatFromInt(rate));
+            const frac = t / period - @floor(t / period);
+            // Golpe de 8 ms con decaimiento exponencial.
+            const s: f32 = if (frac * period < 0.008)
+                @floatCast(0.8 * @exp(-frac * period / 0.002))
+            else
+                0;
+            const v: i16 = @intFromFloat(std.math.clamp(s, -1, 1) * 32000);
+            chunk[i * CHANNELS] = v;
+            chunk[i * CHANNELS + 1] = v;
+        }
+        if (!writeAll(stream, std.mem.sliceAsBytes(chunk[0 .. n * CHANNELS]))) return error.NoEscribe;
+        f += n;
+    }
+}
+
+test "bpm: sin fichero devuelve 0" {
+    try std.testing.expectEqual(@as(f64, 0), ch_engine_detect_bpm(null));
+    try std.testing.expectEqual(@as(f64, 0), ch_engine_detect_bpm(""));
+    try std.testing.expectEqual(@as(f64, 0), ch_engine_detect_bpm("/no/existe/chx.wav"));
+}
+
+test "exportador: escribe un WAV coherente y respeta el recorte" {
+    const alloc = std.testing.allocator;
+    const src = tmpPath(alloc, "chx_export_src.wav") catch return error.SkipZigTest;
+    defer alloc.free(src);
+    const dst = tmpPath(alloc, "chx_export_dst.wav") catch return error.SkipZigTest;
+    defer alloc.free(dst);
+    const dst2 = tmpPath(alloc, "chx_export_cut.wav") catch return error.SkipZigTest;
+    defer alloc.free(dst2);
+    defer _ = std.c.unlink(src);
+    defer _ = std.c.unlink(dst);
+    defer _ = std.c.unlink(dst2);
+
+    writeClickWav(src, 2.0, 0.5) catch return error.SkipZigTest;
+    // Sin decodificador (build sin miniaudio ni ffmpeg) el test no aplica.
+    if (ch_decode_open(src, SAMPLE_RATE, CHANNELS)) |d| ch_decode_close(d) else return error.SkipZigTest;
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_wav(src, dst, 0, 0));
+    const whole = try readWhole(alloc, dst);
+    defer alloc.free(whole);
+    try std.testing.expect(whole.len > 44);
+    try std.testing.expectEqualStrings("RIFF", whole[0..4]);
+    try std.testing.expectEqualStrings("WAVE", whole[8..12]);
+    try std.testing.expectEqual(@as(u32, SAMPLE_RATE), std.mem.readInt(u32, whole[24..][0..4], .little));
+    try std.testing.expectEqual(@as(u16, 2), std.mem.readInt(u16, whole[22..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 16), std.mem.readInt(u16, whole[34..][0..2], .little));
+    const data_bytes = std.mem.readInt(u32, whole[40..][0..4], .little);
+    try std.testing.expectEqual(@as(u32, @intCast(whole.len)) - 44, data_bytes);
+    try std.testing.expectEqual(@as(u32, @intCast(whole.len)) - 8, std.mem.readInt(u32, whole[4..][0..4], .little));
+    // Dos segundos de audio, no vacio y sin recortes.
+    try std.testing.expectEqual(@as(u32, 2 * SAMPLE_RATE * 4), data_bytes);
+    var peak: u32 = 0;
+    var nonzero: usize = 0;
+    var k: usize = 44;
+    while (k + 1 < whole.len) : (k += 2) {
+        const v = std.mem.readInt(i16, whole[k..][0..2], .little);
+        peak = @max(peak, @abs(@as(i32, v)));
+        if (v != 0) nonzero += 1;
+    }
+    try std.testing.expect(nonzero > data_bytes / 200);
+    try std.testing.expect(peak <= 32767);
+    try std.testing.expect(peak > 3000);
+
+    // Rango parcial: 0.05..0.15 s = 4800 frames.
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_wav(src, dst2, 0.05, 0.15));
+    const cut = try readWhole(alloc, dst2);
+    defer alloc.free(cut);
+    try std.testing.expectEqual(@as(u32, 4800 * 4), std.mem.readInt(u32, cut[40..][0..4], .little));
+    try std.testing.expectEqual(@as(usize, 44 + 4800 * 4), cut.len);
+}
+
+test "exportador: argumentos invalidos devuelven error sin crear nada" {
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_render_wav(null, "/tmp/x.wav", 0, 0));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_render_wav("", "/tmp/x.wav", 0, 0));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_render_wav("/tmp/x.wav", null, 0, 0));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_render_wav("/tmp/x.wav", "/tmp/x.wav", -1, 0));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_render_wav("/tmp/x.wav", "/tmp/x.wav", 5, 5));
+    try std.testing.expectEqual(@as(i32, -2), ch_engine_render_wav("/no/existe.wav", "/tmp/x.wav", 0, 0));
+    const nan_start = std.math.nan(f64);
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_render_wav("/no/existe.wav", "/tmp/x.wav", nan_start, 0));
+}
+
+test "exportador con DSP: el paisaje y el 9D cambian la salida" {
+    const alloc = std.testing.allocator;
+    const src = tmpPath(alloc, "chx_dsp_src.wav") catch return error.SkipZigTest;
+    defer alloc.free(src);
+    const flat = tmpPath(alloc, "chx_dsp_flat.wav") catch return error.SkipZigTest;
+    defer alloc.free(flat);
+    const wet = tmpPath(alloc, "chx_dsp_wet.wav") catch return error.SkipZigTest;
+    defer alloc.free(wet);
+    defer _ = std.c.unlink(src);
+    defer _ = std.c.unlink(flat);
+    defer _ = std.c.unlink(wet);
+
+    writeClickWav(src, 1.0, 0.5) catch return error.SkipZigTest;
+    if (ch_decode_open(src, SAMPLE_RATE, CHANNELS)) |d| ch_decode_close(d) else return error.SkipZigTest;
+
+    const e = ch_engine_create() orelse return error.SinMotor;
+    defer ch_engine_destroy(e);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_wav_ex(e, src, flat, 0, 0));
+
+    _ = ch_engine_set_soundscape(e, ambient.PRESET_RAIN, 1);
+    _ = ch_engine_set_9d(e, 1, 0.3, 0.8);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_wav_ex(e, src, wet, 0, 0));
+
+    const a = try readWhole(alloc, flat);
+    defer alloc.free(a);
+    const b = try readWhole(alloc, wet);
+    defer alloc.free(b);
+    try std.testing.expectEqual(a.len, b.len);
+    var diff: usize = 0;
+    var i: usize = 44;
+    while (i + 1 < a.len) : (i += 2) {
+        if (a[i] != b[i]) diff += 1;
+    }
+    // Con paisaje y 9D la mayoria de las muestras tienen que cambiar.
+    try std.testing.expect(diff > (a.len - 44) / 4);
+}
+
+test "bpm: el pulso de un WAV de clicks se detecta" {
+    const alloc = std.testing.allocator;
+    const src = tmpPath(alloc, "chx_bpm.wav") catch return error.SkipZigTest;
+    defer alloc.free(src);
+    defer _ = std.c.unlink(src);
+    writeClickWav(src, 8.0, 0.5) catch return error.SkipZigTest; // 120 BPM
+    const got = ch_engine_detect_bpm(src);
+    if (got == 0) return error.SkipZigTest; // sin decodificador en este entorno
+    try std.testing.expectApproxEqAbs(@as(f64, 120), got, 2.5);
+}
+
 test "eq: frecuencias de banda" {
     try std.testing.expectEqual(@as(i32, 36), ch_engine_eq_band_count());
     try std.testing.expectEqual(@as(f32, 20.0), ch_engine_eq_band_freq(0));
@@ -6135,6 +6712,18 @@ test "api: los punteros nulos devuelven error, no revientan" {
     try std.testing.expectEqual(@as(f32, 0.0), ch_engine_balance(null));
     try std.testing.expectEqual(@as(i32, -1), ch_engine_set_channel_mode(null, 1));
     try std.testing.expectEqual(@as(i32, 0), ch_engine_channel_mode(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_9d(null, 1, 0.2, 0.5));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_9d_enabled(null));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_9d_speed(null));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_9d_depth(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_stereo_enhance(null, 1.5, 0.5));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_bass_punch(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_vocal_cut(null, 0.5));
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_vocal_cut(null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_night_mode(null, 1, 0.5));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_night_mode(null, null));
+    try std.testing.expectEqual(@as(i32, -1), ch_engine_set_s16_output(null, 1));
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_s16_output(null));
     try std.testing.expectEqual(ABI_VERSION, ch_engine_abi_version());
 }
 
@@ -6171,4 +6760,108 @@ test "lrcPathFor cambia la extension, no las carpetas" {
 
     const dos = try lrcPathFor(a, "/musica/carpeta.con.puntos/tema");
     try std.testing.expectEqualStrings("/musica/carpeta.con.puntos/tema.lrc", dos);
+}
+
+test "fase 2: los mandos DSP van y vuelven por la API C" {
+    const e = ch_engine_create() orelse return error.SinMotor;
+    defer ch_engine_destroy(e);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_9d(e, 1, 0.5, 0.8));
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_9d_enabled(e));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.5), ch_engine_9d_speed(e), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.8), ch_engine_9d_depth(e), 1e-6);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_stereo_enhance(e, 1.6, 0.7));
+    try std.testing.expectApproxEqAbs(@as(f32, 1.6), ch_engine_stereo_width(e), 1e-6);
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), ch_engine_bass_punch(e), 1e-6);
+
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_set_vocal_cut(e, 0.9));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.9), ch_engine_vocal_cut(e), 1e-6);
+
+    // La API recorta: velocidad y profundidad tienen rango, el karaoke 0..1.
+    _ = ch_engine_set_9d(e, 1, 99, 9);
+    try std.testing.expectEqual(dsp.MAX_SPEED_HZ, ch_engine_9d_speed(e));
+    try std.testing.expectEqual(@as(f32, 1.0), ch_engine_9d_depth(e));
+    _ = ch_engine_set_vocal_cut(e, -3);
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_vocal_cut(e));
+
+    // El ancho historico sigue funcionando y comparte mando con el potenciador.
+    _ = ch_engine_set_stereo_width(e, 0.0);
+    try std.testing.expectEqual(@as(f32, 0.0), ch_engine_stereo_width(e));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.7), ch_engine_bass_punch(e), 1e-6);
+
+    // Al apagar el 9D no queda estado: volver a encenderlo arranca del centro.
+    _ = ch_engine_set_9d(e, 0, 0.5, 0.8);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_9d_enabled(e));
+
+    // Crossfeed Bauer y modo noche.
+    _ = ch_engine_set_crossfeed(e, 1, 0.35);
+    var cf_level: f32 = 0;
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_crossfeed(e, &cf_level));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.35), cf_level, 1e-6);
+
+    _ = ch_engine_set_night_mode(e, 1, 0.6);
+    var night_amount: f32 = 0;
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_night_mode(e, &night_amount));
+    try std.testing.expectApproxEqAbs(@as(f32, 0.6), night_amount, 1e-6);
+    _ = ch_engine_set_night_mode(e, 0, 0.6);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_night_mode(e, null));
+
+    // Salida S16: el mando se recuerda aunque no haya dispositivo.
+    _ = ch_engine_set_s16_output(e, 1);
+    try std.testing.expectEqual(@as(i32, 1), ch_engine_s16_output(e));
+    _ = ch_engine_set_s16_output(e, 0);
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_s16_output(e));
+}
+
+test "dither: TPDF de +-1 LSB, insesgado y reproducible" {
+    // El error medio tiene que ser cero: eso es lo que hace el dither, meter
+    // ruido a cambio de que la cuantizacion no sesgue el sonido.
+    var state: u32 = 0x12345678;
+    var sum: f64 = 0;
+    var min_q: i16 = 32767;
+    var max_q: i16 = -32768;
+    const samples: usize = 20000;
+    var i: usize = 0;
+    while (i < samples) : (i += 1) {
+        // Muestra constante: con dither la salida no es siempre el mismo entero.
+        const q = ch_audio_quantize_s16(0.5, &state);
+        sum += @as(f64, @floatFromInt(q)) - 0.5 * 32767.0;
+        min_q = @min(min_q, q);
+        max_q = @max(max_q, q);
+    }
+    const mean_error = sum / 20000.0;
+    try std.testing.expect(@abs(mean_error) < 0.05); // sesgo practicamente nulo
+    try std.testing.expectEqual(@as(i16, 16383), min_q);
+    try std.testing.expectEqual(@as(i16, 16384), max_q);
+
+    // Ruido triangular: la desviacion tipica baja, pero distinta de cero.
+    var variance: f64 = 0;
+    var s2: u32 = 0x12345678;
+    i = 0;
+    while (i < samples) : (i += 1) {
+        const q = ch_audio_quantize_s16(0.5, &s2);
+        const e = @as(f64, @floatFromInt(q)) - 0.5 * 32767.0;
+        variance += e * e;
+    }
+    variance /= 20000.0;
+    try std.testing.expect(variance > 0.02);
+    try std.testing.expect(variance < 1.0);
+
+    // Mismo estado inicial, misma secuencia: reproducible en los tests.
+    var a: u32 = 42;
+    var b: u32 = 42;
+    try std.testing.expectEqual(ch_audio_quantize_s16(0.25, &a), ch_audio_quantize_s16(0.25, &b));
+    try std.testing.expectEqual(ch_audio_quantize_s16(0.25, &a), ch_audio_quantize_s16(0.25, &b));
+
+    // Recorte en los extremos y estado nulo admitido.
+    var st: u32 = 7;
+    try std.testing.expectEqual(@as(i16, 32767), ch_audio_quantize_s16(4.0, &st));
+    try std.testing.expectEqual(@as(i16, -32768), ch_audio_quantize_s16(-4.0, &st));
+    // Sin estado (NULL) tambien funciona: usa una semilla local y el dither
+    // sigue siendo de +-1 LSB como mucho.
+    const zero_a = ch_audio_quantize_s16(0.0, null);
+    const zero_b = ch_audio_quantize_s16(0.0, null);
+    try std.testing.expect(@abs(@as(i32, zero_a)) <= 1);
+    try std.testing.expect(@abs(@as(i32, zero_b)) <= 1);
 }

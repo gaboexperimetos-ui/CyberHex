@@ -68,6 +68,14 @@ ch_result ch_engine_crossfeed(ch_engine* engine, float* strength);
 ch_result ch_engine_set_mono(ch_engine* engine, int32_t enabled);
 ch_result ch_engine_mono(ch_engine* engine);
 ch_result ch_engine_set_balance(ch_engine* engine, float balance);
+
+/* Modo noche: compresor RMS suave que sube los pasajes flojos y doma los picos
+   (va antes del limitador). `amount` 0 .. 1; la consulta devuelve 1 si esta on. */
+ch_result ch_engine_set_night_mode(ch_engine* engine, int32_t enabled, float amount);
+ch_result ch_engine_night_mode(ch_engine* engine, float* amount);
+/* Salida S16 con dither TPDF (+-1 LSB). Apagada: se entrega f32 al dispositivo. */
+ch_result ch_engine_set_s16_output(ch_engine* engine, int32_t enabled);
+ch_result ch_engine_s16_output(ch_engine* engine);
 float   ch_engine_balance(ch_engine* engine);
 ch_result ch_engine_set_gain_db(ch_engine* engine, float gain_db); /* -24 .. +24 */
 float   ch_engine_gain_db(ch_engine* engine);
@@ -151,6 +159,28 @@ ch_result ch_engine_normalize_current(ch_engine* engine, double target_lufs, dou
 ch_result ch_engine_album_loudness(ch_engine* engine, double* lufs_out);
 ch_result ch_engine_normalize_album(ch_engine* engine, double target_lufs, double* applied_db);
 ch_result ch_engine_meter(ch_engine* engine, float* peak_l_db, float* peak_r_db, float* rms_db);
+
+/* Audio 9D espacial (auriculares): giro azimutal continuo con ITD <= 0.75 ms,
+   ILD y sombra craneal. speed_hz = vueltas por segundo (0.05 .. 2.0), depth 0 .. 1. */
+ch_result ch_engine_set_9d(ch_engine* engine, int32_t enabled, float speed_hz, float depth);
+ch_result ch_engine_9d_enabled(ch_engine* engine);
+float   ch_engine_9d_speed(ch_engine* engine);
+float   ch_engine_9d_depth(ch_engine* engine);
+
+/* Potenciador estereo: ancho Mid/Side (0 = mono .. 2 = ultra) y realce armonico
+   de graves (0 .. 1) antes del limitador. */
+ch_result ch_engine_set_stereo_enhance(ch_engine* engine, float width, float bass_punch);
+float   ch_engine_bass_punch(ch_engine* engine);
+
+/* Modo karaoke: atenua el centro por encima de ~130 Hz y deja intactos los
+   subgraves. amount 0 (apagado) .. 1 (voz fuera). */
+ch_result ch_engine_set_vocal_cut(ch_engine* engine, float amount);
+float   ch_engine_vocal_cut(ch_engine* engine);
+/* Paisaje sonoro bajo la musica (se mezcla antes del limitador): 0 apagado,
+   1 lluvia, 2 ruido marron, 3 vinilo. level 0 .. 1. No reserva memoria en el
+   hilo de audio y el estado se guarda en la app (SessionStore), no en el motor. */
+ch_result ch_engine_set_soundscape(ch_engine* engine, int32_t preset, float level);
+ch_result ch_engine_soundscape(ch_engine* engine, float* level);
 
 /* Bucle A-B en segundos (a < b). */
 ch_result ch_engine_set_ab_loop(ch_engine* engine, double a_seconds, double b_seconds);
@@ -394,6 +424,23 @@ uint64_t ch_engine_skipped_tracks(ch_engine* engine);
 /* Detecta silencio al principio/fin de un archivo (dBFS). lead/tail en segundos. */
 ch_result ch_engine_detect_silence(const char* utf8_path, float threshold_db, double* lead, double* tail);
 
+/* Pulso del archivo en BPM (60 .. 200). 0 si no hay pulso creible. Analiza
+   como mucho los primeros 30 s; no toca el motor ni el audio en curso. */
+double ch_engine_detect_bpm(const char* utf8_path);
+
+/*
+ * Exporta [start_sec, end_sec) a un WAV 48 kHz estereo S16 con dither TPDF.
+ * end_sec <= 0 = hasta el final. Aplica la ganancia ReplayGain de las etiquetas
+ * y limita a -1 dBFS. La version _ex usa el DSP del motor (EQ de 36 bandas, 9D,
+ * ancho/punch, crossfeed, modo noche, paisaje, balance) tal como esta puesto.
+ * Codigos: 0 bien, -1 argumentos, -2 origen, -3 destino, -4 escritura,
+ * -5 demasiado largo para WAV de 32 bits, -6 origen truncado.
+ */
+int32_t ch_engine_render_wav(const char* utf8_src, const char* utf8_dst,
+                             double start_sec, double end_sec);
+int32_t ch_engine_render_wav_ex(ch_engine* engine, const char* utf8_src, const char* utf8_dst,
+                                double start_sec, double end_sec);
+
 /* Biblioteca de audio: escaneo incremental de carpetas (handle opaco void*). */
 void*     ch_library_create(void);
 void      ch_library_destroy(void* lib);
@@ -442,6 +489,7 @@ ch_result   ch_waveform_peaks(const char* utf8_path, uint32_t buckets, float* ou
 /* Hojas CUE: una imagen de audio dividida en pistas. */
 typedef struct ch_cue ch_cue;
 ch_cue*   ch_cue_read(const char* path);
+ch_cue*   ch_cue_parse(const char* text);
 void      ch_cue_free(ch_cue* cue);
 ch_result   ch_cue_count(const ch_cue* cue);
 const char* ch_cue_album(const ch_cue* cue);

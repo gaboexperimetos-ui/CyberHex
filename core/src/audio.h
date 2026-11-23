@@ -18,6 +18,14 @@ int32_t ch_audio_device_count(void);
 const char* ch_audio_device_name(int32_t index);
 int32_t ch_audio_default_device(void);
 
+/* Salida en enteros de 16 bits con dither TPDF (apagada: f32 directo).
+   Reabre el dispositivo con ma_format_s16; devuelve 0 si todo fue bien. */
+int32_t ch_audio_set_s16(void* audio, int32_t enabled);
+
+/* Cuantiza una muestra f32 a s16 sumando dither triangular de +-1 LSB.
+   `state` es el PRNG del canal: sin candados, solo lo usa el hilo de audio. */
+int16_t ch_audio_quantize_s16(float sample, uint32_t* state);
+
 typedef struct ch_decoder ch_decoder;
 
 ch_decoder* ch_decoder_open(const char* path, uint32_t sample_rate, uint32_t channels);

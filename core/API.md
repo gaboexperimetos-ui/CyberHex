@@ -408,6 +408,55 @@ escritura atómica.
 - `ch_waveform_peaks(path, buckets, out)` devuelve el máximo por tramo en [0..1]
   para dibujar la forma de onda en la UI.
 
+### 9D espacial, potenciador estereo y karaoke
+
+Los tres procesadores son tridimensionales en el sentido de que trabajan sobre
+la imagen estereo, no sobre un solo canal: cadena `karaoke -> 9D -> ancho/punch`,
+siempre despues del ecualizador y antes de crossfeed, balance y limitador.
+Todos los parametros son `std.atomic.Value` (los flotantes viajan como bits en
+un `u32`), no hay candados y `render` no reserva memoria (§8.2: 48 kHz estereo
+fijos).
+
+```c
+/* 9D: giro azimutal continuo para auriculares. */
+ch_engine_set_9d(engine, 1, 0.15f, 0.7f);   /* on, 0.15 vueltas/s, profundidad */
+ch_engine_9d_enabled(engine);               /* 1 */
+ch_engine_9d_speed(engine);                 /* Hz, 0.05 .. 2.0 */
+ch_engine_9d_depth(engine);                 /* 0 .. 1 */
+
+/* Potenciador estereo. */
+ch_engine_set_stereo_enhance(engine, 1.6f, 0.4f); /* ancho 0..2, punch 0..1 */
+ch_engine_bass_punch(engine);
+ch_engine_set_stereo_width(engine, 0.8f);   /* sigue valiendo: comparte ancho */
+
+/* Karaoke. */
+ch_engine_set_vocal_cut(engine, 0.9f);
+ch_engine_vocal_cut(engine);
+```
+
+* **9D** (`src/dsp_spatial.zig`, `Spatial9D`): el frente (`mid`) pasa por una
+  linea de retardo de 38 muestras de la que se leen dos puntos simetricos, de
+  modo que el oido lejano recibe la señal hasta **36 muestras = 0.75 ms**
+  despues (ITD). Encima se aplica ILD de potencia constante (`sqrt(1 -+ pan)`,
+  asi que en el centro no hay caida de nivel) y un pasa-bajos de 3 kHz de
+  **sombra craneal** solo en el oido que se aleja. La fase avanza
+  `speed_hz / 48000` por muestra y da la vuelta completa sin desbordar. Con
+  `depth = 0` la salida es identica a la entrada.
+* **Potenciador** (`StereoEnhancer`): matriz Mid/Side para el ancho y, para el
+  punch, un pasa-bajos de 120 Hz (menos 35 Hz de continua) cuya señal se satura
+  con `tanh`: se suma solo el **residuo armonico**, no el grave entero, de forma
+  que sube la pegada sin inflar el nivel ni disparar el limitador.
+* **Karaoke** (`VocalCut`): separa el centro con dos polos a 130 Hz; por debajo
+  de 130 Hz se deja pasar todo (bombo y bajo intactos) y por arriba se atenua
+  `amount`. Compensa la perdida del filtro (`low * (1 + 0.22 * amount)`) para
+  que el grave no baje al subir el mando.
+
+Tests (`zig build test`): la rotacion separa los canales de un tono mono
+(diferencia media > 0.02 y tramos con la derecha por delante), `depth = 0` es
+identidad exacta, el ancho 0 colapsa a mono y el 2 duplica el lateral, el punch
+genera un 3er armonico a 180 Hz sin perder el fundamental de 60 Hz, y el karaoke
+conserva el 85 % del grave mientras deja la voz de 1 kHz por debajo del 12 %.
+
 ### Ancho, trim y sonoridad
 
 - `ch_engine_set_stereo_width` controla el ancho de la imagen estereofónica
@@ -420,13 +469,109 @@ escritura atómica.
 - `ch_engine_normalize_current(target_lufs)` mide y aplica una ganancia manual
   (limitada a ±24 dB) para alcanzar el objetivo; devuelve la ganancia aplicada.
 
+### Crossfeed Bauer, modo noche y dither TPDF
+
+Tres remates de la cadena, todos en `src/dsp_spatial.zig` salvo el dither, que
+vive en `src/audio.c` porque es el último paso antes del dispositivo.
+
+```c
+/* Crossfeed Bauer (ya existia el simbolo; ahora con retardo y filtro reales). */
+ch_engine_set_crossfeed(engine, 1, 0.4f);
+float level; ch_engine_crossfeed(engine, &level);   /* devuelve 1 si esta on */
+
+/* Modo noche. */
+ch_engine_set_night_mode(engine, 1, 0.7f);
+float amount; ch_engine_night_mode(engine, &amount);
+
+/* Salida S16 con dither (por defecto se entrega f32). */
+ch_engine_set_s16_output(engine, 1);
+ch_engine_s16_output(engine);
+```
+
+* **Crossfeed** (`Crossfeed`): el canal opuesto entra **retardado 12 muestras**
+  (250 µs exactos a 48 kHz) y pasado por un pasa-bajos de 700 Hz, y se mezcla al
+  40-60 % segun `level`. El retardo es lo que evita la suma en fase en el centro
+  (el "sonido pegado a la cabeza"); el filtro deja fuera los agudos, que no
+  cruzan la cabeza. El simbolo C ya existia desde la ABI 3: lo que cambia es el
+  DSP, no la firma.
+* **Modo noche** (`NightMode`): envolvente **RMS** de los dos canales juntos
+  (ataque 2 ms, relajacion 300 ms), umbral -12 dBFS y relacion hasta 4:1, mas
+  una compensacion de +0 a +3.5 dB. Resultado: los pasajes flojos suben y los
+  picos no despiertan a nadie. La ganancia se suaviza a 200 Hz para que no haya
+  escalones. Va antes del limitador, que sigue siendo la ultima red.
+* **Dither TPDF** (`ch_audio_quantize_s16`): cuando el dispositivo se abre en
+  `ma_format_s16` (`ch_audio_set_s16`), el motor renderiza en f32 por trozos de
+  4096 frames y cuantiza sumando la diferencia de **dos uniformes** del PRNG
+  xorshift32: ruido triangular de +-1 LSB, insesgado y descorrelacionado entre
+  canales (un estado por canal, sin candados). El error medio medido es < 0.05
+  LSB y la salida de una muestra constante reparte los valores entre los dos
+  enteros vecinos, que es exactamente lo que se busca.
+
+Tests (`zig build test`): el crossfeed lleva señal de un canal al otro
+atenuada, deja pasar menos del 35 % de un tono de 8 kHz, el modo noche sube un
+pasaje flojo mas de un 30 % y baja un pasaje fuerte mas de un 20 %, y el dither
+es insesgado, reproducible con la misma semilla, recorta en los extremos y
+admite estado NULL.
+
 ### Hojas CUE
 
 `ch_cue_read` parsea un `.cue` (FILE/TRACK/TITLE/PERFORMER/INDEX 01) y resuelve
-el `FILE` relativo a la carpeta del `.cue`. `ch_cue_end` devuelve el inicio de
+el `FILE` relativo a la carpeta del `.cue`. `ch_cue_parse(const char* text)`
+hace lo mismo sobre el texto ya cargado (un `.cue` que llega de un zip, de la
+red o de una intención de compartir); ahí los `FILE` relativos se resuelven
+contra el directorio actual. Las dos variantes comparten el mismo parser en
+`src/cue.c`. `ch_cue_end` devuelve el inicio de
 la pista siguiente, o -1 en la última. Para reproducir una pista: cargar
 `ch_cue_file`, hacer `seek` a `ch_cue_start` y, si hay fin, detener o saltar en
 `ch_cue_end`.
+
+### Paisajes sonoros, BPM y exportador WAV (fase 3)
+
+```c
+/* Paisaje bajo la música: 0 off, 1 lluvia, 2 ruido marrón, 3 vinilo. */
+ch_engine_set_soundscape(engine, 1, 0.6f);   /* 1 si quedó encendido */
+float level;
+int preset = ch_engine_soundscape(engine, &level);   /* 1, y 0.6 en level */
+
+/* Pulso del archivo, sin tocar el motor ni el audio en curso. */
+double bpm = ch_engine_detect_bpm("/musica/tema.flac");  /* 0 si no hay pulso */
+
+/* Exportar a WAV 48 kHz estéreo S16 con dither TPDF. */
+ch_engine_render_wav("/musica/tema.flac", "/tmp/tema.wav", 0.0, 0.0);      /* todo */
+ch_engine_render_wav_ex(engine, "/musica/tema.flac", "/tmp/mio.wav", 10.0, 40.0);
+```
+
+* **Paisajes** (`src/dsp_ambient.zig`, `Soundscape`): lluvia, ruido marrón y
+  vinilo generados por un xorshift32 por canal, **sin reservar memoria** y sin
+  candados (preset y nivel son atómicos). Se suman a la mezcla **después** del
+  crossfeed/modo noche y **antes** del balance y del limitador, así que el
+  limitador también protege la suma. Con preset 0 o nivel 0 el coste es cero
+  (`isIdle` corta el camino). Nivel máximo interno 0.28 para que música + lluvia
+  no se coman el margen; a nivel 1 el RMS ronda 0.06 (-24 dBFS).
+* **BPM** (`src/bpm.zig`): envolvente de energía en tramas de 10 ms, flujo
+  (solo las subidas) suavizado, centrado y normalizado, autocorrelación en el
+  rango 60-200 BPM con prior logarítmico centrado en 120 y refinado parabólico.
+  Analiza como mucho 30 s (≈ 5.7 MB de mezcla mono) y devuelve 0 ante silencio,
+  ruido estacionario o señal demasiado corta; nunca un valor fuera de 60-200.
+  Un pulso a 164 BPM no se confunde con el compás de 82 porque, entre desfases
+  casi igual de buenos, gana el más corto.
+* **Exportador** (`ch_engine_render_wav[_ex]`): decodifica a 48 kHz estéreo (sin
+  remuestrear, contrato §8.2), aplica la ganancia `REPLAYGAIN_TRACK_GAIN` (o
+  `..._ALBUM_GAIN`) de las etiquetas, limita a **-1 dBFS** y escribe PCM S16 con
+  dither TPDF (un estado de PRNG por canal). La variante `_ex` mete además el
+  DSP que tenga puesto el motor: EQ de 36 bandas con su preamp, karaoke, 9D,
+  ancho/punch, crossfeed, modo noche, paisaje y balance, en el mismo orden que
+  `render()`. La cabecera se escribe primero calculando los frames desde la
+  duración del decodificador (si no la sabe, cuenta leyendo y vuelve a empezar),
+  así que no hace falta buscar en el fichero de salida.
+* **Persistencia**: el paisaje **no** se guarda en `ch_engine_save_state`; la
+  app lo conserva en su `SessionStore` (decisión del arquitecto, 2026-11-21).
+
+Tests: paisaje determinista y recortado, BPM con clicks sintéticos de 62 a 198
+BPM y con silencio/ruido, y exportador de extremo a extremo (cabecera RIFF,
+48 kHz, 16 bits, tamaños coherentes, recorte por rango, DSP distinto del plano y
+`-1`/`-2` con argumentos u orígenes inválidos). `zig build smoke` repite el
+camino por el ABI público con audio real.
 
 ### Eventos de reproducción
 

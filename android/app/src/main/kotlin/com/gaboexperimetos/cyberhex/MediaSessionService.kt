@@ -5,21 +5,28 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.bluetooth.BluetoothDevice
+import android.view.KeyEvent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaMetadata
+import android.media.session.MediaSession.Token
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 
@@ -52,6 +59,45 @@ class MediaSessionService : Service() {
         private const val CHANNEL_ID = "cyberhex_playback"
         private const val NOTIFICATION_ID = 0x0C0DE
 
+        /**
+         * Prefijo de los intents que llevan un comando en el `action`. Público
+         * porque el widget y el azulejo lo usan para no tener que exportar
+         * métodos del servicio.
+         */
+        const val ACTION_COMMAND_PREFIX = "com.gaboexperimetos.cyberhex.action.COMMAND."
+
+        /**
+         * Token de la sesión en curso, o `null` si el servicio no está vivo.
+         * Lo lee [CyberHexBrowserService] para enganchar el transporte del
+         * coche; se publica en `onCreate` y se limpia en `onDestroy`.
+         */
+        @Volatile
+        var token: Token? = null
+            private set
+
+        /** Aviso de sesión lista (para que el navegador de medios reconecte). */
+        @Volatile
+        var onSessionReady: ((Token) -> Unit)? = null
+
+        /**
+         * Manda un comando sin que el emisor tenga que saber si el servicio
+         * está vivo: arranca el servicio (ligero, sin primer plano) y el mismo
+         * `onStartCommand` lo despacha. Lo usan widget, azulejo y notificación.
+         */
+        fun sendCommand(context: Context, command: String) {
+            val intent = Intent(context, MediaSessionService::class.java)
+                .setAction(ACTION_COMMAND_PREFIX + command)
+            try {
+                context.startService(intent)
+            } catch (error: Throwable) {
+                // Android 8+ puede vetar startService en segundo plano. No se
+                // usa startForegroundService aquí a propósito: si el comando
+                // no llega a reproducir nada, no habría startForeground y el
+                // sistema mataría el proceso. Se pierde el toque y se anota.
+                Log.w(TAG, "startService rechazado: ${error.message}")
+            }
+        }
+
         /** Arranca el servicio (primer plano si el sistema lo exige). */
         fun start(context: Context) {
             val intent = Intent(context, MediaSessionService::class.java).setAction(ACTION_START)
@@ -75,6 +121,21 @@ class MediaSessionService : Service() {
     private var foregroundStarted = false
     private var pausedForFocus = false
 
+    private var headsetReceiver: BroadcastReceiver? = null
+
+    // Doble y triple pulsación del botón del casco.
+    private val clickHandler = Handler(Looper.getMainLooper())
+    private var clickCount = 0
+    private val clickRunnable = Runnable {
+        val count = clickCount
+        clickCount = 0
+        when (count) {
+            1 -> dispatch(COMMAND_TOGGLE)
+            2 -> dispatch(COMMAND_NEXT)
+            else -> dispatch(COMMAND_PREVIOUS)
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Ciclo de vida
     // -------------------------------------------------------------------------
@@ -88,8 +149,13 @@ class MediaSessionService : Service() {
         session.setSessionActivity(contentPendingIntent())
         session.isActive = true
 
+        // La sesión existe: se publica para el navegador de medios del coche.
+        token = session.sessionToken
+        onSessionReady?.invoke(session.sessionToken)
+
         createNotificationChannel()
         registerNoisyReceiver()
+        registerHeadsetReceiver()
 
         // El puente repinta metadatos/estado en cuanto exista.
         MediaBridge.attach(this)
@@ -113,7 +179,9 @@ class MediaSessionService : Service() {
             }
 
             action != null && action.startsWith(ACTION_PREFIX) -> {
-                dispatch(action.removePrefix(ACTION_PREFIX))
+                // Viene de fuera (widget, azulejo, notificación): puede que
+                // Dart aún no esté escuchando, y entonces hay que abrir la app.
+                dispatch(action.removePrefix(ACTION_PREFIX), external = true)
             }
         }
 
@@ -128,7 +196,13 @@ class MediaSessionService : Service() {
             runCatching { unregisterReceiver(it) }
             noisyReceiver = null
         }
+        headsetReceiver?.let {
+            runCatching { unregisterReceiver(it) }
+            headsetReceiver = null
+        }
+        clickHandler.removeCallbacks(clickRunnable)
         abandonFocus()
+        token = null
 
         if (foregroundStarted) {
             stopForegroundCompat(remove = true)
@@ -151,6 +225,8 @@ class MediaSessionService : Service() {
         metadata = newMetadata
         session.setMetadata(buildMediaMetadata())
         updateNotification()
+        PlaybackCache.save(this, metadata, state)
+        widgetsChanged()
     }
 
     fun onState(newState: PlayerState) {
@@ -174,6 +250,31 @@ class MediaSessionService : Service() {
         } else if (newState.buffering != previous.buffering) {
             updateNotification()
         }
+
+        // Guardar y repintar en cada latido gastaría flash y batería por nada:
+        // el widget avanza con la reproducción, no con el reloj. Basta con
+        // apuntar al cambiar play/pausa o cada [CACHE_STEP_MS] de posición.
+        val cacheNeeded = newState.playing != previous.playing ||
+            (newState.positionMs / CACHE_STEP_MS) != (previous.positionMs / CACHE_STEP_MS)
+        if (cacheNeeded) {
+            PlaybackCache.save(this, metadata, state)
+            widgetsChanged()
+        }
+    }
+
+    /** Repinta widget y azulejo con la instantánea recién guardada. */
+    private fun widgetsChanged() {
+        runCatching { CyberHexWidgetProvider.refreshAll(this) }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // Cargar la clase del azulejo en API < 24 revienta (TileService no
+            // existe): se comprueba antes de nombrarla.
+            runCatching { CyberHexTileService.refresh(this) }
+        }
+    }
+
+    /** Dart pidió cambiar los ajustes de la capa Android (`configure`). */
+    fun onSettingsChanged() {
+        updateNotification()
     }
 
     // -------------------------------------------------------------------------
@@ -192,15 +293,69 @@ class MediaSessionService : Service() {
         override fun onSkipToPrevious() = dispatch(COMMAND_PREVIOUS)
 
         override fun onSeekTo(pos: Long) = MediaBridge.sendSeek(pos)
+
+        /**
+         * Botones del casco y de los auriculares Bluetooth.
+         *
+         * Un clic salta «toggle», **dos clics seguidos → siguiente** y **tres →
+         * anterior**, que es lo que hace la mayoría de reproductores. El
+         * primer clic espera [MULTI_CLICK_DELAY_MS] para saber si viene otro;
+         * ese retardo es el precio de distinguir 1 de 2.
+         */
+        override fun onMediaButtonEvent(mediaButtonIntent: Intent): Boolean {
+            @Suppress("DEPRECATION")
+            val event = mediaButtonIntent.getParcelableExtra(Intent.EXTRA_KEY_EVENT) as? KeyEvent
+                ?: return super.onMediaButtonEvent(mediaButtonIntent)
+            val code = event.keyCode
+            val relevant = code == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE ||
+                code == KeyEvent.KEYCODE_HEADSETHOOK ||
+                code == KeyEvent.KEYCODE_MEDIA_PLAY ||
+                code == KeyEvent.KEYCODE_MEDIA_PAUSE
+            if (!relevant) return super.onMediaButtonEvent(mediaButtonIntent)
+            if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) return true
+
+            clickCount = (clickCount + 1).coerceAtMost(3)
+            clickHandler.removeCallbacks(clickRunnable)
+            clickHandler.postDelayed(clickRunnable, MULTI_CLICK_DELAY_MS)
+            return true
+        }
     }
 
-    private fun dispatch(command: String) {
+    /**
+     * Traduce un comando a la llamada del canal. Si [external] (widget,
+     * azulejo, notificación) y Dart todavía no tiene manejador —la app no se
+     * abrió nunca o el proceso acaba de renacer— no hay a quién mandárselo: se
+     * abre la app, que restaura la sesión y ya recibe los botones.
+     */
+    private fun dispatch(command: String, external: Boolean = false) {
         when (command) {
             COMMAND_PLAY, COMMAND_PAUSE, COMMAND_TOGGLE,
-            COMMAND_NEXT, COMMAND_PREVIOUS -> MediaBridge.sendCommand(command)
+            COMMAND_NEXT, COMMAND_PREVIOUS -> {
+                if (external && !MediaBridge.dartReady) {
+                    Log.i(TAG, "sin Dart para '$command': se abre la app")
+                    openApp()
+                    return
+                }
+                MediaBridge.sendCommand(command)
+            }
+
+            COMMAND_STOP -> shutdownPlayback()
 
             else -> Log.w(TAG, "comando desconocido: $command")
         }
+    }
+
+    /** Abre la actividad principal desde el servicio. */
+    private fun openApp() {
+        runCatching {
+            startActivity(
+                Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+            )
+        }.onFailure { Log.w(TAG, "no se pudo abrir la app", it) }
     }
 
     private fun buildPlaybackState(): PlaybackState {
@@ -331,6 +486,58 @@ class MediaSessionService : Service() {
     }
 
     // -------------------------------------------------------------------------
+    // Auriculares y Bluetooth
+    // -------------------------------------------------------------------------
+
+    /**
+     * Auto-play configurable al conectar.
+     *
+     * `ACTION_HEADSET_PLUG` (cable) y `BluetoothDevice.ACTION_ACL_CONNECTED`
+     * llegan aquí. El de Bluetooth solo se escucha si hay permiso
+     * `BLUETOOTH_CONNECT` (Android 12+; lo pide `MainActivity` al arrancar): sin
+     * él el sistema no lo entrega y registrarlo sería un filtro muerto. Solo se
+     * manda `play` si el usuario lo activó **y** había una
+     * pista en pausa (nunca se arranca de la nada ni se interrumpe lo que ya
+     * suena). `EXTRA_STATE` de la clavija se ignora: en Android moderno llega
+     * `STATE_UNPLUGGED/PLUGGED` sin fiabilidad según el fabricante, y para
+     * desconectar ya está `ACTION_AUDIO_BECOMING_NOISY`.
+     */
+    private fun registerHeadsetReceiver() {
+        if (headsetReceiver != null) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (!MediaSettings.autoPlayOnConnect(this@MediaSessionService)) return
+                if (state.playing) return
+                val cached = PlaybackCache.snapshot(this@MediaSessionService)
+                if (!cached.hasTrack) return
+                Log.d(TAG, "auto-play por ${intent?.action}")
+                MediaBridge.sendCommand(COMMAND_PLAY)
+            }
+        }
+        val filter = IntentFilter().apply {
+            addAction(AudioManager.ACTION_HEADSET_PLUG)
+            if (canWatchBluetooth()) addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
+        headsetReceiver = receiver
+    }
+
+    /**
+     * ¿Podemos recibir `ACTION_ACL_CONNECTED`?
+     *
+     * Desde Android 12 es un broadcast protegido: sin `BLUETOOTH_CONNECT`
+     * concedido no llega nada (R32). Antes de Android 12 no hacía falta.
+     */
+    private fun canWatchBluetooth(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+            PackageManager.PERMISSION_GRANTED
+
+    // -------------------------------------------------------------------------
     // Notificación
     // -------------------------------------------------------------------------
 
@@ -367,7 +574,9 @@ class MediaSessionService : Service() {
         ).joinToString(" · ")
 
         builder
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            // Icono hexagonal propio (adaptive foreground monocromo): el del
+            // sistema (android.R.drawable.ic_media_play) no identificaba la app.
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "CyberHex")
             .setContentText(subtitle)
             .setContentIntent(contentPendingIntent())
@@ -382,32 +591,44 @@ class MediaSessionService : Service() {
 
         decodeArt(track?.art)?.let { builder.setLargeIcon(it) }
 
-        builder.addAction(
-            Notification.Action.Builder(
-                android.R.drawable.ic_media_previous,
-                "Anterior",
-                commandPendingIntent(COMMAND_PREVIOUS, REQUEST_PREVIOUS),
-            ).build(),
-        )
-        builder.addAction(
-            Notification.Action.Builder(
-                if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (playing) "Pausa" else "Reproducir",
-                commandPendingIntent(COMMAND_TOGGLE, REQUEST_TOGGLE),
-            ).build(),
-        )
-        builder.addAction(
-            Notification.Action.Builder(
-                android.R.drawable.ic_media_next,
-                "Siguiente",
-                commandPendingIntent(COMMAND_NEXT, REQUEST_NEXT),
-            ).build(),
-        )
+        // Acciones elegidas por el usuario (SettingsPage → «Notificación»):
+        // anterior / play-pausa / siguiente / cerrar, siempre con play-pausa.
+        val actions = MediaSettings.notificationActions(this)
+        val compact = ArrayList<Int>(3)
+        for (action in actions) {
+            val (icon, label, pending) = when (action) {
+                MediaAction.previous -> Triple(
+                    android.R.drawable.ic_media_previous,
+                    "Anterior",
+                    commandPendingIntent(COMMAND_PREVIOUS, REQUEST_PREVIOUS),
+                )
+
+                MediaAction.toggle -> Triple(
+                    if (playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                    if (playing) "Pausa" else "Reproducir",
+                    commandPendingIntent(COMMAND_TOGGLE, REQUEST_TOGGLE),
+                )
+
+                MediaAction.next -> Triple(
+                    android.R.drawable.ic_media_next,
+                    "Siguiente",
+                    commandPendingIntent(COMMAND_NEXT, REQUEST_NEXT),
+                )
+
+                MediaAction.stop -> Triple(
+                    android.R.drawable.ic_menu_close_clear_cancel,
+                    "Cerrar",
+                    commandPendingIntent(COMMAND_STOP, REQUEST_STOP_ACTION),
+                )
+            }
+            if (compact.size < 3) compact.add(builder.actionCount)
+            builder.addAction(Notification.Action.Builder(icon, label, pending).build())
+        }
 
         builder.setStyle(
             Notification.MediaStyle()
                 .setMediaSession(session.sessionToken)
-                .setShowActionsInCompactView(0, 1, 2),
+                .setShowActionsInCompactView(*compact.toIntArray()),
         )
 
         return builder.build()
@@ -551,16 +772,24 @@ private const val MAX_ART_SIZE = 1024
 
 private const val ACTION_START = "com.gaboexperimetos.cyberhex.action.START"
 private const val ACTION_STOP = "com.gaboexperimetos.cyberhex.action.STOP"
-private const val ACTION_PREFIX = "com.gaboexperimetos.cyberhex.action.COMMAND."
+private const val ACTION_PREFIX = MediaSessionService.ACTION_COMMAND_PREFIX
 
 private const val COMMAND_PLAY = "play"
 private const val COMMAND_PAUSE = "pause"
 private const val COMMAND_TOGGLE = "toggle"
 private const val COMMAND_NEXT = "next"
 private const val COMMAND_PREVIOUS = "previous"
+private const val COMMAND_STOP = "stop"
 
 private const val REQUEST_CONTENT = 1
 private const val REQUEST_STOP = 2
 private const val REQUEST_PREVIOUS = 3
 private const val REQUEST_TOGGLE = 4
 private const val REQUEST_NEXT = 5
+private const val REQUEST_STOP_ACTION = 6
+
+/** Ventana para contar clics del botón del casco (2 = siguiente, 3 = anterior). */
+private const val MULTI_CLICK_DELAY_MS = 420L
+
+/** Cada cuántos ms de posición se vuelca el estado al widget. */
+private const val CACHE_STEP_MS = 5_000L

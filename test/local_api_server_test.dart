@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cyberhex/core/player_api.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/platform/local_api_server.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -15,10 +16,10 @@ void main() {
         ..hasTrack = true
         ..title = 'Canción'
         ..duration = 120
-        ..libraryTracks = const ['/music/cancion.flac'];
+        ..library = [LibraryTrack.fromPath('/music/cancion.flac')];
       final controller = PlayerController(fake);
       controller.pump();
-      controller.scanLibrary('/music');
+      await controller.scanDirectory('/music');
       final api = CyberHexLocalApi(
         controller: controller,
         apiKey: 'secret',
@@ -78,10 +79,10 @@ void main() {
     final fake = FakePlayer()
       ..hasTrack = true
       ..title = 'Tema'
-      ..libraryTracks = const ['/music/tema.mp3'];
+      ..library = [LibraryTrack.fromPath('/music/tema.mp3')];
     final controller = PlayerController(fake);
     controller.pump();
-    controller.scanLibrary('/music');
+    await controller.scanDirectory('/music');
     final api = CyberHexLocalApi(
       controller: controller,
       apiKey: 'secret',

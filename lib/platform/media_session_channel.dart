@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../core/player_api.dart';
 import '../core/player_controller.dart';
 
 /// Puente entre [PlayerController] y el servicio de medios de Android
@@ -12,7 +14,10 @@ import '../core/player_controller.dart';
 ///  * **Dart → Kotlin**: `updateMetadata` cuando cambia la pista o sus
 ///    etiquetas/carátula, `updateState` cuando cambia play/pausa/buffering o
 ///    cambia el **segundo entero** de la posición (throttle de 1 s: la posición
-///    va a 12,5 Hz y no tiene sentido cruzar el canal a ese ritmo).
+///    va a 12,5 Hz y no tiene sentido cruzar el canal a ese ritmo) y
+///    `configure` cuando el usuario cambia el auto-play al conectar o los
+///    botones de la notificación (el lado Kotlin los guarda en
+///    `SharedPreferences` porque también los leen el widget y el azulejo).
 ///  * **Kotlin → Dart**: `play`, `pause`, `toggle`, `next`, `previous`, `seek`
 ///    (segundos), `setVolume` (0..1) y `duck` (bool).
 ///
@@ -135,6 +140,20 @@ class MediaSessionChannel {
     });
   }
 
+  /// Manda los ajustes que la capa Android usa sin la app abierta.
+  ///
+  /// Idempotente: repetirlo con los mismos valores no molesta (Kotlin solo
+  /// repinta si cambió algo).
+  void updateMediaSettings({
+    required bool autoPlayOnConnect,
+    required Iterable<String> notificationActions,
+  }) {
+    _send('configure', <String, Object?>{
+      'autoPlayOnConnect': autoPlayOnConnect,
+      'notificationActions': notificationActions.toList(growable: false),
+    });
+  }
+
   /// Dispara sin esperar: el servicio nunca debe bloquear la UI.
   void _send(String method, [Object? arguments]) {
     if (_disposed) return;
@@ -174,9 +193,8 @@ class MediaSessionChannel {
         _controller.previous();
         return true;
       case 'seek':
-        // El controlador acota con la duración real del motor.
         final seconds = (call.arguments as num?)?.toDouble();
-        if (seconds != null) _controller.seek(seconds);
+        if (seconds != null) _controller.seek(_clampSeek(seconds));
         return true;
       case 'setVolume':
         final value = (call.arguments as num?)?.toDouble();
@@ -189,6 +207,13 @@ class MediaSessionChannel {
         // El servicio puede preguntar por métodos de versiones futuras.
         return false;
     }
+  }
+
+  /// No deja pedir un seek fuera de la pista actual.
+  double _clampSeek(double seconds) {
+    final duration = _controller.snapshot.duration;
+    final max = duration > 0 ? duration : seconds;
+    return seconds.clamp(0.0, max).toDouble();
   }
 
   void _setUserVolume(double value) {

@@ -18,6 +18,7 @@ typedef struct ch_cue ch_cue;
 
 /* Lee `path`; NULL si no se pudo abrir o no hay pistas. */
 ch_cue* ch_cue_read(const char* path);
+ch_cue* ch_cue_parse(const char* text);
 
 /* Libera la hoja. */
 void ch_cue_free(ch_cue* cue);

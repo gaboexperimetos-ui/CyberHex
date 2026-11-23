@@ -25,9 +25,24 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!--
+      Auto-play al conectar auriculares Bluetooth: desde Android 12 el sistema
+      solo entrega BluetoothDevice.ACTION_ACL_CONNECTED con este permiso, así
+      que MainActivity lo pide en runtime junto a POST_NOTIFICATIONS (un solo
+      diálogo; ver requestRuntimePermissions). Si el usuario lo deniega, todo
+      sigue funcionando y el auto-play por Bluetooth simplemente no ocurre (el
+      de la clavija de 3,5 mm no lo necesita).
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!--
+      CyberHexApplication cachea el FlutterEngine (y con él el isolate de Dart y
+      el motor de audio) para que cerrar la app desde "Recientes" no corte la
+      reproducción. MainActivity reutiliza ese motor y no lo destruye.
+    -->
     <application
         android:label="CyberHex"
-        android:name="${applicationName}"
+        android:name=".CyberHexApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -50,7 +65,80 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!--
+              Abrir un audio desde fuera: explorador de archivos, WhatsApp,
+              "Compartir con..." o un enlace content://. MainActivity copia el
+              content:// a cacheDir/shared_audio (el núcleo necesita una ruta
+              POSIX) y se lo pasa a Dart por el canal cyberhex/intent.
+              launchMode="singleTop" ya está puesto: un segundo archivo llega
+              por onNewIntent en vez de crear otra actividad.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="content" android:mimeType="audio/*"/>
+                <data android:scheme="file" android:mimeType="audio/*"/>
+            </intent-filter>
         </activity>
+        <!--
+          Widget de la pantalla de inicio, 4x1 y 4x2. Dos <receiver> porque
+          Android identifica cada widget por su clase; los dos pintan el mismo
+          PlaybackCache y sus botones son PendingIntent al servicio.
+          exported="false": los actualiza el sistema, nadie más.
+        -->
+        <receiver
+            android:name=".CyberHexWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_small_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_small_info" />
+        </receiver>
+        <receiver
+            android:name=".CyberHexWidgetLargeProvider"
+            android:exported="false"
+            android:label="@string/widget_large_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_large_info" />
+        </receiver>
+
+        <!--
+          Azulejo de ajustes rápidos (API 24+). BIND_QUICK_SETTINGS_TILE lo
+          exige el sistema: solo él puede enlazarlo.
+        -->
+        <service
+            android:name=".CyberHexTileService"
+            android:exported="true"
+            android:label="@string/tile_label"
+            android:icon="@drawable/ic_tile_play"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!--
+          Fuente de audio para Android Auto / coches: MediaBrowserService del
+          sistema (sin AndroidX). El transporte lo aporta la MediaSession del
+          MediaSessionService.
+        -->
+        <service
+            android:name=".CyberHexBrowserService"
+            android:exported="true"
+            android:permission="android.permission.BIND_MEDIA_BROWSER_SERVICE">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
         <!--
           Motor de reproducción: mantiene el proceso en primer plano mientras
           suena audio, publica la MediaSession y reenvía los botones (casco,
@@ -64,6 +152,10 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false" />
+        <!-- Android Auto: sin esta declaración el coche no lista a CyberHex. -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

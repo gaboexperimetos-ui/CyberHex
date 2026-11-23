@@ -217,6 +217,7 @@ fn buildLinuxRunner(b: *std.Build, fa: FlutterArtifacts, built_core: core.Core) 
     // Fuentes del runner + registrant de plugins.
     m.addCSourceFile(.{ .file = b.path("linux/runner/main.cc"), .flags = &.{"-std=c++17"} });
     m.addCSourceFile(.{ .file = b.path("linux/runner/my_application.cc"), .flags = &.{"-std=c++17"} });
+    m.addCSourceFile(.{ .file = b.path("linux/runner/mpris_bridge.cc"), .flags = &.{"-std=c++17"} });
     m.addCSourceFile(.{ .file = b.path("linux/flutter/generated_plugin_registrant.cc"), .flags = &.{"-std=c++17"} });
 
     // Plugin `file_selector_linux` (si está en el pub-cache).

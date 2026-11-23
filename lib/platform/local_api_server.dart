@@ -143,35 +143,36 @@ class CyberHexLocalApi {
       'positionSeconds': _controller.position.value,
       'durationSeconds': snapshot.duration,
       'volume': snapshot.volume,
-      'queueCount': _controller.queueCount,
-      'queueIndex': _controller.queueIndex,
-      'repeatMode': _controller.repeatMode,
-      'shuffle': _controller.shuffle,
+      'queueCount': snapshot.queue.length,
+      'queueIndex': snapshot.queueIndex,
+      'repeatMode': snapshot.repeatMode,
+      'shuffle': snapshot.shuffle,
     };
   }
 
   Map<String, Object?> _library(Uri uri) {
     final query = uri.queryParameters['q']?.trim().toLowerCase() ?? '';
     final tracks = _controller.libraryTracks
-        .where((path) {
+        .where((track) {
           return query.isEmpty ||
-              _trackTitle(path).toLowerCase().contains(query);
+              track.title.toLowerCase().contains(query) ||
+              track.path.toLowerCase().contains(query);
         })
-        .map((path) => {'path': path, 'title': _trackTitle(path)})
+        .map((track) => {'path': track.path, 'title': track.title})
         .toList();
     return {'tracks': tracks};
   }
 
-  Map<String, Object?> _queue() => {
-    'items': [
-      for (var i = 0; i < _controller.queueCount; i++)
-        {
-          'path': _controller.queueItem(i),
-          'title': _trackTitle(_controller.queueItem(i)),
-        },
-    ],
-    'index': _controller.queueIndex,
-  };
+  Map<String, Object?> _queue() {
+    final snapshot = _controller.snapshot;
+    return {
+      'items': [
+        for (final item in snapshot.queue)
+          {'path': item.path, 'title': _trackTitle(item.path)},
+      ],
+      'index': snapshot.queueIndex,
+    };
+  }
 
   _ApiResult _command(Map<String, dynamic> body) {
     final action = body['action'];
@@ -217,7 +218,8 @@ class CyberHexLocalApi {
     switch (body['action']) {
       case 'add':
         final path = body['path'];
-        if (path is! String || !_controller.libraryTracks.contains(path)) {
+        if (path is! String ||
+            !_controller.libraryTracks.any((track) => track.path == path)) {
           return const _ApiResult(HttpStatus.badRequest, {
             'error': 'path_must_be_in_scanned_library',
           });
@@ -229,24 +231,20 @@ class CyberHexLocalApi {
         }
       case 'play_index':
         final index = _integer(body['index']);
-        if (index == null || !_controller.playIndex(index)) {
+        if (index == null || !_controller.playAt(index)) {
           return const _ApiResult(HttpStatus.badRequest, {
             'error': 'invalid_queue_index',
           });
         }
       case 'remove':
         final index = _integer(body['index']);
-        if (index == null || !_controller.queueRemove(index)) {
+        if (index == null || !_controller.removeQueueItem(index)) {
           return const _ApiResult(HttpStatus.badRequest, {
             'error': 'invalid_queue_index',
           });
         }
       case 'clear':
-        if (!_controller.queueClear()) {
-          return const _ApiResult(HttpStatus.conflict, {
-            'error': 'queue_clear_failed',
-          });
-        }
+        _controller.clearQueue();
       default:
         return const _ApiResult(HttpStatus.badRequest, {
           'error': 'unsupported_action',

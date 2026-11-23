@@ -149,6 +149,7 @@ void main() {
     addTearDown(controller.dispose);
     final bridge = MediaSessionChannel(controller);
     addTearDown(bridge.dispose);
+    controller.pump(); // la duración llega al snapshot en el primer tick
 
     await fromPlatform('seek', 300.0);
     expect(fake.position, 30);
