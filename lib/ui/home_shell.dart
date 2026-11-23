@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/favorites_store.dart';
+import '../core/home_tab_store.dart';
 import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../core/radio_store.dart';
@@ -33,6 +34,7 @@ class HomeShell extends StatefulWidget {
     required this.theme,
     this.desktop,
     this.connections,
+    this.tabs,
   });
 
   final PlayerController controller;
@@ -40,12 +42,16 @@ class HomeShell extends StatefulWidget {
   final DesktopChannel? desktop;
   final CyberHexConnections? connections;
 
+  /// Se inyecta en las pruebas; en producción el armazón crea el suyo.
+  final HomeTabStore? tabs;
+
   @override
   State<HomeShell> createState() => _HomeShellState();
 }
 
 class _HomeShellState extends State<HomeShell> {
-  int _index = 0;
+  late final HomeTabStore _tabs = widget.tabs ?? HomeTabStore();
+  late final bool _ownsTabs = widget.tabs == null;
 
   late final PlaylistStore _playlists = PlaylistStore();
   late final StatsStore _stats = StatsStore();
@@ -53,9 +59,13 @@ class _HomeShellState extends State<HomeShell> {
   late final LongTrackMemory _longTracks = LongTrackMemory();
   late final RadioStore _radio = RadioStore();
 
+  int get _index => _tabs.tab;
+
   @override
   void initState() {
     super.initState();
+    _tabs.addListener(_onTabChanged);
+    unawaited(_tabs.load());
     // Si se inyectan, las páginas no cargan los almacenes por su cuenta: lo
     // hace el armazón, una sola vez, sin bloquear el primer frame.
     unawaited(_playlists.load());
@@ -64,8 +74,14 @@ class _HomeShellState extends State<HomeShell> {
     unawaited(_longTracks.load());
   }
 
+  void _onTabChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _tabs.removeListener(_onTabChanged);
+    if (_ownsTabs) _tabs.dispose();
     _playlists.dispose();
     _stats.dispose();
     _favorites.dispose();
@@ -75,8 +91,7 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _select(int index) {
-    if (index == _index) return;
-    setState(() => _index = index);
+    _tabs.setTab(index);
   }
 
   void _openPlayer() {

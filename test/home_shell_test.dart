@@ -1,3 +1,4 @@
+import 'package:cyberhex/core/home_tab_store.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/core/theme_controller.dart';
 import 'package:cyberhex/ui/home_shell.dart';
@@ -16,13 +17,15 @@ void main() {
       ..artist = 'Artista';
     final controller = PlayerController(fake);
     final theme = ThemeController();
+    final tabs = HomeTabStore.memory();
     addTearDown(controller.dispose);
     addTearDown(theme.dispose);
+    addTearDown(tabs.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
         theme: theme.themeData,
-        home: HomeShell(controller: controller, theme: theme),
+        home: HomeShell(controller: controller, theme: theme, tabs: tabs),
       ),
     );
     await tester.pumpAndSettle();
@@ -42,6 +45,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(index(), 2);
+    expect(tabs.tab, 2);
 
     await tester.tap(
       find.descendant(
@@ -64,6 +68,30 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('restaura la pestaña guardada de la sesión anterior', (
+    tester,
+  ) async {
+    final controller = PlayerController(FakePlayer());
+    final theme = ThemeController();
+    final tabs = HomeTabStore.memory()..setTab(2);
+    addTearDown(controller.dispose);
+    addTearDown(theme.dispose);
+    addTearDown(tabs.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme.themeData,
+        home: HomeShell(controller: controller, theme: theme, tabs: tabs),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final index = tester.widget<IndexedStack>(find.byType(IndexedStack)).index;
+    expect(index, 2);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('en ventana ancha la navegación pasa a barra lateral', (
     tester,
   ) async {
@@ -77,13 +105,15 @@ void main() {
       ..artist = 'Artista';
     final controller = PlayerController(fake);
     final theme = ThemeController();
+    final tabs = HomeTabStore.memory();
     addTearDown(controller.dispose);
     addTearDown(theme.dispose);
+    addTearDown(tabs.dispose);
 
     await tester.pumpWidget(
       MaterialApp(
         theme: theme.themeData,
-        home: HomeShell(controller: controller, theme: theme),
+        home: HomeShell(controller: controller, theme: theme, tabs: tabs),
       ),
     );
     await tester.pumpAndSettle();
@@ -103,6 +133,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(index(), 1);
+    expect(tabs.tab, 1);
 
     await tester.pumpWidget(const SizedBox());
   });
