@@ -1,12 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- Launch screen CyberHex: fondo #0F0F23 (azul noche) con hexágono centrado en acento cyberpunk rosa -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
-
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <item android:drawable="@color/launch_background_color" />
+    <item android:gravity="center">
+        <vector
+            android:width="96dp"
+            android:height="96dp"
+            android:viewportWidth="108"
+            android:viewportHeight="108">
+            <path
+                android:pathData="M54,20 L82,36 L82,72 L54,88 L26,72 L26,36 Z"
+                android:fillColor="#0F0F23"
+                android:strokeColor="#F472B6"
+                android:strokeWidth="4" />
+            <path
+                android:pathData="M47,38 L70,54 L47,70 Z"
+                android:fillColor="#F472B6" />
+        </vector>
+    </item>
 </layer-list>

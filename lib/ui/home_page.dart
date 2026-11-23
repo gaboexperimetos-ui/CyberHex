@@ -12,6 +12,7 @@ import '../core/stats_store.dart';
 import '../core/theme_controller.dart';
 import '../theme.dart';
 import 'hex_cover.dart';
+import 'hex_grid.dart';
 import 'search_sheet.dart';
 
 /// Pestaña de inicio: el punto de entrada de la app.
@@ -99,85 +100,91 @@ class HomePage extends StatelessWidget {
                     stops: const <double>[0, 0.45],
                   ),
                 ),
-                child: SafeArea(
-                  bottom: false,
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
-                    children: [
-                      _Header(palette: palette, onSearch: openSearch),
-                      const SizedBox(height: 20),
-                      _ContinueCard(
-                        snapshot: snapshot,
-                        position: controller.position,
-                        palette: palette,
-                        onOpen: onOpenPlayer,
-                        onToggle: controller.toggle,
-                        onOpenLibrary: onOpenLibrary,
+                child: Stack(
+                  children: [
+                    // Patrón hexagonal sutil detrás del contenido.
+                    HexGridBackground(palette: palette),
+                    SafeArea(
+                      bottom: false,
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
+                        children: [
+                          _Header(palette: palette, onSearch: openSearch),
+                          const SizedBox(height: 20),
+                          _ContinueCard(
+                            snapshot: snapshot,
+                            position: controller.position,
+                            palette: palette,
+                            onOpen: onOpenPlayer,
+                            onToggle: controller.toggle,
+                            onOpenLibrary: onOpenLibrary,
+                          ),
+                          const SizedBox(height: 26),
+                          if (recents.isNotEmpty) ...[
+                            _SectionHeader(
+                              'Sigue escuchando',
+                              palette: palette,
+                              onSeeAll: onOpenStats,
+                            ),
+                            const SizedBox(height: 10),
+                            _RecentRail(
+                              entries: recents,
+                              palette: palette,
+                              onPlay: (path) =>
+                                  unawaited(_play(context, controller, path)),
+                            ),
+                            const SizedBox(height: 26),
+                          ],
+                          if (albums.isNotEmpty) ...[
+                            _SectionHeader(
+                              'Álbumes',
+                              palette: palette,
+                              onSeeAll: onOpenLibrary,
+                            ),
+                            const SizedBox(height: 10),
+                            _AlbumRail(
+                              albums: albums.take(12).toList(growable: false),
+                              palette: palette,
+                              onOpen: (album) => onOpenAlbum!(album.name),
+                            ),
+                            const SizedBox(height: 26),
+                          ],
+                          _SectionTitle('Explorar', palette: palette),
+                          const SizedBox(height: 12),
+                          _Shortcuts(
+                            palette: palette,
+                            onLibrary: onOpenLibrary,
+                            onPlaylists: onOpenPlaylists,
+                            onRadio: onOpenRadio,
+                            onStats: onOpenStats,
+                          ),
+                          if (top.isNotEmpty) ...[
+                            const SizedBox(height: 26),
+                            _SectionHeader(
+                              'Lo que más suena',
+                              palette: palette,
+                              onSeeAll: onOpenStats,
+                            ),
+                            const SizedBox(height: 10),
+                            _TopTracks(
+                              tracks: top,
+                              palette: palette,
+                              onPlay: (path) =>
+                                  unawaited(_play(context, controller, path)),
+                            ),
+                          ],
+                          const SizedBox(height: 26),
+                          _SectionTitle('Tu actividad', palette: palette),
+                          const SizedBox(height: 12),
+                          _ActivityCard(
+                            stats: stats,
+                            palette: palette,
+                            onOpen: onOpenStats,
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 26),
-                      if (recents.isNotEmpty) ...[
-                        _SectionHeader(
-                          'Sigue escuchando',
-                          palette: palette,
-                          onSeeAll: onOpenStats,
-                        ),
-                        const SizedBox(height: 10),
-                        _RecentRail(
-                          entries: recents,
-                          palette: palette,
-                          onPlay: (path) =>
-                              unawaited(_play(context, controller, path)),
-                        ),
-                        const SizedBox(height: 26),
-                      ],
-                      if (albums.isNotEmpty) ...[
-                        _SectionHeader(
-                          'Álbumes',
-                          palette: palette,
-                          onSeeAll: onOpenLibrary,
-                        ),
-                        const SizedBox(height: 10),
-                        _AlbumRail(
-                          albums: albums.take(12).toList(growable: false),
-                          palette: palette,
-                          onOpen: (album) => onOpenAlbum!(album.name),
-                        ),
-                        const SizedBox(height: 26),
-                      ],
-                      _SectionTitle('Explorar', palette: palette),
-                      const SizedBox(height: 12),
-                      _Shortcuts(
-                        palette: palette,
-                        onLibrary: onOpenLibrary,
-                        onPlaylists: onOpenPlaylists,
-                        onRadio: onOpenRadio,
-                        onStats: onOpenStats,
-                      ),
-                      if (top.isNotEmpty) ...[
-                        const SizedBox(height: 26),
-                        _SectionHeader(
-                          'Lo que más suena',
-                          palette: palette,
-                          onSeeAll: onOpenStats,
-                        ),
-                        const SizedBox(height: 10),
-                        _TopTracks(
-                          tracks: top,
-                          palette: palette,
-                          onPlay: (path) =>
-                              unawaited(_play(context, controller, path)),
-                        ),
-                      ],
-                      const SizedBox(height: 26),
-                      _SectionTitle('Tu actividad', palette: palette),
-                      const SizedBox(height: 12),
-                      _ActivityCard(
-                        stats: stats,
-                        palette: palette,
-                        onOpen: onOpenStats,
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
