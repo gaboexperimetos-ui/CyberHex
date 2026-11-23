@@ -595,7 +595,7 @@ class MediaSessionService : Service() {
         // anterior / play-pausa / siguiente / cerrar, siempre con play-pausa.
         val actions = MediaSettings.notificationActions(this)
         val compact = ArrayList<Int>(3)
-        for (action in actions) {
+        for ((index, action) in actions.withIndex()) {
             val (icon, label, pending) = when (action) {
                 MediaAction.previous -> Triple(
                     android.R.drawable.ic_media_previous,
@@ -621,7 +621,7 @@ class MediaSessionService : Service() {
                     commandPendingIntent(COMMAND_STOP, REQUEST_STOP_ACTION),
                 )
             }
-            if (compact.size < 3) compact.add(builder.actionCount)
+            if (compact.size < 3) compact.add(index)
             builder.addAction(Notification.Action.Builder(icon, label, pending).build())
         }
 

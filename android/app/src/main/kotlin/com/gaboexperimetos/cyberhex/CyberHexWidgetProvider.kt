@@ -97,12 +97,7 @@ open class CyberHexWidgetProvider : AppWidgetProvider() {
         val max = duration.coerceAtMost(24L * 60 * 60 * 1000).toInt()
         if (max > 0) {
             val progress = cached.positionMs.coerceIn(0L, max.toLong()).toInt()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                views.setProgressBar(R.id.widget_progress, max, progress, false)
-            } else {
-                @Suppress("DEPRECATION")
-                views.setProgressBar(R.id.widget_progress, max, progress)
-            }
+            views.setProgressBar(R.id.widget_progress, max, progress, false)
         } else {
             views.setViewVisibility(R.id.widget_progress, View.INVISIBLE)
         }

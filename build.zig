@@ -188,8 +188,9 @@ fn buildLinuxRunner(b: *std.Build, fa: FlutterArtifacts, built_core: core.Core) 
     });
     const m = exe.root_module;
 
-    // Flags de pkg-config (includes + libs) para GTK/glib/gio.
-    const gtk_cflags = pkgConfigCFlags(b, "gtk+-3.0 glib-2.0 gio-2.0");
+    // Flags de pkg-config (includes + libs) para GTK/glib/gio y libsecret
+    // (dependencia de flutter_secure_storage_linux).
+    const gtk_cflags = pkgConfigCFlags(b, "gtk+-3.0 glib-2.0 gio-2.0 libsecret-1");
 
     // includes de gtk/glib como include paths del módulo.
     for (gtk_cflags) |f| {
@@ -220,12 +221,23 @@ fn buildLinuxRunner(b: *std.Build, fa: FlutterArtifacts, built_core: core.Core) 
     m.addCSourceFile(.{ .file = b.path("linux/runner/mpris_bridge.cc"), .flags = &.{"-std=c++17"} });
     m.addCSourceFile(.{ .file = b.path("linux/flutter/generated_plugin_registrant.cc"), .flags = &.{"-std=c++17"} });
 
-    // Plugin `file_selector_linux` (si está en el pub-cache).
-    if (linuxPluginDir(b)) |plugin_dir| {
-        m.addCSourceFile(.{ .file = absPath(b, plugin_dir, "file_selector_plugin.cc"), .flags = &.{"-std=c++17"} });
-        m.addCSourceFile(.{ .file = absPath(b, plugin_dir, "messages.g.cc"), .flags = &.{"-std=c++17"} });
-        m.addIncludePath(absPath(b, plugin_dir, "include"));
-        m.addIncludePath(.{ .cwd_relative = plugin_dir });
+    // Plugins de Linux en el pub-cache: `file_selector_linux` y
+    // `flutter_secure_storage_linux`. Sin este segundo el registrant no
+    // compila porque su cabecera no está en el include path.
+    for ([_][]const u8{ "file_selector_linux", "flutter_secure_storage_linux" }) |plugin_name| {
+        if (linuxPluginDirFor(b, plugin_name)) |plugin_dir| {
+            m.addIncludePath(absPath(b, plugin_dir, "include"));
+            m.addIncludePath(.{ .cwd_relative = plugin_dir });
+            // Solo file_selector trae fuentes propias que compilar aquí.
+            if (std.mem.eql(u8, plugin_name, "file_selector_linux")) {
+                m.addCSourceFile(.{ .file = absPath(b, plugin_dir, "file_selector_plugin.cc"), .flags = &.{"-std=c++17"} });
+                m.addCSourceFile(.{ .file = absPath(b, plugin_dir, "messages.g.cc"), .flags = &.{"-std=c++17"} });
+            } else {
+                // El registrant llama a esta función; sin la fuente el enlazado
+                // falla con "undefined symbol".
+                m.addCSourceFile(.{ .file = absPath(b, plugin_dir, "flutter_secure_storage_linux_plugin.cc"), .flags = &.{"-std=c++17"} });
+            }
+        }
     }
 
     // Enlazar motor Flutter + GTK.
@@ -236,6 +248,8 @@ fn buildLinuxRunner(b: *std.Build, fa: FlutterArtifacts, built_core: core.Core) 
     m.linkSystemLibrary("gobject-2.0", .{});
     m.linkSystemLibrary("glib-2.0", .{});
     m.linkSystemLibrary("gio-2.0", .{});
+    // flutter_secure_storage_linux usa libsecret.
+    m.linkSystemLibrary("secret-1", .{});
 
     // RPATH $ORIGIN/lib: el bundle encuentra libcyberhex_core.so y el motor sin
     // LD_LIBRARY_PATH.
@@ -268,16 +282,23 @@ fn absPath(b: *std.Build, base: []const u8, name: []const u8) std.Build.LazyPath
     return .{ .cwd_relative = b.pathJoin(&.{ base, name }) };
 }
 
-/// Directorio del plugin `file_selector_linux` en el pub-cache, si existe.
+/// Directorio de un plugin de Linux en el pub-cache, si existe.
 fn linuxPluginDir(b: *std.Build) ?[]const u8 {
+    return linuxPluginDirFor(b, "file_selector_linux");
+}
+
+/// Igual que `linuxPluginDir` pero para cualquier plugin por nombre.
+fn linuxPluginDirFor(b: *std.Build, plugin_name: []const u8) ?[]const u8 {
     const cfg = std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
         ".dart_tool/package_config.json",
         b.allocator,
         .limited(1 << 20),
     ) catch return null;
+    // El nombre va entre comillas para no casar con prefijos de otros plugins.
+    const needle = b.fmt("\"{s}\"", .{plugin_name});
     var search_from: usize = 0;
-    while (std.mem.indexOfPos(u8, cfg, search_from, "\"file_selector_linux\"")) |i| {
+    while (std.mem.indexOfPos(u8, cfg, search_from, needle)) |i| {
         const window_end = @min(cfg.len, i + 500);
         const window = cfg[i..window_end];
         const ru = std.mem.indexOf(u8, window, "\"rootUri\":") orelse {
