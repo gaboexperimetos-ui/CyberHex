@@ -56,3 +56,8 @@ app.*.map.json
 /core/third_party/ffmpeg-android/
 /core/third_party/ffmpeg.tar.xz
 
+# Zig-only build (root build.zig) artifacts
+/.zig-cache/
+/zig-out/
+/zig-out-*/
+

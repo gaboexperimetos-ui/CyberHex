@@ -52,6 +52,129 @@ typedef _CoverAtDart = Pointer<Uint8> Function(
 typedef _PlainTextNative = Pointer<Utf8> Function();
 typedef _PlainTextDart = Pointer<Utf8> Function();
 
+/// Espejo de `ch_result` (core/include/cyberhex_core.h).
+enum ChResult {
+  ok,
+  noMem,
+  invalidArg,
+  decode,
+  device,
+  io,
+  format,
+  notFound,
+  unsupported,
+  state,
+  busy,
+  cancelled,
+}
+
+/// Convierte un `ChResult` a su código entero C (`ch_result`).
+int chResultToInt(ChResult r) {
+  switch (r) {
+    case ChResult.ok:
+      return 0;
+    case ChResult.noMem:
+      return -1;
+    case ChResult.invalidArg:
+      return -2;
+    case ChResult.decode:
+      return -3;
+    case ChResult.device:
+      return -4;
+    case ChResult.io:
+      return -5;
+    case ChResult.format:
+      return -6;
+    case ChResult.notFound:
+      return -7;
+    case ChResult.unsupported:
+      return -8;
+    case ChResult.state:
+      return -9;
+    case ChResult.busy:
+      return -10;
+    case ChResult.cancelled:
+      return -11;
+  }
+}
+
+/// Devuelve el mensaje legible del núcleo para un código de resultado, o un
+/// mensaje genérico si la función nativa no está disponible.
+String chResultStr(ChResult r) {
+  final fn = _Bindings.instance.resultStr;
+  if (fn == null) {
+    switch (r) {
+      case ChResult.ok:
+        return 'OK';
+      case ChResult.noMem:
+        return 'sin memoria';
+      case ChResult.invalidArg:
+        return 'argumento invalido';
+      case ChResult.decode:
+        return 'error de decodificacion';
+      case ChResult.device:
+        return 'error de dispositivo de audio';
+      case ChResult.io:
+        return 'error de E/S';
+      case ChResult.format:
+        return 'formato no soportado';
+      case ChResult.notFound:
+        return 'no encontrado';
+      case ChResult.unsupported:
+        return 'no soportado';
+      case ChResult.state:
+        return 'estado invalido';
+      case ChResult.busy:
+        return 'dispositivo ocupado';
+      case ChResult.cancelled:
+        return 'cancelado';
+    }
+  }
+  return fn(chResultToInt(r)).toDartString();
+}
+
+/// Lanza [CyberHexException] con el código y mensaje cuando `rc != CH_OK`.
+/// Útil para envolver llamadas nativas que devuelven `ch_result`.
+void chResultRequireOk(int rc, String what) {
+  if (rc != 0) {
+    throw CyberHexException(
+        'falló $what: código ${chResultIntToEnum(rc)} (${chResultStr(chResultIntToEnum(rc))})');
+  }
+}
+
+/// Mapea un código entero C a [ChResult] (valores desconocidos -> cancelled).
+ChResult chResultIntToEnum(int rc) {
+  switch (rc) {
+    case 0:
+      return ChResult.ok;
+    case -1:
+      return ChResult.noMem;
+    case -2:
+      return ChResult.invalidArg;
+    case -3:
+      return ChResult.decode;
+    case -4:
+      return ChResult.device;
+    case -5:
+      return ChResult.io;
+    case -6:
+      return ChResult.format;
+    case -7:
+      return ChResult.notFound;
+    case -8:
+      return ChResult.unsupported;
+    case -9:
+      return ChResult.state;
+    case -10:
+      return ChResult.busy;
+    case -11:
+      return ChResult.cancelled;
+    default:
+      return ChResult.cancelled;
+  }
+}
+
+
 /// Espejo de `ch_event` (core/include/cyberhex_core.h).
 final class _ChEvent extends Struct {
   @Int32()
@@ -130,6 +253,8 @@ typedef _DetectSilenceDart = int Function(
     Pointer<Utf8>, double, Pointer<Double>, Pointer<Double>);
 typedef _TextAtNative = Pointer<Utf8> Function(Pointer<Void>, Int32);
 typedef _TextAtDart = Pointer<Utf8> Function(Pointer<Void>, int);
+typedef _ResultStrNative = Pointer<Utf8> Function(Int32);
+typedef _ResultStrDart = Pointer<Utf8> Function(int);
 typedef _DoubleAtNative = Double Function(Pointer<Void>, Int32);
 typedef _DoubleAtDart = double Function(Pointer<Void>, int);
 typedef _MarkerAddNative = Int32 Function(
@@ -153,6 +278,106 @@ typedef _WaveformNative = Int32 Function(Pointer<Utf8>, Uint32, Pointer<Float>);
 typedef _WaveformDart = int Function(Pointer<Utf8>, int, Pointer<Float>);
 typedef _LoudnessNative = Int32 Function(Pointer<Utf8>, Pointer<_ChLoudness>);
 typedef _LoudnessDart = int Function(Pointer<Utf8>, Pointer<_ChLoudness>);
+
+// --- DSP / efectos avanzados -------------------------------------------------
+typedef _Set8dNative = Int32 Function(Pointer<Void>, Int32, Float, Float);
+typedef _Set8dDart = int Function(Pointer<Void>, int, double, double);
+typedef _EightDNative = Int32 Function(Pointer<Void>, Pointer<Float>, Pointer<Float>);
+typedef _EightDDart = int Function(Pointer<Void>, Pointer<Float>, Pointer<Float>);
+typedef _SetHrtfNative = Int32 Function(Pointer<Void>, Int32, Float);
+typedef _SetHrtfDart = int Function(Pointer<Void>, int, double);
+typedef _HrtfNative = Int32 Function(Pointer<Void>, Pointer<Float>);
+typedef _HrtfDart = int Function(Pointer<Void>, Pointer<Float>);
+typedef _SetReverbNative = Int32 Function(Pointer<Void>, Int32, Float);
+typedef _SetReverbDart = int Function(Pointer<Void>, int, double);
+typedef _ReverbNative = Int32 Function(Pointer<Void>, Pointer<Float>);
+typedef _ReverbDart = int Function(Pointer<Void>, Pointer<Float>);
+typedef _SetCompressorNative = Int32 Function(
+    Pointer<Void>, Int32, Float, Float, Float, Float);
+typedef _SetCompressorDart = int Function(
+    Pointer<Void>, int, double, double, double, double);
+typedef _CompressorNative = Int32 Function(
+    Pointer<Void>, Pointer<Float>, Pointer<Float>);
+typedef _CompressorDart = int Function(
+    Pointer<Void>, Pointer<Float>, Pointer<Float>);
+typedef _SetPeqNative = Int32 Function(
+    Pointer<Void>, Int32, Int32, Int32, Float, Float, Float);
+typedef _SetPeqDart = int Function(
+    Pointer<Void>, int, int, int, double, double, double);
+typedef _PeqNative = Int32 Function(Pointer<Void>, Int32, Pointer<Int32>,
+    Pointer<Float>, Pointer<Float>, Pointer<Float>);
+typedef _PeqDart = int Function(Pointer<Void>, int, Pointer<Int32>,
+    Pointer<Float>, Pointer<Float>, Pointer<Float>);
+
+// --- Exportación / análisis offline ------------------------------------------
+typedef _ExportWavNative = Int32 Function(Pointer<Void>, Pointer<Utf8>,
+    Pointer<Utf8>, Double, Double, Int32, Int32);
+typedef _ExportWavDart = int Function(Pointer<Void>, Pointer<Utf8>,
+    Pointer<Utf8>, double, double, int, int);
+typedef _ConcatWavNative = Int32 Function(
+    Pointer<Void>, Pointer<Pointer<Utf8>>, Int32, Pointer<Utf8>, Int32);
+typedef _ConcatWavDart = int Function(
+    Pointer<Void>, Pointer<Pointer<Utf8>>, int, Pointer<Utf8>, int);
+typedef _SplitSilenceNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Float, Double, Int32);
+typedef _SplitSilenceDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double, double, int);
+typedef _SpectrogramPngNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Int32, Int32);
+typedef _SpectrogramPngDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, int);
+typedef _DoubleOutNative = Int32 Function(Pointer<Void>, Pointer<Double>);
+typedef _DoubleOutDart = int Function(Pointer<Void>, Pointer<Double>);
+typedef _CountSilencesNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Float, Double, Pointer<Double>, Int32);
+typedef _CountSilencesDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, double, double, Pointer<Double>, int);
+typedef _StripSilenceNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Float, Double, Double, Int32);
+typedef _StripSilenceDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double, double, double, int);
+typedef _ExportIntNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _ExportIntDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
+typedef _ExportPngNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Int32, Int32);
+typedef _ExportPngDart = int Function(Pointer<Void>, Pointer<Utf8>, int, int);
+typedef _ExportSpectrumPngNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Int32, Int32, Int32);
+typedef _ExportSpectrumPngDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, int, int, int);
+
+// --- Utilidades --------------------------------------------------------------
+typedef _SetTagNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _SetTagDart = int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>);
+typedef _SetDoubleNative = Int32 Function(Pointer<Void>, Double);
+typedef _SetDoubleDart = int Function(Pointer<Void>, double);
+typedef _DetectKeyNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Uint32, Pointer<Double>);
+typedef _DetectKeyDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, int, Pointer<Double>);
+typedef _KeyCurrentNative = Int32 Function(
+    Pointer<Void>, Pointer<Utf8>, Uint32, Pointer<Double>);
+typedef _KeyCurrentDart = int Function(
+    Pointer<Void>, Pointer<Utf8>, int, Pointer<Double>);
+typedef _SetAutoGainNative = Int32 Function(Pointer<Void>, Int32, Double);
+typedef _SetAutoGainDart = int Function(Pointer<Void>, int, double);
+typedef _LibraryExportNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _LibraryExportDart = int Function(Pointer<Void>, Pointer<Utf8>);
+typedef _LibraryRemoveNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
+typedef _LibraryRemoveDart = int Function(Pointer<Void>, Pointer<Utf8>);
+typedef _EqPresetNameNative = Int32 Function(Int32, Pointer<Utf8>, Int32);
+typedef _EqPresetNameDart = int Function(int, Pointer<Utf8>, int);
+typedef _EqPresetFindNative = Int32 Function(Pointer<Utf8>);
+typedef _EqPresetFindDart = int Function(Pointer<Utf8>);
+typedef _CopyTagsNative = Int32 Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _CopyTagsDart = int Function(Pointer<Utf8>, Pointer<Utf8>);
+typedef _BpmDetectNative = Double Function(Pointer<Utf8>);
+typedef _BpmDetectDart = double Function(Pointer<Utf8>);
+typedef _DrMeasureNative = Double Function(Pointer<Utf8>, Pointer<Uint32>);
+typedef _DrMeasureDart = double Function(Pointer<Utf8>, Pointer<Uint32>);
+typedef _EngineDrNative = Double Function(Pointer<Void>, Pointer<Uint32>);
+typedef _EngineDrDart = double Function(Pointer<Void>, Pointer<Uint32>);
 
 const String _libraryName = 'libcyberhex_core.so';
 
@@ -221,6 +446,10 @@ class NativePlayer extends PlayerApi {
   bool _loaded = false;
   double _duration = 0;
   bool _disposed = false;
+
+  /// Handle perezoso de `ch_library_*` para exportar/gestionar la biblioteca.
+  /// Se crea bajo demanda y se libera en [dispose].
+  Pointer<Void>? _library;
 
   /// Título para mostrar: la etiqueta del archivo si existe, o su nombre.
   @override
@@ -1085,6 +1314,688 @@ class NativePlayer extends PlayerApi {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // DSP / efectos avanzados
+  // ---------------------------------------------------------------------------
+
+  /// Sonido 8D: rotación estéreo. `speed` en Hz y `depth` 0..1.
+  void set8d(bool enabled, {double speed = 1, double depth = 0.5}) =>
+      _bindings.set8d?.call(_engine, enabled ? 1 : 0, speed, depth);
+
+  ({double speed, double depth})? get8d() {
+    final fn = _bindings.get8d;
+    if (fn == null || _disposed) return null;
+    final speed = calloc<Float>();
+    final depth = calloc<Float>();
+    try {
+      if (fn(_engine, speed, depth) != 0) return null;
+      return (speed: speed.value, depth: depth.value);
+    } finally {
+      calloc.free(speed);
+      calloc.free(depth);
+    }
+  }
+
+  /// HRTF: panoramización binaural. `angle` en grados.
+  void setHrtf(bool enabled, {double angle = 0}) =>
+      _bindings.setHrtf?.call(_engine, enabled ? 1 : 0, angle);
+
+  double? getHrtf() {
+    final fn = _bindings.getHrtf;
+    if (fn == null || _disposed) return null;
+    final angle = calloc<Float>();
+    try {
+      if (fn(_engine, angle) != 0) return null;
+      return angle.value;
+    } finally {
+      calloc.free(angle);
+    }
+  }
+
+  /// Reverb. `mix` 0..1.
+  void setReverb(bool enabled, {double mix = 0.3}) =>
+      _bindings.setReverb?.call(_engine, enabled ? 1 : 0, mix);
+
+  double? getReverb() {
+    final fn = _bindings.getReverb;
+    if (fn == null || _disposed) return null;
+    final mix = calloc<Float>();
+    try {
+      if (fn(_engine, mix) != 0) return null;
+      return mix.value;
+    } finally {
+      calloc.free(mix);
+    }
+  }
+
+  /// Compresor de rango dinámico.
+  void setCompressor(
+    bool enabled, {
+    double thresholdDb = -18,
+    double ratio = 4,
+    double attackS = 0.01,
+    double releaseS = 0.1,
+  }) =>
+      _bindings.setCompressor?.call(
+          _engine, enabled ? 1 : 0, thresholdDb, ratio, attackS, releaseS);
+
+  ({double thresholdDb, double ratio})? getCompressor() {
+    final fn = _bindings.getCompressor;
+    if (fn == null || _disposed) return null;
+    final threshold = calloc<Float>();
+    final ratio = calloc<Float>();
+    try {
+      if (fn(_engine, threshold, ratio) != 0) return null;
+      return (thresholdDb: threshold.value, ratio: ratio.value);
+    } finally {
+      calloc.free(threshold);
+      calloc.free(ratio);
+    }
+  }
+
+  /// EQ paramétrico por banda (`band` 0-based). `type` = tipo de filtro,
+  /// `freq` en Hz, `gainDb` en dB y `q` el factor Q.
+  void setPeq(
+    int band, {
+    bool enabled = true,
+    int type = 0,
+    double freq = 1000,
+    double gainDb = 0,
+    double q = 1,
+  }) =>
+      _bindings.setPeq?.call(
+          _engine, band, enabled ? 1 : 0, type, freq, gainDb, q);
+
+  ({int type, double freq, double gainDb, double q})? getPeq(int band) {
+    final fn = _bindings.getPeq;
+    if (fn == null || _disposed) return null;
+    final type = calloc<Int32>();
+    final freq = calloc<Float>();
+    final gain = calloc<Float>();
+    final q = calloc<Float>();
+    try {
+      if (fn(_engine, band, type, freq, gain, q) != 0) return null;
+      return (type: type.value, freq: freq.value, gainDb: gain.value, q: q.value);
+    } finally {
+      calloc.free(type);
+      calloc.free(freq);
+      calloc.free(gain);
+      calloc.free(q);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cola avanzada
+  // ---------------------------------------------------------------------------
+
+  bool queueSort() => _bindings.queueSort?.call(_engine) == 0;
+
+  bool queueReverse() => _bindings.queueReverse?.call(_engine) == 0;
+
+  /// Reordena la cola al azar con una semilla reproducible.
+  bool queueShuffle([int seed = 0]) =>
+      _bindings.queueShuffle?.call(_engine, seed & 0xFFFFFFFF) == 0;
+
+  bool queueSortTitle() => _bindings.queueSortTitle?.call(_engine) == 0;
+
+  bool queueSortArtist() => _bindings.queueSortArtist?.call(_engine) == 0;
+
+  bool queueSortAlbum() => _bindings.queueSortAlbum?.call(_engine) == 0;
+
+  bool queueSortYear() => _bindings.queueSortYear?.call(_engine) == 0;
+
+  bool queueSortTrack() => _bindings.queueSortTrack?.call(_engine) == 0;
+
+  bool queueSortDuration() => _bindings.queueSortDuration?.call(_engine) == 0;
+
+  bool queueSortAlbumArtist() =>
+      _bindings.queueSortAlbumArtist?.call(_engine) == 0;
+
+  bool queueSortGenre() => _bindings.queueSortGenre?.call(_engine) == 0;
+
+  bool queueSortComposer() => _bindings.queueSortComposer?.call(_engine) == 0;
+
+  bool queueSortFileSize() => _bindings.queueSortFilesize?.call(_engine) == 0;
+
+  bool queueInsertSorted(String path) =>
+      _pathCall(path, (ptr) => _bindings.queueInsertSorted?.call(_engine, ptr)) ==
+      0;
+
+  bool queueKeepCurrent() => _bindings.queueKeepCurrent?.call(_engine) == 0;
+
+  bool queueDuplicateCurrent() =>
+      _bindings.queueDuplicateCurrent?.call(_engine) == 0;
+
+  bool queueRotate() => _bindings.queueRotate?.call(_engine) == 0;
+
+  /// Nº de pistas de la cola cuya extensión coincide con `ext` (p. ej. ".flac").
+  int queueCountExt(String ext) {
+    final rc =
+        _pathCall(ext, (ptr) => _bindings.queueCountExt?.call(_engine, ptr));
+    return rc < 0 ? 0 : rc;
+  }
+
+  bool queuePrune() => _bindings.queuePrune?.call(_engine) == 0;
+
+  bool queueDedup() => _bindings.queueDedup?.call(_engine) == 0;
+
+  bool queueDedupHash() => _bindings.queueDedupHash?.call(_engine) == 0;
+
+  bool queueFilterDir(String dir) =>
+      _pathCall(dir, (ptr) => _bindings.queueFilterDir?.call(_engine, ptr)) ==
+      0;
+
+  bool queueExportJson(String path) =>
+      _pathCall(path, (ptr) => _bindings.queueExportJson?.call(_engine, ptr)) ==
+      0;
+
+  /// Importa una cola desde JSON; devuelve el nº de pistas añadidas (-1 si falla).
+  int queueImportJson(String path) =>
+      _pathCall(path, (ptr) => _bindings.queueImportJson?.call(_engine, ptr));
+
+  bool queueExportM3uExt(String path) =>
+      _pathCall(
+          path, (ptr) => _bindings.queueExportM3uExt?.call(_engine, ptr)) ==
+      0;
+
+  bool queueExportM3uRelative(String path) =>
+      _pathCall(path,
+          (ptr) => _bindings.queueExportM3uRelative?.call(_engine, ptr)) ==
+      0;
+
+  /// Exporta la cola a CSV (símbolo nativo `ch_engine_export_queue_csv`).
+  bool exportQueueCsv(String path) =>
+      _pathCall(path, (ptr) => _bindings.exportQueueCsv?.call(_engine, ptr)) ==
+      0;
+
+  // ---------------------------------------------------------------------------
+  // Exportación y análisis offline
+  // ---------------------------------------------------------------------------
+
+  /// Exporta un fragmento de `srcPath` a WAV en `dstPath`.
+  bool exportWav(
+    String srcPath,
+    String dstPath, {
+    double startS = 0,
+    double durationS = 0,
+    int rate = 44100,
+    int channels = 2,
+  }) {
+    final fn = _bindings.exportWav;
+    if (fn == null || _disposed) return false;
+    final src = srcPath.toNativeUtf8();
+    final dst = dstPath.toNativeUtf8();
+    try {
+      return fn(_engine, src, dst, startS, durationS, rate, channels) == 0;
+    } finally {
+      malloc.free(src);
+      malloc.free(dst);
+    }
+  }
+
+  /// Concatena varios WAV en `dstPath`.
+  bool concatWav(List<String> srcPaths, String dstPath, {int rate = 44100}) {
+    final fn = _bindings.concatWav;
+    if (fn == null || _disposed || srcPaths.isEmpty) return false;
+    final count = srcPaths.length;
+    final ptrs = calloc<Pointer<Utf8>>(count);
+    var allocated = 0;
+    final dst = dstPath.toNativeUtf8();
+    try {
+      for (var i = 0; i < count; i++) {
+        ptrs[i] = srcPaths[i].toNativeUtf8();
+        allocated++;
+      }
+      return fn(_engine, ptrs, count, dst, rate) == 0;
+    } finally {
+      for (var i = 0; i < allocated; i++) {
+        malloc.free(ptrs[i]);
+      }
+      calloc.free(ptrs);
+      malloc.free(dst);
+    }
+  }
+
+  /// Parte `srcPath` en varios WAV usando `prefix` como base de nombre.
+  /// Devuelve el nº de segmentos creados (-1 si falla).
+  int splitBySilence(
+    String srcPath,
+    String prefix, {
+    double thresholdDb = -60,
+    double minS = 0.5,
+    int rate = 44100,
+  }) {
+    final fn = _bindings.splitBySilence;
+    if (fn == null || _disposed) return -1;
+    final src = srcPath.toNativeUtf8();
+    final pre = prefix.toNativeUtf8();
+    try {
+      return fn(_engine, src, pre, thresholdDb, minS, rate);
+    } finally {
+      malloc.free(src);
+      malloc.free(pre);
+    }
+  }
+
+  bool writeReplaygain(String path) =>
+      _pathCall(path, (ptr) => _bindings.writeReplaygain?.call(_engine, ptr)) ==
+      0;
+
+  bool writeReplaygainDir(String dir) =>
+      _pathCall(
+          dir, (ptr) => _bindings.writeReplaygainDir?.call(_engine, ptr)) ==
+      0;
+
+  bool writeReplaygainQueue() =>
+      _bindings.writeReplaygainQueue?.call(_engine) == 0;
+
+  bool writeBpm(String path) =>
+      _pathCall(path, (ptr) => _bindings.writeBpm?.call(_engine, ptr)) == 0;
+
+  bool spectrogramPng(
+    String srcPath,
+    String outPath, {
+    int width = 1200,
+    int height = 600,
+  }) {
+    final fn = _bindings.spectrogramPng;
+    if (fn == null || _disposed) return false;
+    final src = srcPath.toNativeUtf8();
+    final out = outPath.toNativeUtf8();
+    try {
+      return fn(_engine, src, out, width, height) == 0;
+    } finally {
+      malloc.free(src);
+      malloc.free(out);
+    }
+  }
+
+  /// Sonoridad integrada del conjunto de pistas cargadas (LUFS).
+  double? albumLoudness() {
+    final fn = _bindings.albumLoudness;
+    if (fn == null || _disposed) return null;
+    final out = calloc<Double>();
+    try {
+      if (fn(_engine, out) != 0) return null;
+      return out.value;
+    } finally {
+      calloc.free(out);
+    }
+  }
+
+  /// Normaliza el álbum a `targetLufs`; devuelve la ganancia aplicada en dB.
+  double? normalizeAlbum(double targetLufs) {
+    final fn = _bindings.normalizeAlbum;
+    if (fn == null || _disposed) return null;
+    final applied = calloc<Double>();
+    try {
+      if (fn(_engine, targetLufs, applied) != 0) return null;
+      return applied.value;
+    } finally {
+      calloc.free(applied);
+    }
+  }
+
+  /// Segmentos de silencio de `path` (inicio de cada uno, en segundos).
+  List<double> countSilences(
+    String path, {
+    double thresholdDb = -60,
+    double minS = 0.5,
+    int maxSegments = 256,
+  }) {
+    final fn = _bindings.countSilences;
+    if (fn == null || _disposed || maxSegments <= 0) return const [];
+    final out = calloc<Double>(maxSegments);
+    final utf8 = path.toNativeUtf8();
+    try {
+      final count = fn(_engine, utf8, thresholdDb, minS, out, maxSegments);
+      if (count <= 0) return const [];
+      final n = count > maxSegments ? maxSegments : count;
+      return List<double>.generate(n, (i) => out[i]);
+    } finally {
+      malloc.free(utf8);
+      calloc.free(out);
+    }
+  }
+
+  /// Elimina los silencios de `srcPath` y escribe el resultado en `dstPath`.
+  bool stripSilence(
+    String srcPath,
+    String dstPath, {
+    double thresholdDb = -60,
+    double minS = 0.5,
+    double gapS = 0.1,
+    int rate = 44100,
+  }) {
+    final fn = _bindings.stripSilence;
+    if (fn == null || _disposed) return false;
+    final src = srcPath.toNativeUtf8();
+    final dst = dstPath.toNativeUtf8();
+    try {
+      return fn(_engine, src, dst, thresholdDb, minS, gapS, rate) == 0;
+    } finally {
+      malloc.free(src);
+      malloc.free(dst);
+    }
+  }
+
+  bool exportSpectrumCsv(String path, {int points = 1024}) {
+    final fn = _bindings.exportSpectrumCsv;
+    if (fn == null) return false;
+    return _pathCall(path, (ptr) => fn(_engine, ptr, points)) == 0;
+  }
+
+  bool exportWaveformCsv(String path, {int buckets = 2000}) {
+    final fn = _bindings.exportWaveformCsv;
+    if (fn == null) return false;
+    return _pathCall(path, (ptr) => fn(_engine, ptr, buckets)) == 0;
+  }
+
+  bool exportWaveformPng(
+    String path, {
+    int width = 1200,
+    int height = 400,
+  }) {
+    final fn = _bindings.exportWaveformPng;
+    if (fn == null) return false;
+    return _pathCall(path, (ptr) => fn(_engine, ptr, width, height)) == 0;
+  }
+
+  bool exportSpectrumPng(
+    String path, {
+    int width = 1200,
+    int height = 600,
+    int bands = 512,
+  }) {
+    final fn = _bindings.exportSpectrumPng;
+    if (fn == null) return false;
+    return _pathCall(path, (ptr) => fn(_engine, ptr, width, height, bands)) == 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Favoritos
+  // ---------------------------------------------------------------------------
+
+  bool favoritesAdd(String path) =>
+      _pathCall(path, (ptr) => _bindings.favoritesAdd?.call(_engine, ptr)) == 0;
+
+  bool favoritesRemove(String path) =>
+      _pathCall(path, (ptr) => _bindings.favoritesRemove?.call(_engine, ptr)) ==
+      0;
+
+  int get favoritesCount => _bindings.favoritesCount?.call(_engine) ?? 0;
+
+  String favoritesPath(int index) =>
+      _text(_bindings.favoritesPath?.call(_engine, index));
+
+  bool favoritesSave(String path) =>
+      _pathCall(path, (ptr) => _bindings.favoritesSave?.call(_engine, ptr)) ==
+      0;
+
+  bool favoritesLoad(String path) =>
+      _pathCall(path, (ptr) => _bindings.favoritesLoad?.call(_engine, ptr)) ==
+      0;
+
+  bool favoritesExportM3u(String path) =>
+      _pathCall(
+          path, (ptr) => _bindings.favoritesExportM3u?.call(_engine, ptr)) ==
+      0;
+
+  // ---------------------------------------------------------------------------
+  // Utilidades: etiquetas, carátulas, letras, tonalidad, etc.
+  // ---------------------------------------------------------------------------
+
+  /// Escribe una etiqueta genérica `key = value` en el archivo actual.
+  bool setTag(String key, String value) {
+    final fn = _bindings.setTagFn;
+    if (fn == null || _disposed) return false;
+    final k = key.toNativeUtf8();
+    final v = value.toNativeUtf8();
+    try {
+      return fn(_engine, k, v) == 0;
+    } finally {
+      malloc.free(k);
+      malloc.free(v);
+    }
+  }
+
+  int get coverCountCurrent =>
+      _bindings.coverCountCurrent?.call(_engine) ?? 0;
+
+  bool saveCoverCurrent(int index, String path) =>
+      _pathCall(path,
+          (ptr) => _bindings.saveCoverCurrent?.call(_engine, index, ptr)) ==
+      0;
+
+  bool saveLyrics(String path) =>
+      _pathCall(path, (ptr) => _bindings.saveLyrics?.call(_engine, ptr)) == 0;
+
+  bool loadLyrics(String path) =>
+      _pathCall(path, (ptr) => _bindings.loadLyrics?.call(_engine, ptr)) == 0;
+
+  /// Desplaza la letra `deltaS` segundos (positivo = adelanta).
+  bool shiftLyrics(double deltaS) =>
+      _bindings.shiftLyrics?.call(_engine, deltaS) == 0;
+
+  double get lyricsOffsetMs => _bindings.lyricsOffsetMs?.call(_engine) ?? 0;
+
+  /// Detecta la tonalidad musical de `path`.
+  ({String key, double confidence})? detectKey(String path) {
+    final fn = _bindings.detectKey;
+    if (fn == null || _disposed) return null;
+    const size = 32;
+    final out = calloc<Uint8>(size).cast<Utf8>();
+    final confidence = calloc<Double>();
+    final utf8 = path.toNativeUtf8();
+    try {
+      if (fn(_engine, utf8, out, size, confidence) != 0) return null;
+      return (key: out.toDartString(), confidence: confidence.value);
+    } finally {
+      malloc.free(utf8);
+      calloc.free(out);
+      calloc.free(confidence);
+    }
+  }
+
+  /// Tonalidad de la pista actual.
+  ({String key, double confidence})? keyCurrent() {
+    final fn = _bindings.keyCurrent;
+    if (fn == null || _disposed) return null;
+    const size = 32;
+    final out = calloc<Uint8>(size).cast<Utf8>();
+    final confidence = calloc<Double>();
+    try {
+      if (fn(_engine, out, size, confidence) != 0) return null;
+      return (key: out.toDartString(), confidence: confidence.value);
+    } finally {
+      calloc.free(out);
+      calloc.free(confidence);
+    }
+  }
+
+  bool setAvoidRecent(bool enabled) =>
+      _bindings.setAvoidRecent?.call(_engine, enabled ? 1 : 0) == 0;
+
+  bool get avoidRecent => (_bindings.avoidRecent?.call(_engine) ?? 0) != 0;
+
+  int get recentCount => _bindings.recentCount?.call(_engine) ?? 0;
+
+  bool recentClear() => _bindings.recentClear?.call(_engine) == 0;
+
+  bool setPauseAtDirEnd(bool enabled) =>
+      _bindings.setPauseAtDirEnd?.call(_engine, enabled ? 1 : 0) == 0;
+
+  bool get pauseAtDirEnd => (_bindings.pauseAtDirEnd?.call(_engine) ?? 0) != 0;
+
+  /// Carga (o recarga) todos los archivos de un directorio en la cola.
+  bool loadDir(String dir) =>
+      _pathCall(dir, (ptr) => _bindings.loadDir?.call(_engine, ptr)) == 0;
+
+  /// Ganancia automática por pista para alcanzar `targetLufs`.
+  bool setAutoGain(bool enabled, {double targetLufs = -14}) =>
+      _bindings.setAutoGain?.call(_engine, enabled ? 1 : 0, targetLufs) == 0;
+
+  /// LUFS objetivo de la ganancia automática (null si no está disponible).
+  double? autoGain() {
+    final fn = _bindings.autoGain;
+    if (fn == null || _disposed) return null;
+    final out = calloc<Double>();
+    try {
+      if (fn(_engine, out) != 0) return null;
+      return out.value;
+    } finally {
+      calloc.free(out);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Biblioteca (handle persistente, liberado en dispose)
+  // ---------------------------------------------------------------------------
+
+  Pointer<Void>? _libraryHandle() {
+    final create = _bindings.libraryCreate;
+    if (create == null) return null;
+    final existing = _library;
+    if (existing != null && existing != nullptr) return existing;
+    final handle = create();
+    if (handle == nullptr) return null;
+    return _library = handle;
+  }
+
+  /// Escanea `root` en la biblioteca interna y devuelve el nº de pistas.
+  int libraryScanInto(String root) {
+    final b = _bindings;
+    final lib = _libraryHandle();
+    if (lib == null || b.libraryScan == null) return -1;
+    return _pathCall(root, (ptr) => b.libraryScan!(lib, ptr));
+  }
+
+  bool exportLibraryJson(String path) {
+    final lib = _library;
+    final fn = _bindings.libraryExportJson;
+    if (lib == null || lib == nullptr || fn == null) return false;
+    return _pathCall(path, (ptr) => fn(lib, ptr)) == 0;
+  }
+
+  bool exportLibraryCsv(String path) {
+    final lib = _library;
+    final fn = _bindings.libraryExportCsv;
+    if (lib == null || lib == nullptr || fn == null) return false;
+    return _pathCall(path, (ptr) => fn(lib, ptr)) == 0;
+  }
+
+  /// Quita `path` del índice de la biblioteca interna.
+  bool libraryRemove(String path) {
+    final lib = _library;
+    final fn = _bindings.libraryRemove;
+    if (lib == null || lib == nullptr || fn == null) return false;
+    return _pathCall(path, (ptr) => fn(lib, ptr)) == 0;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Presets de EQ y utilidades de archivos
+  // ---------------------------------------------------------------------------
+
+  int get eqPresetCount => _bindings.eqPresetCount?.call() ?? 0;
+
+  String eqPresetName(int index) {
+    final fn = _bindings.eqPresetName;
+    if (fn == null) return '';
+    const size = 256;
+    final out = calloc<Uint8>(size).cast<Utf8>();
+    try {
+      if (fn(index, out, size) <= 0) return '';
+      return out.toDartString();
+    } finally {
+      calloc.free(out);
+    }
+  }
+
+  /// Índice del preset con nombre `name`, o -1 si no existe.
+  int eqPresetFind(String name) {
+    final fn = _bindings.eqPresetFind;
+    if (fn == null) return -1;
+    final utf8 = name.toNativeUtf8();
+    try {
+      return fn(utf8);
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  bool applyEqPreset(int index) =>
+      _bindings.applyEqPreset?.call(_engine, index) == 0;
+
+  bool saveEqPreset(String path) =>
+      _pathCall(path, (ptr) => _bindings.saveEqPreset?.call(_engine, ptr)) ==
+      0;
+
+  bool loadEqPreset(String path) =>
+      _pathCall(path, (ptr) => _bindings.loadEqPreset?.call(_engine, ptr)) ==
+      0;
+
+  bool copyTags(String srcPath, String dstPath) {
+    final fn = _bindings.copyTags;
+    if (fn == null) return false;
+    final src = srcPath.toNativeUtf8();
+    final dst = dstPath.toNativeUtf8();
+    try {
+      return fn(src, dst) == 0;
+    } finally {
+      malloc.free(src);
+      malloc.free(dst);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // BPM y rango dinámico (DR)
+  // ---------------------------------------------------------------------------
+
+  /// BPM de un archivo (null si no se pudo medir).
+  double? bpmDetectPath(String path) {
+    final fn = _bindings.bpmDetectPath;
+    if (fn == null) return null;
+    final utf8 = path.toNativeUtf8();
+    try {
+      final value = fn(utf8);
+      return value > 0 ? value : null;
+    } finally {
+      malloc.free(utf8);
+    }
+  }
+
+  double get bpm => _bindings.bpmFn?.call(_engine) ?? 0;
+
+  /// DR de un archivo: valor y nº de bloques (null si no se pudo medir).
+  ({double value, int blocks})? drMeasurePath(String path) {
+    final fn = _bindings.drMeasurePath;
+    if (fn == null) return null;
+    final blocks = calloc<Uint32>();
+    final utf8 = path.toNativeUtf8();
+    try {
+      final value = fn(utf8, blocks);
+      if (value <= 0) return null;
+      return (value: value, blocks: blocks.value);
+    } finally {
+      malloc.free(utf8);
+      calloc.free(blocks);
+    }
+  }
+
+  /// DR de la pista actual.
+  ({double value, int blocks})? dr() {
+    final fn = _bindings.drFn;
+    if (fn == null || _disposed) return null;
+    final blocks = calloc<Uint32>();
+    try {
+      final value = fn(_engine, blocks);
+      if (value <= 0) return null;
+      return (value: value, blocks: blocks.value);
+    } finally {
+      calloc.free(blocks);
+    }
+  }
+
   @override
   void dispose() {
     if (_disposed) {
@@ -1093,6 +2004,11 @@ class NativePlayer extends PlayerApi {
     _disposed = true;
     calloc.free(_eventBuf);
     calloc.free(_levelBuf);
+    final library = _library;
+    if (library != null && library != nullptr) {
+      _bindings.libraryDestroy?.call(library);
+      _library = null;
+    }
     _bindings.destroy(_engine);
   }
 
@@ -1486,7 +2402,375 @@ class _Bindings {
         coverAt =
             lib.lookupFunction<_CoverAtNative, _CoverAtDart>('ch_engine_cover_at'),
         engineLastErrorFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_last_error'),
-        coreLastErrorFn = lib.lookupFunction<_PlainTextNative, _PlainTextDart>('ch_core_last_error');
+        set8d = lib.providesSymbol('ch_engine_set_8d')
+            ? lib.lookupFunction<_Set8dNative, _Set8dDart>('ch_engine_set_8d')
+            : null,
+        get8d = lib.providesSymbol('ch_engine_8d')
+            ? lib.lookupFunction<_EightDNative, _EightDDart>('ch_engine_8d')
+            : null,
+        setHrtf = lib.providesSymbol('ch_engine_set_hrtf')
+            ? lib.lookupFunction<_SetHrtfNative, _SetHrtfDart>('ch_engine_set_hrtf')
+            : null,
+        getHrtf = lib.providesSymbol('ch_engine_hrtf')
+            ? lib.lookupFunction<_HrtfNative, _HrtfDart>('ch_engine_hrtf')
+            : null,
+        setReverb = lib.providesSymbol('ch_engine_set_reverb')
+            ? lib.lookupFunction<_SetReverbNative, _SetReverbDart>(
+                'ch_engine_set_reverb')
+            : null,
+        getReverb = lib.providesSymbol('ch_engine_reverb')
+            ? lib.lookupFunction<_ReverbNative, _ReverbDart>('ch_engine_reverb')
+            : null,
+        setCompressor = lib.providesSymbol('ch_engine_set_compressor')
+            ? lib.lookupFunction<_SetCompressorNative, _SetCompressorDart>(
+                'ch_engine_set_compressor')
+            : null,
+        getCompressor = lib.providesSymbol('ch_engine_compressor')
+            ? lib.lookupFunction<_CompressorNative, _CompressorDart>(
+                'ch_engine_compressor')
+            : null,
+        setPeq = lib.providesSymbol('ch_engine_set_peq')
+            ? lib.lookupFunction<_SetPeqNative, _SetPeqDart>('ch_engine_set_peq')
+            : null,
+        getPeq = lib.providesSymbol('ch_engine_peq')
+            ? lib.lookupFunction<_PeqNative, _PeqDart>('ch_engine_peq')
+            : null,
+        queueSort = lib.providesSymbol('ch_engine_queue_sort')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort')
+            : null,
+        queueReverse = lib.providesSymbol('ch_engine_queue_reverse')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_reverse')
+            : null,
+        queueShuffle = lib.providesSymbol('ch_engine_queue_shuffle')
+            ? lib.lookupFunction<_SeedNative, _SeedDart>('ch_engine_queue_shuffle')
+            : null,
+        queueSortTitle = lib.providesSymbol('ch_engine_queue_sort_title')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_title')
+            : null,
+        queueSortArtist = lib.providesSymbol('ch_engine_queue_sort_artist')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_artist')
+            : null,
+        queueSortAlbum = lib.providesSymbol('ch_engine_queue_sort_album')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_album')
+            : null,
+        queueSortYear = lib.providesSymbol('ch_engine_queue_sort_year')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_year')
+            : null,
+        queueSortTrack = lib.providesSymbol('ch_engine_queue_sort_track')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_track')
+            : null,
+        queueSortDuration = lib.providesSymbol('ch_engine_queue_sort_duration')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_duration')
+            : null,
+        queueSortAlbumArtist =
+            lib.providesSymbol('ch_engine_queue_sort_albumartist')
+                ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                    'ch_engine_queue_sort_albumartist')
+                : null,
+        queueSortGenre = lib.providesSymbol('ch_engine_queue_sort_genre')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_genre')
+            : null,
+        queueSortComposer = lib.providesSymbol('ch_engine_queue_sort_composer')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_composer')
+            : null,
+        queueSortFilesize = lib.providesSymbol('ch_engine_queue_sort_filesize')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_sort_filesize')
+            : null,
+        queueInsertSorted = lib.providesSymbol('ch_engine_queue_insert_sorted')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_queue_insert_sorted')
+            : null,
+        queueKeepCurrent = lib.providesSymbol('ch_engine_queue_keep_current')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_keep_current')
+            : null,
+        queueDuplicateCurrent =
+            lib.providesSymbol('ch_engine_queue_duplicate_current')
+                ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                    'ch_engine_queue_duplicate_current')
+                : null,
+        queueRotate = lib.providesSymbol('ch_engine_queue_rotate')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_rotate')
+            : null,
+        queueCountExt = lib.providesSymbol('ch_engine_queue_count_ext')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_queue_count_ext')
+            : null,
+        queuePrune = lib.providesSymbol('ch_engine_queue_prune')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_prune')
+            : null,
+        queueDedup = lib.providesSymbol('ch_engine_queue_dedup')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_dedup')
+            : null,
+        queueDedupHash = lib.providesSymbol('ch_engine_queue_dedup_hash')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_queue_dedup_hash')
+            : null,
+        queueFilterDir = lib.providesSymbol('ch_engine_queue_filter_dir')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_queue_filter_dir')
+            : null,
+        queueExportJson = lib.providesSymbol('ch_engine_queue_export_json')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_queue_export_json')
+            : null,
+        queueImportJson = lib.providesSymbol('ch_engine_queue_import_json')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_queue_import_json')
+            : null,
+        queueExportM3uExt =
+            lib.providesSymbol('ch_engine_queue_export_m3u_ext')
+                ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                    'ch_engine_queue_export_m3u_ext')
+                : null,
+        queueExportM3uRelative =
+            lib.providesSymbol('ch_engine_queue_export_m3u_relative')
+                ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                    'ch_engine_queue_export_m3u_relative')
+                : null,
+        exportQueueCsv = lib.providesSymbol('ch_engine_export_queue_csv')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_export_queue_csv')
+            : null,
+        exportWav = lib.providesSymbol('ch_engine_export_wav')
+            ? lib.lookupFunction<_ExportWavNative, _ExportWavDart>(
+                'ch_engine_export_wav')
+            : null,
+        concatWav = lib.providesSymbol('ch_engine_concat_wav')
+            ? lib.lookupFunction<_ConcatWavNative, _ConcatWavDart>(
+                'ch_engine_concat_wav')
+            : null,
+        splitBySilence = lib.providesSymbol('ch_engine_split_by_silence')
+            ? lib.lookupFunction<_SplitSilenceNative, _SplitSilenceDart>(
+                'ch_engine_split_by_silence')
+            : null,
+        writeReplaygain = lib.providesSymbol('ch_engine_write_replaygain')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_write_replaygain')
+            : null,
+        writeReplaygainDir =
+            lib.providesSymbol('ch_engine_write_replaygain_dir')
+                ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                    'ch_engine_write_replaygain_dir')
+                : null,
+        writeReplaygainQueue =
+            lib.providesSymbol('ch_engine_write_replaygain_queue')
+                ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                    'ch_engine_write_replaygain_queue')
+                : null,
+        writeBpm = lib.providesSymbol('ch_engine_write_bpm')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_write_bpm')
+            : null,
+        spectrogramPng = lib.providesSymbol('ch_engine_spectrogram_png')
+            ? lib.lookupFunction<_SpectrogramPngNative, _SpectrogramPngDart>(
+                'ch_engine_spectrogram_png')
+            : null,
+        albumLoudness = lib.providesSymbol('ch_engine_album_loudness')
+            ? lib.lookupFunction<_DoubleOutNative, _DoubleOutDart>(
+                'ch_engine_album_loudness')
+            : null,
+        normalizeAlbum = lib.providesSymbol('ch_engine_normalize_album')
+            ? lib.lookupFunction<_NormalizeNative, _NormalizeDart>(
+                'ch_engine_normalize_album')
+            : null,
+        countSilences = lib.providesSymbol('ch_engine_count_silences')
+            ? lib.lookupFunction<_CountSilencesNative, _CountSilencesDart>(
+                'ch_engine_count_silences')
+            : null,
+        stripSilence = lib.providesSymbol('ch_engine_strip_silence')
+            ? lib.lookupFunction<_StripSilenceNative, _StripSilenceDart>(
+                'ch_engine_strip_silence')
+            : null,
+        exportSpectrumCsv =
+            lib.providesSymbol('ch_engine_export_spectrum_csv')
+                ? lib.lookupFunction<_ExportIntNative, _ExportIntDart>(
+                    'ch_engine_export_spectrum_csv')
+                : null,
+        exportWaveformCsv =
+            lib.providesSymbol('ch_engine_export_waveform_csv')
+                ? lib.lookupFunction<_ExportIntNative, _ExportIntDart>(
+                    'ch_engine_export_waveform_csv')
+                : null,
+        exportWaveformPng =
+            lib.providesSymbol('ch_engine_export_waveform_png')
+                ? lib.lookupFunction<_ExportPngNative, _ExportPngDart>(
+                    'ch_engine_export_waveform_png')
+                : null,
+        exportSpectrumPng =
+            lib.providesSymbol('ch_engine_export_spectrum_png')
+                ? lib.lookupFunction<_ExportSpectrumPngNative,
+                        _ExportSpectrumPngDart>(
+                    'ch_engine_export_spectrum_png')
+                : null,
+        favoritesAdd = lib.providesSymbol('ch_engine_favorites_add')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_favorites_add')
+            : null,
+        favoritesRemove = lib.providesSymbol('ch_engine_favorites_remove')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_favorites_remove')
+            : null,
+        favoritesCount = lib.providesSymbol('ch_engine_favorites_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>(
+                'ch_engine_favorites_count')
+            : null,
+        favoritesPath = lib.providesSymbol('ch_engine_favorites_path')
+            ? lib.lookupFunction<_TextAtNative, _TextAtDart>(
+                'ch_engine_favorites_path')
+            : null,
+        favoritesSave = lib.providesSymbol('ch_engine_favorites_save')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_favorites_save')
+            : null,
+        favoritesLoad = lib.providesSymbol('ch_engine_favorites_load')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_favorites_load')
+            : null,
+        favoritesExportM3u =
+            lib.providesSymbol('ch_engine_favorites_export_m3u')
+                ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                    'ch_engine_favorites_export_m3u')
+                : null,
+        setTagFn = lib.providesSymbol('ch_engine_set_tag')
+            ? lib.lookupFunction<_SetTagNative, _SetTagDart>('ch_engine_set_tag')
+            : null,
+        coverCountCurrent =
+            lib.providesSymbol('ch_engine_cover_count_current')
+                ? lib.lookupFunction<_IntNative, _IntDart>(
+                    'ch_engine_cover_count_current')
+                : null,
+        saveCoverCurrent =
+            lib.providesSymbol('ch_engine_save_cover_current')
+                ? lib.lookupFunction<_InsertNative, _InsertDart>(
+                    'ch_engine_save_cover_current')
+                : null,
+        saveLyrics = lib.providesSymbol('ch_engine_save_lyrics')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_save_lyrics')
+            : null,
+        loadLyrics = lib.providesSymbol('ch_engine_load_lyrics')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_load_lyrics')
+            : null,
+        shiftLyrics = lib.providesSymbol('ch_engine_shift_lyrics')
+            ? lib.lookupFunction<_SetDoubleNative, _SetDoubleDart>(
+                'ch_engine_shift_lyrics')
+            : null,
+        lyricsOffsetMs = lib.providesSymbol('ch_engine_lyrics_offset_ms')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>(
+                'ch_engine_lyrics_offset_ms')
+            : null,
+        detectKey = lib.providesSymbol('ch_engine_detect_key')
+            ? lib.lookupFunction<_DetectKeyNative, _DetectKeyDart>(
+                'ch_engine_detect_key')
+            : null,
+        keyCurrent = lib.providesSymbol('ch_engine_key_current')
+            ? lib.lookupFunction<_KeyCurrentNative, _KeyCurrentDart>(
+                'ch_engine_key_current')
+            : null,
+        setAvoidRecent = lib.providesSymbol('ch_engine_set_avoid_recent')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+                'ch_engine_set_avoid_recent')
+            : null,
+        avoidRecent = lib.providesSymbol('ch_engine_avoid_recent')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_avoid_recent')
+            : null,
+        recentCount = lib.providesSymbol('ch_engine_recent_count')
+            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_recent_count')
+            : null,
+        recentClear = lib.providesSymbol('ch_engine_recent_clear')
+            ? lib.lookupFunction<_ControlNative, _ControlDart>(
+                'ch_engine_recent_clear')
+            : null,
+        setPauseAtDirEnd = lib.providesSymbol('ch_engine_set_pause_at_dir_end')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+                'ch_engine_set_pause_at_dir_end')
+            : null,
+        pauseAtDirEnd = lib.providesSymbol('ch_engine_pause_at_dir_end')
+            ? lib.lookupFunction<_IntNative, _IntDart>(
+                'ch_engine_pause_at_dir_end')
+            : null,
+        loadDir = lib.providesSymbol('ch_engine_load_dir')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_load_dir')
+            : null,
+        setAutoGain = lib.providesSymbol('ch_engine_set_auto_gain')
+            ? lib.lookupFunction<_SetAutoGainNative, _SetAutoGainDart>(
+                'ch_engine_set_auto_gain')
+            : null,
+        autoGain = lib.providesSymbol('ch_engine_auto_gain')
+            ? lib.lookupFunction<_DoubleOutNative, _DoubleOutDart>(
+                'ch_engine_auto_gain')
+            : null,
+        libraryExportJson = lib.providesSymbol('ch_library_export_json')
+            ? lib.lookupFunction<_LibraryExportNative, _LibraryExportDart>(
+                'ch_library_export_json')
+            : null,
+        libraryExportCsv = lib.providesSymbol('ch_library_export_csv')
+            ? lib.lookupFunction<_LibraryExportNative, _LibraryExportDart>(
+                'ch_library_export_csv')
+            : null,
+        libraryRemove = lib.providesSymbol('ch_library_remove')
+            ? lib.lookupFunction<_LibraryRemoveNative, _LibraryRemoveDart>(
+                'ch_library_remove')
+            : null,
+        eqPresetCount = lib.providesSymbol('ch_engine_eq_preset_count')
+            ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>(
+                'ch_engine_eq_preset_count')
+            : null,
+        eqPresetName = lib.providesSymbol('ch_engine_eq_preset_name')
+            ? lib.lookupFunction<_EqPresetNameNative, _EqPresetNameDart>(
+                'ch_engine_eq_preset_name')
+            : null,
+        eqPresetFind = lib.providesSymbol('ch_engine_eq_preset_find')
+            ? lib.lookupFunction<_EqPresetFindNative, _EqPresetFindDart>(
+                'ch_engine_eq_preset_find')
+            : null,
+        applyEqPreset = lib.providesSymbol('ch_engine_apply_eq_preset')
+            ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+                'ch_engine_apply_eq_preset')
+            : null,
+        saveEqPreset = lib.providesSymbol('ch_engine_save_eq_preset')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_save_eq_preset')
+            : null,
+        loadEqPreset = lib.providesSymbol('ch_engine_load_eq_preset')
+            ? lib.lookupFunction<_LoadNative, _LoadDart>(
+                'ch_engine_load_eq_preset')
+            : null,
+        copyTags = lib.providesSymbol('ch_engine_copy_tags')
+            ? lib.lookupFunction<_CopyTagsNative, _CopyTagsDart>(
+                'ch_engine_copy_tags')
+            : null,
+        bpmDetectPath = lib.providesSymbol('ch_bpm_detect_path')
+            ? lib.lookupFunction<_BpmDetectNative, _BpmDetectDart>(
+                'ch_bpm_detect_path')
+            : null,
+        bpmFn = lib.providesSymbol('ch_engine_bpm')
+            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_bpm')
+            : null,
+        drMeasurePath = lib.providesSymbol('ch_dr_measure_path')
+            ? lib.lookupFunction<_DrMeasureNative, _DrMeasureDart>(
+                'ch_dr_measure_path')
+            : null,
+        drFn = lib.providesSymbol('ch_engine_dr')
+            ? lib.lookupFunction<_EngineDrNative, _EngineDrDart>('ch_engine_dr')
+            : null,
+        coreLastErrorFn = lib.lookupFunction<_PlainTextNative, _PlainTextDart>('ch_core_last_error'),
+        resultStr = lib.providesSymbol('ch_result_str')
+            ? lib.lookupFunction<_ResultStrNative, _ResultStrDart>('ch_result_str')
+            : null;
 
   static final _Bindings instance = _Bindings._(_open());
 
@@ -1630,8 +2914,101 @@ class _Bindings {
   final _TextDart albumFn;
   final _IntDart coverCount;
   final _CoverAtDart coverAt;
+  final _Set8dDart? set8d;
+  final _EightDDart? get8d;
+  final _SetHrtfDart? setHrtf;
+  final _HrtfDart? getHrtf;
+  final _SetReverbDart? setReverb;
+  final _ReverbDart? getReverb;
+  final _SetCompressorDart? setCompressor;
+  final _CompressorDart? getCompressor;
+  final _SetPeqDart? setPeq;
+  final _PeqDart? getPeq;
+  final _ControlDart? queueSort;
+  final _ControlDart? queueReverse;
+  final _SeedDart? queueShuffle;
+  final _ControlDart? queueSortTitle;
+  final _ControlDart? queueSortArtist;
+  final _ControlDart? queueSortAlbum;
+  final _ControlDart? queueSortYear;
+  final _ControlDart? queueSortTrack;
+  final _ControlDart? queueSortDuration;
+  final _ControlDart? queueSortAlbumArtist;
+  final _ControlDart? queueSortGenre;
+  final _ControlDart? queueSortComposer;
+  final _ControlDart? queueSortFilesize;
+  final _LoadDart? queueInsertSorted;
+  final _ControlDart? queueKeepCurrent;
+  final _ControlDart? queueDuplicateCurrent;
+  final _ControlDart? queueRotate;
+  final _LoadDart? queueCountExt;
+  final _ControlDart? queuePrune;
+  final _ControlDart? queueDedup;
+  final _ControlDart? queueDedupHash;
+  final _LoadDart? queueFilterDir;
+  final _LoadDart? queueExportJson;
+  final _LoadDart? queueImportJson;
+  final _LoadDart? queueExportM3uExt;
+  final _LoadDart? queueExportM3uRelative;
+  final _LoadDart? exportQueueCsv;
+  final _ExportWavDart? exportWav;
+  final _ConcatWavDart? concatWav;
+  final _SplitSilenceDart? splitBySilence;
+  final _LoadDart? writeReplaygain;
+  final _LoadDart? writeReplaygainDir;
+  final _ControlDart? writeReplaygainQueue;
+  final _LoadDart? writeBpm;
+  final _SpectrogramPngDart? spectrogramPng;
+  final _DoubleOutDart? albumLoudness;
+  final _NormalizeDart? normalizeAlbum;
+  final _CountSilencesDart? countSilences;
+  final _StripSilenceDart? stripSilence;
+  final _ExportIntDart? exportSpectrumCsv;
+  final _ExportIntDart? exportWaveformCsv;
+  final _ExportPngDart? exportWaveformPng;
+  final _ExportSpectrumPngDart? exportSpectrumPng;
+  final _LoadDart? favoritesAdd;
+  final _LoadDart? favoritesRemove;
+  final _IntDart? favoritesCount;
+  final _TextAtDart? favoritesPath;
+  final _LoadDart? favoritesSave;
+  final _LoadDart? favoritesLoad;
+  final _LoadDart? favoritesExportM3u;
+  final _SetTagDart? setTagFn;
+  final _IntDart? coverCountCurrent;
+  final _InsertDart? saveCoverCurrent;
+  final _LoadDart? saveLyrics;
+  final _LoadDart? loadLyrics;
+  final _SetDoubleDart? shiftLyrics;
+  final _DoubleDart? lyricsOffsetMs;
+  final _DetectKeyDart? detectKey;
+  final _KeyCurrentDart? keyCurrent;
+  final _SetIntDart? setAvoidRecent;
+  final _IntDart? avoidRecent;
+  final _IntDart? recentCount;
+  final _ControlDart? recentClear;
+  final _SetIntDart? setPauseAtDirEnd;
+  final _IntDart? pauseAtDirEnd;
+  final _LoadDart? loadDir;
+  final _SetAutoGainDart? setAutoGain;
+  final _DoubleOutDart? autoGain;
+  final _LibraryExportDart? libraryExportJson;
+  final _LibraryExportDart? libraryExportCsv;
+  final _LibraryRemoveDart? libraryRemove;
+  final _NoArgIntDart? eqPresetCount;
+  final _EqPresetNameDart? eqPresetName;
+  final _EqPresetFindDart? eqPresetFind;
+  final _SetIntDart? applyEqPreset;
+  final _LoadDart? saveEqPreset;
+  final _LoadDart? loadEqPreset;
+  final _CopyTagsDart? copyTags;
+  final _BpmDetectDart? bpmDetectPath;
+  final _DoubleDart? bpmFn;
+  final _DrMeasureDart? drMeasurePath;
+  final _EngineDrDart? drFn;
   final _TextDart engineLastErrorFn;
   final _PlainTextDart coreLastErrorFn;
+  final _ResultStrDart? resultStr;
 
   String coreLastError() => coreLastErrorFn().toDartString();
 

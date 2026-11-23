@@ -38,6 +38,27 @@ static void check(int ok, const char* what) {
     if (!ok) failures++;
 }
 
+/* Comprueba que un resultado del núcleo sea CH_OK, imprimiendo el mensaje si falla. */
+static void check_result(ch_result rc, ch_result expected, const char* what) {
+    if (rc == expected) {
+        printf("OK  %s\n", what);
+    } else {
+        printf("MAL  %s (rc=%d %s)\n", what, (int)rc, ch_result_str(rc));
+        failures++;
+    }
+}
+
+/* Comprueba que un resultado sea un código de error esperado (distinto de CH_OK). */
+static void check_error(ch_result rc, ch_result expected, const char* what) {
+    if (rc == expected) {
+        printf("OK  %s (rc=%d %s)\n", what, (int)rc, ch_result_str(rc));
+    } else {
+        printf("MAL  %s (rc=%d %s, esperado %d %s)\n", what, (int)rc,
+               ch_result_str(rc), (int)expected, ch_result_str(expected));
+        failures++;
+    }
+}
+
 /* WAV PCM 16 bits estereo, `seconds` segundos de un tono de `hz`. */
 static int write_tone(const char* path, double seconds, double hz) {
     const uint32_t rate = 48000;
@@ -96,7 +117,8 @@ int main(int argc, char** argv) {
         printf("sin motor: %s\n", ch_core_last_error());
         return 2;
     }
-    if (ch_engine_load(e, wav) != 0) {
+    check_result(ch_engine_load(e, wav), CH_OK, "carga el wav");
+    if (ch_engine_load(e, wav) != CH_OK) {
         printf("no carga el wav: %s\n", ch_engine_last_error(e));
         ch_engine_destroy(e);
         return 1;
@@ -157,17 +179,18 @@ int main(int argc, char** argv) {
     check(ch_engine_loop_start(e) < 0, "loop: desactivado");
 
     /* Ajustes nuevos: preamp, ReplayGain por album, balance y modo de canales. */
-    check(ch_engine_set_eq_preamp(e, -6) == 0 && near(ch_engine_eq_preamp(e), -6.0, 1e-6),
-          "preamp del EQ");
-    check(ch_engine_set_replaygain_mode(e, 1) == 0 && ch_engine_replaygain_mode(e) == 1,
-          "ReplayGain por album");
+    check_result(ch_engine_set_eq_preamp(e, -6), CH_OK, "preamp del EQ: establece");
+    check(near(ch_engine_eq_preamp(e), -6.0, 1e-6), "preamp del EQ: lee");
+    check_result(ch_engine_set_replaygain_mode(e, 1), CH_OK, "ReplayGain por album: establece");
+    check(ch_engine_replaygain_mode(e) == 1, "ReplayGain por album: lee");
     ch_engine_set_replaygain_mode(e, 0);
-    check(ch_engine_set_balance(e, -1.0f) == 0 && near(ch_engine_balance(e), -1.0, 1e-6),
-          "balance");
+    check_result(ch_engine_set_balance(e, -1.0f), CH_OK, "balance: establece -1");
+    check(near(ch_engine_balance(e), -1.0, 1e-6), "balance: lee -1");
     ch_engine_set_balance(e, 3.0f); /* fuera de rango: se acota */
     check(near(ch_engine_balance(e), 1.0, 1e-6), "balance se acota a +1");
-    check(ch_engine_set_channel_mode(e, 2) == 0 && ch_engine_channel_mode(e) == 2, "modo mono/cambio");
-    check(ch_engine_set_channel_mode(e, 9) != 0, "modo de canales invalido rechazado");
+    check_result(ch_engine_set_channel_mode(e, 2), CH_OK, "modo mono/cambio");
+    check(ch_engine_channel_mode(e) == 2, "modo mono/cambio: lee");
+    check_error(ch_engine_set_channel_mode(e, 9), CH_ERR_INVALID_ARG, "modo de canales invalido rechazado");
     ch_engine_set_channel_mode(e, 0);
     ch_engine_set_balance(e, 0.0f);
 

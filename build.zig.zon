@@ -1,0 +1,17 @@
+.{
+    .name = .cyberhex,
+    .version = "1.0.0",
+    .fingerprint = 0x97fe2fc67f22b630,
+    .minimum_zig_version = "0.17.1",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "core",
+        "linux",
+        "lib",
+        "assets",
+        "android",
+        "pubspec.yaml",
+    },
+}

@@ -45,28 +45,60 @@ La referencia completa de la API está en [`core/API.md`](core/API.md).
 
 ## Compilar y ejecutar en Linux (escritorio)
 
+### Desarrollo (con hot reload)
+
 ```bash
 flutter pub get
-flutter run -d linux        # el CMake compila el núcleo y lo empaqueta solo
+flutter run -d linux        # usa Flutter para compilar el runner + el núcleo
 ```
 
-`linux/CMakeLists.txt` invoca `zig build -Drelease=true -Ddecoder=auto` y copia
-`libcyberhex_core.so` a `build/linux/x64/<modo>/bundle/lib/`, donde el runner lo
-encuentra por su `RPATH` (`$ORIGIN/lib`). No hace falta `LD_LIBRARY_PATH`.
+`flutter run` sigue funcionando para desarrollo: la carpeta `linux/flutter/`
+conserva los ficheros que Flutter necesita (`generated_plugin_registrant.cc`,
+`generated_plugins.cmake`) aunque ya no haya `CMakeLists.txt`. Si Flutter se
+queja de que falta el `CMakeLists.txt`, regenera la carpeta con
+`flutter create --platforms=linux .` (respeta el código existente).
 
-Para forzar el decodificador:
+### Build de release solo con Zig (sin CMake, ninja ni Flutter)
 
 ```bash
-flutter build linux --release -d linux      # auto (FFmpeg si está)
-flutter build linux -DCYBERHEX_DECODER=miniaudio   # sin FFmpeg
+zig build -Drelease=true        # bundle completo en zig-out/
+./zig-out/cyberhex
 ```
+
+El `build.zig` del root orquesta todo:
+
+1. Compila el núcleo nativo (`libcyberhex_core.so`) con `core/build.zig`.
+2. Ejecuta `flutter assemble` (AOT `libapp.so` + `flutter_assets/`) — **sin**
+   invocar CMake.
+3. Compila el runner C++ (`linux/runner/*.cc` + `file_selector_linux`) con Zig y
+   lo enlaza contra el motor Flutter y GTK.
+4. Copia todo al bundle: `cyberhex`, `lib/libflutter_linux_gtk.so`,
+   `lib/libcyberhex_core.so`, `lib/libapp.so`, `data/icudtl.dat`,
+   `data/flutter_assets/`.
+
+El runner lleva `RPATH=$ORIGIN/lib`, así que no hace falta `LD_LIBRARY_PATH`.
+
+### Opciones de `zig build`
+
+| Opción | Descripción |
+|---|---|
+| `-Drelease=true` | Bundle AOT de producción (por defecto en CI) |
+| `-Drelease=false` | Bundle debug (usa `kernel_blob.bin`, sin AOT) |
+| `-Ddecoder=auto\|ffmpeg\|miniaudio` | Decodificador del núcleo |
+| `-Dtarget=<triple>` | Cross-compilar el núcleo (Windows, macOS, Android…) |
+| `-Dflutter=<ruta>` | Ruta al binario `flutter` (por defecto: el de PATH) |
+| `-Dprefix=<dir>` | Directorio de instalación (por defecto: `zig-out`) |
+
+Steps: `zig build` (bundle completo), `zig build core` (solo el núcleo),
+`zig build runner` (solo el runner C++), `zig build flutter` (solo
+`flutter assemble`).
 
 ### Instalar en Arch Linux
 
 Dependencias (repos oficiales + AUR para Flutter):
 
 ```bash
-sudo pacman -S --needed base-devel flutter zig cmake ninja clang pkgconf \
+sudo pacman -S --needed base-devel flutter zig pkgconf \
   gtk3 ffmpeg alsa-lib libpulse fontconfig libxkbcommon libglvnd
 ```
 
@@ -83,8 +115,8 @@ El `PKGBUILD` instala la app en `/usr/lib/cyberhex/`, el lanzador en
 sin instalar:
 
 ```bash
-flutter build linux --release
-./build/linux/x64/release/bundle/cyberhex
+zig build -Drelease=true
+./zig-out/cyberhex
 ```
 
 ## Compilar el APK
