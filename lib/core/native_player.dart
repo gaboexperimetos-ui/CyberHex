@@ -171,6 +171,23 @@ bool _loadTrackInIsolate(int address, String path) {
   }
 }
 
+List<double> _waveformInIsolate(String path, int buckets) {
+  final lib = DynamicLibrary.open(_libraryName);
+  if (!lib.providesSymbol('ch_waveform_peaks')) return const [];
+  final waveform =
+      lib.lookupFunction<_WaveformNative, _WaveformDart>('ch_waveform_peaks');
+  final out = calloc<Float>(buckets);
+  final utf8 = path.toNativeUtf8();
+  try {
+    final result = waveform(utf8, buckets, out);
+    if (result != 0) return const [];
+    return List<double>.generate(buckets, (i) => out[i]);
+  } finally {
+    malloc.free(utf8);
+    calloc.free(out);
+  }
+}
+
 class CyberHexException implements Exception {
   CyberHexException(this.message);
   final String message;
@@ -965,13 +982,19 @@ class NativePlayer extends PlayerApi {
     final out = calloc<Float>(buckets);
     final utf8 = path.toNativeUtf8();
     try {
-      final total = fn(utf8, buckets, out);
-      if (total <= 0) return const [];
-      return List<double>.generate(total, (i) => out[i]);
+      final result = fn(utf8, buckets, out);
+      if (result != 0) return const [];
+      return List<double>.generate(buckets, (i) => out[i]);
     } finally {
       malloc.free(utf8);
       calloc.free(out);
     }
+  }
+
+  @override
+  Future<List<double>> waveformAsync(String path, int buckets) {
+    if (buckets <= 0) return Future.value(const []);
+    return Isolate.run(() => _waveformInIsolate(path, buckets));
   }
 
   @override
