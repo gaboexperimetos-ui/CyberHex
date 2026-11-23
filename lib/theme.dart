@@ -72,12 +72,13 @@ ThemeData buildCyberHexTheme() {
 // Temas (fase 6): cuatro paletas y estilos de carátula
 // ---------------------------------------------------------------------------
 
-/// Los cuatro temas de la app. `neon` es el de siempre.
+/// Los cinco temas de la app. `neon` es el de siempre.
 enum CyberHexThemeId {
   neon('CyberHex Neon'),
   amoled('AMOLED Negro Puro'),
   light('Claro'),
-  materialYou('Material You');
+  materialYou('Material You'),
+  cyberpunk('Cyberpunk');
 
   const CyberHexThemeId(this.label);
 
@@ -148,20 +149,20 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
   }
 
   CyberHexPalette _withAccentColor(Color color) => CyberHexPalette(
-        id: id,
-        background: background,
-        surface: surface,
-        surfaceHigh: surfaceHigh,
-        primary: primary,
-        secondary: secondary,
-        accent: color,
-        onAccent: _onColor(color),
-        foreground: foreground,
-        muted: muted,
-        border: border,
-        error: error,
-        brightness: brightness,
-      );
+    id: id,
+    background: background,
+    surface: surface,
+    surfaceHigh: surfaceHigh,
+    primary: primary,
+    secondary: secondary,
+    accent: color,
+    onAccent: _onColor(color),
+    foreground: foreground,
+    muted: muted,
+    border: border,
+    error: error,
+    brightness: brightness,
+  );
 
   /// Sube o baja la luminosidad del acento hasta que se lea sobre el fondo.
   Color _readableAccent(Color color) {
@@ -173,7 +174,8 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
       final ratio = _contrastRatio(candidate, background);
       // Se pide contraste suficiente *y* un brillo claro/oscurio de verdad: un
       // gris medio sobre negro cumple la ratio pero cansa la vista.
-      final readable = ratio >= 3.0 && (dark ? luminance >= 0.25 : luminance <= 0.45);
+      final readable =
+          ratio >= 3.0 && (dark ? luminance >= 0.25 : luminance <= 0.45);
       if (readable) return candidate;
       hsl = hsl.withLightness(
         (hsl.lightness + (dark ? 0.05 : -0.05)).clamp(0.0, 1.0),
@@ -255,13 +257,33 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
     brightness: Brightness.dark,
   );
 
+  /// Neón rosa sobre azul noche: la veta más «cyberpunk» de la marca, con el
+  /// acento cálido para que las carátulas y la barra no se confundan con el neón
+  /// verde de siempre.
+  static const CyberHexPalette cyberpunk = CyberHexPalette(
+    id: CyberHexThemeId.cyberpunk,
+    background: Color(0xFF0B0713),
+    surface: Color(0xFF171024),
+    surfaceHigh: Color(0xFF241735),
+    primary: Color(0xFF2B1050),
+    secondary: Color(0xFF0EA5E9),
+    accent: Color(0xFFF472B6),
+    onAccent: Color(0xFF2A0717),
+    foreground: Color(0xFFF5F0FA),
+    muted: Color(0xFFA99BBE),
+    border: Color(0xFF3B2456),
+    error: Color(0xFFFF6B81),
+    brightness: Brightness.dark,
+  );
+
   /// Paleta de un tema.
   static CyberHexPalette of(CyberHexThemeId id) => switch (id) {
-        CyberHexThemeId.neon => neon,
-        CyberHexThemeId.amoled => amoled,
-        CyberHexThemeId.light => light,
-        CyberHexThemeId.materialYou => materialYou,
-      };
+    CyberHexThemeId.neon => neon,
+    CyberHexThemeId.amoled => amoled,
+    CyberHexThemeId.light => light,
+    CyberHexThemeId.materialYou => materialYou,
+    CyberHexThemeId.cyberpunk => cyberpunk,
+  };
 
   /// Negro o blanco según el brillo del acento (contraste legible).
   static Color _onColor(Color color) =>

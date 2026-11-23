@@ -13,9 +13,9 @@ import 'package:material_ui/material_ui.dart';
 import 'fake_player.dart';
 
 Widget _app(Widget child, {ThemeData? theme}) => MaterialApp(
-      theme: theme ?? buildCyberHexThemed(CyberHexPalette.neon),
-      home: child,
-    );
+  theme: theme ?? buildCyberHexThemed(CyberHexPalette.neon),
+  home: child,
+);
 
 /// 4 píxeles RGBA (2×2) del color indicado, como los devuelve `rawRgba`.
 Uint8List _pixels(int r, int g, int b, {int count = 4, int alpha = 255}) {
@@ -31,13 +31,28 @@ Uint8List _pixels(int r, int g, int b, {int count = 4, int alpha = 255}) {
 
 void main() {
   group('CyberHexPalette', () {
-    test('hay cuatro temas, con nombre y brillo', () {
-      expect(CyberHexThemeId.values.length, 4);
+    test('hay cinco temas, con nombre y brillo', () {
+      expect(CyberHexThemeId.values.length, 5);
       expect(CyberHexThemeId.neon.label, 'CyberHex Neon');
       expect(CyberHexThemeId.amoled.label, 'AMOLED Negro Puro');
-      expect(CyberHexPalette.of(CyberHexThemeId.light).brightness, Brightness.light);
-      expect(CyberHexPalette.of(CyberHexThemeId.amoled).background, const Color(0xFF000000));
-      expect(CyberHexThemeId.fromName('materialYou'), CyberHexThemeId.materialYou);
+      expect(CyberHexThemeId.cyberpunk.label, 'Cyberpunk');
+      expect(
+        CyberHexPalette.of(CyberHexThemeId.light).brightness,
+        Brightness.light,
+      );
+      expect(
+        CyberHexPalette.of(CyberHexThemeId.cyberpunk).accent,
+        const Color(0xFFF472B6),
+      );
+      expect(
+        CyberHexPalette.of(CyberHexThemeId.amoled).background,
+        const Color(0xFF000000),
+      );
+      expect(CyberHexThemeId.fromName('cyberpunk'), CyberHexThemeId.cyberpunk);
+      expect(
+        CyberHexThemeId.fromName('materialYou'),
+        CyberHexThemeId.materialYou,
+      );
       expect(CyberHexThemeId.fromName('no-existe'), CyberHexThemeId.neon);
     });
 
@@ -53,8 +68,11 @@ void main() {
 
     test('un acento nuevo se aclara u oscurece para que se lea', () {
       final lighter = CyberHexPalette.neon.withAccent(const Color(0xFF101010));
-      expect(lighter.accent, isNot(const Color(0xFF101010)),
-          reason: 'se ajusta el brillo para que contraste');
+      expect(
+        lighter.accent,
+        isNot(const Color(0xFF101010)),
+        reason: 'se ajusta el brillo para que contraste',
+      );
       expect(lighter.accent.computeLuminance(), greaterThan(0.2));
     });
   });
@@ -71,6 +89,7 @@ void main() {
 
       theme.cycleTheme();
       expect(theme.themeId, CyberHexThemeId.light);
+      theme.cycleTheme();
       theme.cycleTheme();
       theme.cycleTheme();
       expect(theme.themeId, CyberHexThemeId.neon);
@@ -134,10 +153,16 @@ void main() {
 
     test('el acento de reserva es estable', () {
       final bytes = Uint8List.fromList(<int>[1, 2, 3, 4, 5]);
-      expect(ThemeController.fallbackAccent(bytes),
-          ThemeController.fallbackAccent(bytes));
-      expect(ThemeController.fallbackAccent(bytes),
-          isNot(ThemeController.fallbackAccent(Uint8List.fromList(<int>[9, 9, 9]))));
+      expect(
+        ThemeController.fallbackAccent(bytes),
+        ThemeController.fallbackAccent(bytes),
+      );
+      expect(
+        ThemeController.fallbackAccent(bytes),
+        isNot(
+          ThemeController.fallbackAccent(Uint8List.fromList(<int>[9, 9, 9])),
+        ),
+      );
     });
 
     test('los ajustes se guardan y se recuperan', () async {
@@ -160,7 +185,10 @@ void main() {
       expect(second.coverStyle, CoverStyle.rounded);
       expect(second.pocketMode, isTrue);
       expect(second.dynamicColor, isTrue);
-      expect(second.actions, <PlayerAction>{PlayerAction.tags, PlayerAction.lab});
+      expect(second.actions, <PlayerAction>{
+        PlayerAction.tags,
+        PlayerAction.lab,
+      });
       dir.deleteSync(recursive: true);
     });
   });
@@ -187,10 +215,12 @@ void main() {
       final theme = ThemeController.memory();
       addTearDown(theme.dispose);
 
-      await tester.pumpWidget(_app(
-        PlayerPage(controller: controller, theme: theme),
-        theme: theme.themeData,
-      ));
+      await tester.pumpWidget(
+        _app(
+          PlayerPage(controller: controller, theme: theme),
+          theme: theme.themeData,
+        ),
+      );
       await tester.pump();
       return (fake, controller, theme);
     }
@@ -230,8 +260,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('el arrastre vertical en la barra hace búsqueda fina',
-        (tester) async {
+    testWidgets('el arrastre vertical en la barra hace búsqueda fina', (
+      tester,
+    ) async {
       final (fake, _, _) = await pumpPlayer(tester, position: 30);
       // 100 px hacia arriba = 5 s (1 px = 50 ms).
       await tester.drag(find.byType(Slider).first, const Offset(0, -100));
@@ -246,8 +277,9 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
 
-    testWidgets('el modo bolsillo bloquea y se sale con pulsación larga',
-        (tester) async {
+    testWidgets('el modo bolsillo bloquea y se sale con pulsación larga', (
+      tester,
+    ) async {
       final (fake, _, theme) = await pumpPlayer(tester);
       await tester.tap(find.byTooltip('Modo bolsillo'));
       // La página entera escucha el doble toque, así que el toque simple se
@@ -256,7 +288,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       // El bloqueo es un ajuste del tema: si no se enciende, el botón no llegó.
-      expect(theme.pocketMode, isTrue, reason: 'el botón no llegó a encenderlo');
+      expect(
+        theme.pocketMode,
+        isTrue,
+        reason: 'el botón no llegó a encenderlo',
+      );
       expect(find.text('Mantén pulsado para salir'), findsOneWidget);
 
       // Con el bloqueo puesto, el doble toque no hace nada.
@@ -267,11 +303,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Mantén pulsado para salir'), findsNothing);
       await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(seconds: 3)); // suelta los temporizadores
+      await tester.pump(
+        const Duration(seconds: 3),
+      ); // suelta los temporizadores
     });
 
-    testWidgets('los cuatro estilos de carátula se pintan sin errores',
-        (tester) async {
+    testWidgets('los cuatro estilos de carátula se pintan sin errores', (
+      tester,
+    ) async {
       final (_, _, theme) = await pumpPlayer(tester);
       for (final style in CoverStyle.values) {
         theme.setCoverStyle(style);
@@ -281,8 +320,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('en pantalla ancha se usa el diseño de dos paneles',
-        (tester) async {
+    testWidgets('en pantalla ancha se usa el diseño de dos paneles', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(1200, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -297,15 +337,22 @@ void main() {
       final theme = ThemeController.memory();
       addTearDown(theme.dispose);
 
-      await tester.pumpWidget(_app(
-        PlayerPage(controller: controller, theme: theme),
-        theme: theme.themeData,
-      ));
+      await tester.pumpWidget(
+        _app(
+          PlayerPage(controller: controller, theme: theme),
+          theme: theme.themeData,
+        ),
+      );
       await tester.pump();
 
       // En dos paneles la carátula y los controles están lado a lado.
-      expect(find.byKey(const ValueKey<String>('player-panes')), findsOneWidget);
-      final cover = tester.getRect(find.byKey(const ValueKey<String>('player-cover')));
+      expect(
+        find.byKey(const ValueKey<String>('player-panes')),
+        findsOneWidget,
+      );
+      final cover = tester.getRect(
+        find.byKey(const ValueKey<String>('player-cover')),
+      );
       final title = tester.getRect(find.text('Tema'));
       expect(cover.center.dx, lessThan(title.center.dx));
       expect(find.text('CYBERHEX'), findsOneWidget);
@@ -324,11 +371,13 @@ void main() {
       controller.pump();
       var opened = 0;
 
-      await tester.pumpWidget(_app(
-        Scaffold(
-          body: MiniPlayer(controller: controller, onOpen: () => opened += 1),
+      await tester.pumpWidget(
+        _app(
+          Scaffold(
+            body: MiniPlayer(controller: controller, onOpen: () => opened += 1),
+          ),
         ),
-      ));
+      );
       await tester.pump();
 
       expect(find.text('En la biblioteca'), findsOneWidget);
@@ -345,11 +394,13 @@ void main() {
     testWidgets('sin pista no ocupa sitio', (tester) async {
       final controller = PlayerController(FakePlayer());
       addTearDown(controller.dispose);
-      await tester.pumpWidget(_app(
-        Scaffold(
-          body: MiniPlayer(controller: controller, onOpen: () {}),
+      await tester.pumpWidget(
+        _app(
+          Scaffold(
+            body: MiniPlayer(controller: controller, onOpen: () {}),
+          ),
         ),
-      ));
+      );
       await tester.pump();
       expect(find.byType(MiniPlayer), findsOneWidget);
       expect(find.byType(Icon), findsNothing);
@@ -358,15 +409,15 @@ void main() {
   });
 
   group('SettingsPage', () {
-    testWidgets('cambia el tema, el bolsillo y la barra de acciones',
-        (tester) async {
+    testWidgets('cambia el tema, el bolsillo y la barra de acciones', (
+      tester,
+    ) async {
       final theme = ThemeController.memory();
       addTearDown(theme.dispose);
 
-      await tester.pumpWidget(_app(
-        SettingsPage(theme: theme),
-        theme: theme.themeData,
-      ));
+      await tester.pumpWidget(
+        _app(SettingsPage(theme: theme), theme: theme.themeData),
+      );
       await tester.pump();
 
       await tester.tap(find.text('AMOLED Negro Puro'));
