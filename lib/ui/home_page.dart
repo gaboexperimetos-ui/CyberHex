@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
@@ -44,6 +45,20 @@ class HomePage extends StatelessWidget {
       builder: (context, _) {
         final palette = theme.palette;
         final snapshot = controller.snapshot;
+        final currentPath =
+            snapshot.queueIndex >= 0 &&
+                snapshot.queueIndex < snapshot.queue.length
+            ? snapshot.queue[snapshot.queueIndex].path
+            : null;
+        final recents = _recentTracks(
+          stats,
+          excludePath: currentPath,
+          limit: 10,
+        );
+        final top = <TrackStat>[
+          for (final stat in stats.topTracks(5))
+            if (stat.plays > 0) stat,
+        ];
         return Scaffold(
           backgroundColor: palette.background,
           body: Container(
@@ -74,6 +89,21 @@ class HomePage extends StatelessWidget {
                     onOpenLibrary: onOpenLibrary,
                   ),
                   const SizedBox(height: 26),
+                  if (recents.isNotEmpty) ...[
+                    _SectionHeader(
+                      'Sigue escuchando',
+                      palette: palette,
+                      onSeeAll: onOpenStats,
+                    ),
+                    const SizedBox(height: 10),
+                    _RecentRail(
+                      entries: recents,
+                      palette: palette,
+                      onPlay: (path) =>
+                          unawaited(_play(context, controller, path)),
+                    ),
+                    const SizedBox(height: 26),
+                  ],
                   _SectionTitle('Explorar', palette: palette),
                   const SizedBox(height: 12),
                   _Shortcuts(
@@ -83,6 +113,21 @@ class HomePage extends StatelessWidget {
                     onRadio: onOpenRadio,
                     onStats: onOpenStats,
                   ),
+                  if (top.isNotEmpty) ...[
+                    const SizedBox(height: 26),
+                    _SectionHeader(
+                      'Lo que más suena',
+                      palette: palette,
+                      onSeeAll: onOpenStats,
+                    ),
+                    const SizedBox(height: 10),
+                    _TopTracks(
+                      tracks: top,
+                      palette: palette,
+                      onPlay: (path) =>
+                          unawaited(_play(context, controller, path)),
+                    ),
+                  ],
                   const SizedBox(height: 26),
                   _SectionTitle('Tu actividad', palette: palette),
                   const SizedBox(height: 12),
@@ -98,6 +143,37 @@ class HomePage extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// Historial reciente sin repetir pistas; deja fuera la que ya suena.
+  static List<HistoryEntry> _recentTracks(
+    StatsStore stats, {
+    String? excludePath,
+    int limit = 10,
+  }) {
+    final seen = <String>{};
+    final out = <HistoryEntry>[];
+    for (final entry in stats.history) {
+      if (entry.path.isEmpty) continue;
+      if (excludePath != null && entry.path == excludePath) continue;
+      if (!seen.add(entry.path)) continue;
+      out.add(entry);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /// Reproduce una ruta ya conocida por las estadísticas.
+  static Future<void> _play(
+    BuildContext context,
+    PlayerController controller,
+    String path,
+  ) async {
+    final error = await controller.openFile(path);
+    if (error == null || !context.mounted) return;
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('No se pudo reproducir: $error')));
   }
 }
 
@@ -623,6 +699,358 @@ class _Divider extends StatelessWidget {
       width: 1,
       height: 30,
       color: palette.border.withValues(alpha: 0.5),
+    );
+  }
+}
+
+/// Título de sección con un acceso opcional «Ver todo» a la derecha.
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader(this.text, {required this.palette, this.onSeeAll});
+
+  final String text;
+  final CyberHexPalette palette;
+  final VoidCallback? onSeeAll;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: _SectionTitle(text, palette: palette)),
+        if (onSeeAll != null)
+          TextButton(
+            onPressed: onSeeAll,
+            style: TextButton.styleFrom(
+              foregroundColor: palette.accent,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 28),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            child: const Text('Ver todo'),
+          ),
+      ],
+    );
+  }
+}
+
+/// Carrusel horizontal de lo último escuchado.
+class _RecentRail extends StatelessWidget {
+  const _RecentRail({
+    required this.entries,
+    required this.palette,
+    required this.onPlay,
+  });
+
+  final List<HistoryEntry> entries;
+  final CyberHexPalette palette;
+  final ValueChanged<String> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 166,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        clipBehavior: Clip.none,
+        itemCount: entries.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final entry = entries[index];
+          return _RecentCard(
+            entry: entry,
+            palette: palette,
+            onTap: () => onPlay(entry.path),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RecentCard extends StatelessWidget {
+  const _RecentCard({
+    required this.entry,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final HistoryEntry entry;
+  final CyberHexPalette palette;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final artist = entry.artist.trim();
+    return SizedBox(
+      width: 112,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _HexCover(seed: entry.label, palette: palette),
+            const SizedBox(height: 8),
+            Text(
+              entry.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: palette.foreground,
+              ),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              artist.isEmpty ? 'Desconocido' : artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: palette.muted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Carátula de reserva con forma de hexágono y tono derivado del título.
+class _HexCover extends StatelessWidget {
+  const _HexCover({required this.seed, required this.palette});
+
+  /// Lado del hexágono; también fija el cuerpo de la inicial.
+  static const double size = 112;
+
+  final String seed;
+  final CyberHexPalette palette;
+
+  Color _tint() {
+    final hash =
+        seed.codeUnits.fold<int>(0, (acc, unit) => acc * 31 + unit) &
+        0x7fffffff;
+    final hsl = HSLColor.fromColor(palette.accent);
+    final hue = (hsl.hue + ((hash % 90) - 45) + 360) % 360;
+    return hsl
+        .withHue(hue)
+        .withSaturation(hsl.saturation.clamp(0.45, 1.0))
+        .toColor();
+  }
+
+  static String _initial(String text) {
+    for (final rune in text.trim().runes) {
+      final char = String.fromCharCode(rune).trim();
+      if (char.isNotEmpty) return char.toUpperCase();
+    }
+    return '#';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = _tint();
+    return SizedBox(
+      width: size,
+      height: size,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ClipPath(
+            clipper: const _HexClipper(),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: <Color>[
+                    Color.lerp(tint, palette.surfaceHigh, 0.25)!,
+                    Color.lerp(palette.surface, palette.background, 0.35)!,
+                  ],
+                ),
+              ),
+              child: Center(
+                child: Text(
+                  _initial(seed),
+                  style: TextStyle(
+                    fontFamily: 'Righteous',
+                    fontSize: size * 0.38,
+                    color: Colors.white.withValues(alpha: 0.92),
+                    shadows: <Shadow>[
+                      Shadow(
+                        color: tint.withValues(alpha: 0.85),
+                        blurRadius: 16,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          CustomPaint(
+            painter: _HexPainter(color: tint.withValues(alpha: 0.55)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HexClipper extends CustomClipper<Path> {
+  const _HexClipper();
+
+  @override
+  Path getClip(Size size) => _hexPath(size);
+
+  @override
+  bool shouldReclip(covariant CustomClipper<Path> oldClipper) => false;
+}
+
+class _HexPainter extends CustomPainter {
+  const _HexPainter({required this.color});
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = color;
+    canvas.drawPath(_hexPath(size, inset: 1.2), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HexPainter oldDelegate) =>
+      oldDelegate.color != color;
+}
+
+Path _hexPath(Size size, {double inset = 0}) {
+  final w = size.width;
+  final h = size.height;
+  final shoulder = h * 0.25;
+  return Path()
+    ..moveTo(w / 2, inset)
+    ..lineTo(w - inset, shoulder)
+    ..lineTo(w - inset, h - shoulder)
+    ..lineTo(w / 2, h - inset)
+    ..lineTo(inset, h - shoulder)
+    ..lineTo(inset, shoulder)
+    ..close();
+}
+
+/// Lista compacta de las pistas más reproducidas.
+class _TopTracks extends StatelessWidget {
+  const _TopTracks({
+    required this.tracks,
+    required this.palette,
+    required this.onPlay,
+  });
+
+  final List<TrackStat> tracks;
+  final CyberHexPalette palette;
+  final ValueChanged<String> onPlay;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: palette.surface,
+      borderRadius: BorderRadius.circular(20),
+      clipBehavior: Clip.antiAlias,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: palette.border.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          children: [
+            for (var i = 0; i < tracks.length; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: palette.border.withValues(alpha: 0.35),
+                ),
+              _TopTrackRow(
+                rank: i + 1,
+                stat: tracks[i],
+                palette: palette,
+                onTap: () => onPlay(tracks[i].path),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TopTrackRow extends StatelessWidget {
+  const _TopTrackRow({
+    required this.rank,
+    required this.stat,
+    required this.palette,
+    required this.onTap,
+  });
+
+  final int rank;
+  final TrackStat stat;
+  final CyberHexPalette palette;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              child: Text(
+                rank.toString().padLeft(2, '0'),
+                style: TextStyle(
+                  fontFamily: 'Righteous',
+                  fontSize: 13,
+                  color: palette.accent,
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    stat.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: palette.foreground,
+                    ),
+                  ),
+                  Text(
+                    stat.artist.trim().isEmpty ? 'Desconocido' : stat.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${stat.plays}×',
+              style: TextStyle(fontSize: 11.5, color: palette.muted),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
