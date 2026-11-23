@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/library_browse.dart';
@@ -11,6 +12,7 @@ import '../core/stats_store.dart';
 import '../core/theme_controller.dart';
 import '../theme.dart';
 import 'hex_cover.dart';
+import 'search_sheet.dart';
 
 /// Pestaña de inicio: el punto de entrada de la app.
 ///
@@ -69,98 +71,114 @@ class HomePage extends StatelessWidget {
         final albums = onOpenAlbum == null
             ? const <LibraryAlbum>[]
             : albumsFromTracks(controller.libraryTracks);
-        return Scaffold(
-          backgroundColor: palette.background,
-          body: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: <Color>[
-                  Color.lerp(palette.background, palette.primary, 0.38)!,
-                  palette.background,
-                ],
-                stops: const <double>[0, 0.45],
-              ),
-            ),
-            child: SafeArea(
-              bottom: false,
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
-                children: [
-                  _Header(palette: palette),
-                  const SizedBox(height: 20),
-                  _ContinueCard(
-                    snapshot: snapshot,
-                    position: controller.position,
-                    palette: palette,
-                    onOpen: onOpenPlayer,
-                    onToggle: controller.toggle,
-                    onOpenLibrary: onOpenLibrary,
+        void openSearch() => unawaited(_openSearch(context, controller, stats));
+        return CallbackShortcuts(
+          bindings: <ShortcutActivator, VoidCallback>{
+            const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+                openSearch,
+            const SingleActivator(LogicalKeyboardKey.keyF, meta: true):
+                openSearch,
+            const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+                openSearch,
+            const SingleActivator(LogicalKeyboardKey.keyK, meta: true):
+                openSearch,
+          },
+          child: Focus(
+            autofocus: true,
+            child: Scaffold(
+              backgroundColor: palette.background,
+              body: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: <Color>[
+                      Color.lerp(palette.background, palette.primary, 0.38)!,
+                      palette.background,
+                    ],
+                    stops: const <double>[0, 0.45],
                   ),
-                  const SizedBox(height: 26),
-                  if (recents.isNotEmpty) ...[
-                    _SectionHeader(
-                      'Sigue escuchando',
-                      palette: palette,
-                      onSeeAll: onOpenStats,
-                    ),
-                    const SizedBox(height: 10),
-                    _RecentRail(
-                      entries: recents,
-                      palette: palette,
-                      onPlay: (path) =>
-                          unawaited(_play(context, controller, path)),
-                    ),
-                    const SizedBox(height: 26),
-                  ],
-                  if (albums.isNotEmpty) ...[
-                    _SectionHeader(
-                      'Álbumes',
-                      palette: palette,
-                      onSeeAll: onOpenLibrary,
-                    ),
-                    const SizedBox(height: 10),
-                    _AlbumRail(
-                      albums: albums.take(12).toList(growable: false),
-                      palette: palette,
-                      onOpen: (album) => onOpenAlbum!(album.name),
-                    ),
-                    const SizedBox(height: 26),
-                  ],
-                  _SectionTitle('Explorar', palette: palette),
-                  const SizedBox(height: 12),
-                  _Shortcuts(
-                    palette: palette,
-                    onLibrary: onOpenLibrary,
-                    onPlaylists: onOpenPlaylists,
-                    onRadio: onOpenRadio,
-                    onStats: onOpenStats,
+                ),
+                child: SafeArea(
+                  bottom: false,
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
+                    children: [
+                      _Header(palette: palette, onSearch: openSearch),
+                      const SizedBox(height: 20),
+                      _ContinueCard(
+                        snapshot: snapshot,
+                        position: controller.position,
+                        palette: palette,
+                        onOpen: onOpenPlayer,
+                        onToggle: controller.toggle,
+                        onOpenLibrary: onOpenLibrary,
+                      ),
+                      const SizedBox(height: 26),
+                      if (recents.isNotEmpty) ...[
+                        _SectionHeader(
+                          'Sigue escuchando',
+                          palette: palette,
+                          onSeeAll: onOpenStats,
+                        ),
+                        const SizedBox(height: 10),
+                        _RecentRail(
+                          entries: recents,
+                          palette: palette,
+                          onPlay: (path) =>
+                              unawaited(_play(context, controller, path)),
+                        ),
+                        const SizedBox(height: 26),
+                      ],
+                      if (albums.isNotEmpty) ...[
+                        _SectionHeader(
+                          'Álbumes',
+                          palette: palette,
+                          onSeeAll: onOpenLibrary,
+                        ),
+                        const SizedBox(height: 10),
+                        _AlbumRail(
+                          albums: albums.take(12).toList(growable: false),
+                          palette: palette,
+                          onOpen: (album) => onOpenAlbum!(album.name),
+                        ),
+                        const SizedBox(height: 26),
+                      ],
+                      _SectionTitle('Explorar', palette: palette),
+                      const SizedBox(height: 12),
+                      _Shortcuts(
+                        palette: palette,
+                        onLibrary: onOpenLibrary,
+                        onPlaylists: onOpenPlaylists,
+                        onRadio: onOpenRadio,
+                        onStats: onOpenStats,
+                      ),
+                      if (top.isNotEmpty) ...[
+                        const SizedBox(height: 26),
+                        _SectionHeader(
+                          'Lo que más suena',
+                          palette: palette,
+                          onSeeAll: onOpenStats,
+                        ),
+                        const SizedBox(height: 10),
+                        _TopTracks(
+                          tracks: top,
+                          palette: palette,
+                          onPlay: (path) =>
+                              unawaited(_play(context, controller, path)),
+                        ),
+                      ],
+                      const SizedBox(height: 26),
+                      _SectionTitle('Tu actividad', palette: palette),
+                      const SizedBox(height: 12),
+                      _ActivityCard(
+                        stats: stats,
+                        palette: palette,
+                        onOpen: onOpenStats,
+                      ),
+                    ],
                   ),
-                  if (top.isNotEmpty) ...[
-                    const SizedBox(height: 26),
-                    _SectionHeader(
-                      'Lo que más suena',
-                      palette: palette,
-                      onSeeAll: onOpenStats,
-                    ),
-                    const SizedBox(height: 10),
-                    _TopTracks(
-                      tracks: top,
-                      palette: palette,
-                      onPlay: (path) =>
-                          unawaited(_play(context, controller, path)),
-                    ),
-                  ],
-                  const SizedBox(height: 26),
-                  _SectionTitle('Tu actividad', palette: palette),
-                  const SizedBox(height: 12),
-                  _ActivityCard(
-                    stats: stats,
-                    palette: palette,
-                    onOpen: onOpenStats,
-                  ),
-                ],
+                ),
               ),
             ),
           ),
@@ -199,12 +217,25 @@ class HomePage extends StatelessWidget {
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text('No se pudo reproducir: $error')));
   }
+
+  /// Abre la búsqueda global (biblioteca + historial) desde Inicio.
+  static Future<void> _openSearch(
+    BuildContext context,
+    PlayerController controller,
+    StatsStore stats,
+  ) {
+    return SearchSheet.show(context, controller: controller, stats: stats);
+  }
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.palette});
+  const _Header({required this.palette, this.onSearch});
 
   final CyberHexPalette palette;
+
+  /// Abre la búsqueda global. Sin callback no se pinta la lupa (portada usada
+  /// suelta, sin armazón).
+  final VoidCallback? onSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -246,6 +277,14 @@ class _Header extends StatelessWidget {
           ],
         ),
         const Spacer(),
+        if (onSearch != null) ...[
+          IconButton(
+            tooltip: 'Buscar (Ctrl+F)',
+            onPressed: onSearch,
+            icon: Icon(Icons.search_rounded, color: palette.foreground),
+          ),
+          const SizedBox(width: 4),
+        ],
         Container(
           width: 42,
           height: 42,
