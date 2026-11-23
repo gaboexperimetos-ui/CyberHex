@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../core/favorites_store.dart';
@@ -179,19 +180,39 @@ class _HomeShellState extends State<HomeShell> {
         MiniPlayer(controller: widget.controller, onOpen: _openPlayer),
       ],
     );
+    final Scaffold scaffold;
     if (!wide) {
-      return Scaffold(body: content, bottomNavigationBar: navigationBar);
+      scaffold = Scaffold(body: content, bottomNavigationBar: navigationBar);
+    } else {
+      scaffold = Scaffold(
+        body: Row(
+          children: [
+            _navigationRail(palette),
+            const VerticalDivider(width: 1, thickness: 0),
+            Expanded(child: content),
+          ],
+        ),
+      );
     }
-    return Scaffold(
-      body: Row(
-        children: [
-          _navigationRail(palette),
-          const VerticalDivider(width: 1, thickness: 0),
-          Expanded(child: content),
-        ],
-      ),
+    // Atajos de escritorio: Ctrl/⌘ + 1..4 salta de pestaña sin soltar el
+    // teclado. Los dígitos solos se dejan libres para los campos de búsqueda.
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        for (var i = 0; i < 4; i++) ...<ShortcutActivator, VoidCallback>{
+          SingleActivator(_digits[i], control: true): () => _select(i),
+          SingleActivator(_digits[i], meta: true): () => _select(i),
+        },
+      },
+      child: Focus(autofocus: true, child: scaffold),
     );
   }
+
+  static const List<LogicalKeyboardKey> _digits = <LogicalKeyboardKey>[
+    LogicalKeyboardKey.digit1,
+    LogicalKeyboardKey.digit2,
+    LogicalKeyboardKey.digit3,
+    LogicalKeyboardKey.digit4,
+  ];
 
   Widget _navigationBar(CyberHexPalette palette) {
     return DecoratedBox(

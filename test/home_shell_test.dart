@@ -2,6 +2,7 @@ import 'package:cyberhex/core/home_tab_store.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/core/theme_controller.dart';
 import 'package:cyberhex/ui/home_shell.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -88,6 +89,34 @@ void main() {
 
     final index = tester.widget<IndexedStack>(find.byType(IndexedStack)).index;
     expect(index, 2);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Ctrl+3 salta a Listas con el teclado', (tester) async {
+    final controller = PlayerController(FakePlayer());
+    final theme = ThemeController();
+    final tabs = HomeTabStore.memory();
+    addTearDown(controller.dispose);
+    addTearDown(theme.dispose);
+    addTearDown(tabs.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme.themeData,
+        home: HomeShell(controller: controller, theme: theme, tabs: tabs),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit3);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    final index = tester.widget<IndexedStack>(find.byType(IndexedStack)).index;
+    expect(index, 2);
+    expect(tabs.tab, 2);
 
     await tester.pumpWidget(const SizedBox());
   });
