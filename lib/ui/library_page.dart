@@ -47,6 +47,8 @@ class LibraryPage extends StatefulWidget {
     this.longTracks,
     this.onOpenPlayer,
     this.showMiniPlayer = true,
+    this.focusAlbum,
+    this.focusRequest = 0,
   });
 
   final PlayerController controller;
@@ -70,6 +72,13 @@ class LibraryPage extends StatefulWidget {
   /// Si es `false`, el mini-reproductor lo dibuja el armazón que contiene la
   /// página (así no se duplica cuando la biblioteca es una pestaña).
   final bool showMiniPlayer;
+
+  /// Álbum por el que saltar al abrirse (lo pide la sección Álbumes de Inicio).
+  final String? focusAlbum;
+
+  /// Cambia cuando el armazón quiere forzar el salto; así tocar dos álbumes
+  /// distintos seguidos vuelve a aplicar el foco.
+  final int focusRequest;
 
   @override
   State<LibraryPage> createState() => _LibraryPageState();
@@ -115,6 +124,22 @@ class _LibraryPageState extends State<LibraryPage>
     _controller.addListener(_onPlayerChanged);
     final root = widget.initialRoot;
     if (root != null) unawaited(_scan(root));
+    if (widget.focusRequest > 0) _applyFocus();
+  }
+
+  @override
+  void didUpdateWidget(LibraryPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.focusRequest != oldWidget.focusRequest) _applyFocus();
+  }
+
+  /// Salta a la pestaña Álbumes con la búsqueda puesta en ese álbum.
+  void _applyFocus() {
+    final album = widget.focusAlbum;
+    if (album == null || album.isEmpty) return;
+    _tabs.index = LibraryTab.albums.index;
+    _search.text = album;
+    setState(() => _query = _normalize(album));
   }
 
   @override

@@ -25,6 +25,8 @@ Future<FavoritesStore> _pumpLibrary(
   WidgetTester tester, {
   PlayerController? controller,
   FavoritesStore? favorites,
+  String? focusAlbum,
+  int focusRequest = 0,
 }) async {
   final fake = controller == null ? _fakeWithLibrary() : null;
   final player = controller ?? PlayerController(fake!);
@@ -38,6 +40,8 @@ Future<FavoritesStore> _pumpLibrary(
         controller: player,
         favorites: store,
         initialRoot: '/m',
+        focusAlbum: focusAlbum,
+        focusRequest: focusRequest,
       ),
     ),
   );
@@ -125,6 +129,18 @@ void main() {
     expect(find.text('Sin álbum'), findsOneWidget);
     // Cada grupo lleva su carátula-emblema hexagonal.
     expect(find.byType(HexCover), findsNWidgets(3));
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('el foco de Inicio abre Álbumes filtrado por ese álbum', (
+    tester,
+  ) async {
+    await _pumpLibrary(tester, focusAlbum: 'Clásicos', focusRequest: 1);
+
+    expect(find.text('Clásicos'), findsWidgets);
+    expect(find.text('Lento'), findsNothing);
+    expect(find.text('Sin álbum'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
   });

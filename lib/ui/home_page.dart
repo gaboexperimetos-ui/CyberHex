@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../core/library_browse.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../core/stats_store.dart';
@@ -28,6 +29,7 @@ class HomePage extends StatelessWidget {
     required this.onOpenPlaylists,
     required this.onOpenRadio,
     required this.onOpenStats,
+    this.onOpenAlbum,
   });
 
   final PlayerController controller;
@@ -38,6 +40,10 @@ class HomePage extends StatelessWidget {
   final VoidCallback onOpenPlaylists;
   final VoidCallback onOpenRadio;
   final VoidCallback onOpenStats;
+
+  /// Abre la biblioteca filtrada por un álbum. Si falta, la sección de álbumes
+  /// no se pinta (pruebas de la portada aislada).
+  final void Function(String album)? onOpenAlbum;
 
   @override
   Widget build(BuildContext context) {
@@ -60,6 +66,9 @@ class HomePage extends StatelessWidget {
           for (final stat in stats.topTracks(5))
             if (stat.plays > 0) stat,
         ];
+        final albums = onOpenAlbum == null
+            ? const <LibraryAlbum>[]
+            : albumsFromTracks(controller.libraryTracks);
         return Scaffold(
           backgroundColor: palette.background,
           body: Container(
@@ -102,6 +111,20 @@ class HomePage extends StatelessWidget {
                       palette: palette,
                       onPlay: (path) =>
                           unawaited(_play(context, controller, path)),
+                    ),
+                    const SizedBox(height: 26),
+                  ],
+                  if (albums.isNotEmpty) ...[
+                    _SectionHeader(
+                      'Álbumes',
+                      palette: palette,
+                      onSeeAll: onOpenLibrary,
+                    ),
+                    const SizedBox(height: 10),
+                    _AlbumRail(
+                      albums: albums.take(12).toList(growable: false),
+                      palette: palette,
+                      onOpen: (album) => onOpenAlbum!(album.name),
                     ),
                     const SizedBox(height: 26),
                   ],
@@ -238,6 +261,67 @@ class _Header extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Carrusel horizontal de álbumes de la biblioteca escaneada.
+class _AlbumRail extends StatelessWidget {
+  const _AlbumRail({
+    required this.albums,
+    required this.palette,
+    required this.onOpen,
+  });
+
+  final List<LibraryAlbum> albums;
+  final CyberHexPalette palette;
+  final ValueChanged<LibraryAlbum> onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 178,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        itemCount: albums.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final album = albums[index];
+          return SizedBox(
+            width: 108,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => onOpen(album),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  HexCover(seed: album.seed, palette: palette, size: 108),
+                  const SizedBox(height: 8),
+                  Text(
+                    album.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: palette.foreground,
+                    ),
+                  ),
+                  Text(
+                    album.artist.isEmpty
+                        ? '${album.count} pistas'
+                        : '${album.artist} · ${album.count}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

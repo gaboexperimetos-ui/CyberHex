@@ -1,3 +1,4 @@
+import 'package:cyberhex/core/player_api.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/core/stats_store.dart';
 import 'package:cyberhex/core/theme_controller.dart';
@@ -11,8 +12,9 @@ void main() {
   Widget mount(
     PlayerController controller,
     ThemeController theme,
-    StatsStore stats,
-  ) {
+    StatsStore stats, {
+    void Function(String album)? onOpenAlbum,
+  }) {
     return MaterialApp(
       theme: theme.themeData,
       home: HomePage(
@@ -24,6 +26,7 @@ void main() {
         onOpenPlaylists: () {},
         onOpenRadio: () {},
         onOpenStats: () {},
+        onOpenAlbum: onOpenAlbum,
       ),
     );
   }
@@ -82,6 +85,42 @@ void main() {
     expect(find.text('Sigue escuchando'), findsNothing);
     expect(find.text('Lo que más suena'), findsNothing);
     expect(find.text('Explorar'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('inicio enseña los álbumes escaneados y avisa al tocarlos', (
+    tester,
+  ) async {
+    final fake = FakePlayer()
+      ..library = <LibraryTrack>[
+        LibraryTrack.fromPath('/m/Artista/Álbum/01.flac'),
+        LibraryTrack.fromPath('/m/Artista/Álbum/02.flac'),
+      ];
+    final controller = PlayerController(fake);
+    await controller.scanDirectory('/m');
+    final theme = ThemeController();
+    final stats = StatsStore.memory();
+    addTearDown(controller.dispose);
+    addTearDown(theme.dispose);
+    addTearDown(stats.dispose);
+
+    String? tapped;
+    await tester.pumpWidget(
+      mount(controller, theme, stats, onOpenAlbum: (album) => tapped = album),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('Álbumes'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Artista · 2'), findsOneWidget);
+
+    await tester.tap(find.text('Álbum'));
+    await tester.pumpAndSettle();
+    expect(tapped, 'Álbum');
 
     await tester.pumpWidget(const SizedBox());
   });

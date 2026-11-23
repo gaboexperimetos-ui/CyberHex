@@ -62,6 +62,17 @@ class _HomeShellState extends State<HomeShell> {
 
   int get _index => _tabs.tab;
 
+  String? _albumFocus;
+  int _libraryFocus = 0;
+
+  void _openAlbum(String album) {
+    setState(() {
+      _albumFocus = album;
+      _libraryFocus++;
+    });
+    _tabs.setTab(1);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -149,6 +160,7 @@ class _HomeShellState extends State<HomeShell> {
                 onOpenPlaylists: () => _select(2),
                 onOpenRadio: _openRadio,
                 onOpenStats: () => unawaited(_openStats()),
+                onOpenAlbum: _openAlbum,
               ),
               LibraryPage(
                 controller: widget.controller,
@@ -158,6 +170,8 @@ class _HomeShellState extends State<HomeShell> {
                 longTracks: _longTracks,
                 onOpenPlayer: _openPlayer,
                 showMiniPlayer: false,
+                focusAlbum: _albumFocus,
+                focusRequest: _libraryFocus,
               ),
               PlaylistsPage(
                 controller: widget.controller,
