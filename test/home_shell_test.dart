@@ -7,8 +7,9 @@ import 'package:material_ui/material_ui.dart';
 import 'fake_player.dart';
 
 void main() {
-  testWidgets('el armazón arranca en Inicio y cambia de pestaña',
-      (tester) async {
+  testWidgets('el armazón arranca en Inicio y cambia de pestaña', (
+    tester,
+  ) async {
     final fake = FakePlayer()
       ..hasTrack = true
       ..title = 'Canción'
@@ -18,16 +19,19 @@ void main() {
     addTearDown(controller.dispose);
     addTearDown(theme.dispose);
 
-    await tester.pumpWidget(MaterialApp(
-      theme: theme.themeData,
-      home: HomeShell(controller: controller, theme: theme),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme.themeData,
+        home: HomeShell(controller: controller, theme: theme),
+      ),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Tu música, tu máquina'), findsOneWidget);
     expect(find.text('Explorar'), findsOneWidget);
 
-    int? index() => tester.widget<IndexedStack>(find.byType(IndexedStack)).index;
+    int? index() =>
+        tester.widget<IndexedStack>(find.byType(IndexedStack)).index;
 
     expect(index(), 0);
     await tester.tap(
@@ -56,6 +60,49 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(index(), 0);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('en ventana ancha la navegación pasa a barra lateral', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final fake = FakePlayer()
+      ..hasTrack = true
+      ..title = 'Canción'
+      ..artist = 'Artista';
+    final controller = PlayerController(fake);
+    final theme = ThemeController();
+    addTearDown(controller.dispose);
+    addTearDown(theme.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: theme.themeData,
+        home: HomeShell(controller: controller, theme: theme),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+
+    int? index() =>
+        tester.widget<IndexedStack>(find.byType(IndexedStack)).index;
+    expect(index(), 0);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationRail),
+        matching: find.text('Biblioteca'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(index(), 1);
 
     await tester.pumpWidget(const SizedBox());
   });

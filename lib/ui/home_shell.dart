@@ -112,111 +112,210 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final palette = widget.theme.palette;
-    return Scaffold(
-      body: Column(
-        children: [
-          Expanded(
-            child: IndexedStack(
-              index: _index,
-              children: [
-                HomePage(
-                  controller: widget.controller,
-                  theme: widget.theme,
-                  stats: _stats,
-                  onOpenPlayer: _openPlayer,
-                  onOpenLibrary: () => _select(1),
-                  onOpenPlaylists: () => _select(2),
-                  onOpenRadio: _openRadio,
-                  onOpenStats: () => unawaited(_openStats()),
-                ),
-                LibraryPage(
-                  controller: widget.controller,
-                  playlists: _playlists,
-                  stats: _stats,
-                  favorites: _favorites,
-                  longTracks: _longTracks,
-                  onOpenPlayer: _openPlayer,
-                  showMiniPlayer: false,
-                ),
-                PlaylistsPage(
-                  controller: widget.controller,
-                  store: _playlists,
-                  stats: _stats,
-                  onOpenPlayer: _openPlayer,
-                  showMiniPlayer: false,
-                ),
-                SettingsPage(
-                  theme: widget.theme,
-                  player: widget.controller,
-                  desktop: widget.desktop,
-                  connections: widget.connections,
-                ),
-              ],
-            ),
-          ),
-          // Un único mini-reproductor para todas las pestañas: vive encima de
-          // la barra de navegación y no se re-monta al cambiar de sección.
-          MiniPlayer(controller: widget.controller, onOpen: _openPlayer),
-        ],
-      ),
-      bottomNavigationBar: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(color: palette.border.withValues(alpha: 0.5)),
-          ),
-        ),
-        child: NavigationBarTheme(
-          data: NavigationBarThemeData(
-            backgroundColor: palette.surface,
-            surfaceTintColor: Colors.transparent,
-            indicatorColor: palette.accent.withValues(alpha: 0.16),
-            labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-            labelTextStyle: WidgetStateProperty.resolveWith((states) {
-              final selected = states.contains(WidgetState.selected);
-              return TextStyle(
-                fontSize: 10.5,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? palette.accent : palette.muted,
-              );
-            }),
-            iconTheme: WidgetStateProperty.resolveWith((states) {
-              final selected = states.contains(WidgetState.selected);
-              return IconThemeData(
-                size: 24,
-                color: selected ? palette.accent : palette.muted,
-              );
-            }),
-          ),
-          child: NavigationBar(
-            height: 68,
-            elevation: 0,
-            selectedIndex: _index,
-            onDestinationSelected: _select,
-            destinations: const <NavigationDestination>[
-              NavigationDestination(
-                icon: Icon(Icons.home_outlined),
-                selectedIcon: Icon(Icons.home_rounded),
-                label: 'Inicio',
+    final size = MediaQuery.sizeOf(context);
+    // En ventanas anchas (PC) la navegación pasa a una barra lateral: la
+    // barra inferior se queda para el móvil. El umbral deja intacta la
+    // disposición de una ventana de 800 px.
+    final wide = size.width >= 900 && size.width > size.height;
+    final navigationBar = _navigationBar(palette);
+    final content = Column(
+      children: [
+        Expanded(
+          child: IndexedStack(
+            index: _index,
+            children: [
+              HomePage(
+                controller: widget.controller,
+                theme: widget.theme,
+                stats: _stats,
+                onOpenPlayer: _openPlayer,
+                onOpenLibrary: () => _select(1),
+                onOpenPlaylists: () => _select(2),
+                onOpenRadio: _openRadio,
+                onOpenStats: () => unawaited(_openStats()),
               ),
-              NavigationDestination(
-                icon: Icon(Icons.library_music_outlined),
-                selectedIcon: Icon(Icons.library_music_rounded),
-                label: 'Biblioteca',
+              LibraryPage(
+                controller: widget.controller,
+                playlists: _playlists,
+                stats: _stats,
+                favorites: _favorites,
+                longTracks: _longTracks,
+                onOpenPlayer: _openPlayer,
+                showMiniPlayer: false,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.queue_music_outlined),
-                selectedIcon: Icon(Icons.queue_music_rounded),
-                label: 'Listas',
+              PlaylistsPage(
+                controller: widget.controller,
+                store: _playlists,
+                stats: _stats,
+                onOpenPlayer: _openPlayer,
+                showMiniPlayer: false,
               ),
-              NavigationDestination(
-                icon: Icon(Icons.tune_outlined),
-                selectedIcon: Icon(Icons.tune_rounded),
-                label: 'Ajustes',
+              SettingsPage(
+                theme: widget.theme,
+                player: widget.controller,
+                desktop: widget.desktop,
+                connections: widget.connections,
               ),
             ],
           ),
         ),
+        // Un único mini-reproductor para todas las pestañas: vive encima de
+        // la barra de navegación y no se re-monta al cambiar de sección.
+        MiniPlayer(controller: widget.controller, onOpen: _openPlayer),
+      ],
+    );
+    if (!wide) {
+      return Scaffold(body: content, bottomNavigationBar: navigationBar);
+    }
+    return Scaffold(
+      body: Row(
+        children: [
+          _navigationRail(palette),
+          const VerticalDivider(width: 1, thickness: 0),
+          Expanded(child: content),
+        ],
       ),
     );
   }
+
+  Widget _navigationBar(CyberHexPalette palette) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(color: palette.border.withValues(alpha: 0.5)),
+        ),
+      ),
+      child: NavigationBarTheme(
+        data: _navigationTheme(palette),
+        child: NavigationBar(
+          height: 68,
+          elevation: 0,
+          selectedIndex: _index,
+          onDestinationSelected: _select,
+          destinations: _destinations,
+        ),
+      ),
+    );
+  }
+
+  Widget _navigationRail(CyberHexPalette palette) {
+    return NavigationRailTheme(
+      data: NavigationRailThemeData(
+        backgroundColor: palette.surface,
+        indicatorColor: palette.accent.withValues(alpha: 0.16),
+        selectedIconTheme: IconThemeData(color: palette.accent, size: 24),
+        unselectedIconTheme: IconThemeData(color: palette.muted, size: 24),
+        selectedLabelTextStyle: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: palette.accent,
+        ),
+        unselectedLabelTextStyle: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          color: palette.muted,
+        ),
+      ),
+      child: NavigationRail(
+        selectedIndex: _index,
+        onDestinationSelected: _select,
+        labelType: NavigationRailLabelType.all,
+        leading: Padding(
+          padding: const EdgeInsets.fromLTRB(0, 18, 0, 12),
+          child: Column(
+            children: [
+              Icon(Icons.hexagon_rounded, color: palette.accent, size: 30),
+              const SizedBox(height: 6),
+              Text(
+                'CYBER',
+                style: chDisplay.copyWith(
+                  fontSize: 11,
+                  color: palette.foreground,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              Text(
+                'HEX',
+                style: chDisplay.copyWith(
+                  fontSize: 11,
+                  color: palette.accent,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+        destinations: const <NavigationRailDestination>[
+          NavigationRailDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: Text('Inicio'),
+          ),
+          NavigationRailDestination(
+            icon: Icon(Icons.library_music_outlined),
+            selectedIcon: Icon(Icons.library_music_rounded),
+            label: Text('Biblioteca'),
+          ),
+          NavigationRailDestination(
+            icon: Icon(Icons.queue_music_outlined),
+            selectedIcon: Icon(Icons.queue_music_rounded),
+            label: Text('Listas'),
+          ),
+          NavigationRailDestination(
+            icon: Icon(Icons.tune_outlined),
+            selectedIcon: Icon(Icons.tune_rounded),
+            label: Text('Ajustes'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  NavigationBarThemeData _navigationTheme(CyberHexPalette palette) {
+    return NavigationBarThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      indicatorColor: palette.accent.withValues(alpha: 0.16),
+      labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+      labelTextStyle: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return TextStyle(
+          fontSize: 10.5,
+          fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+          color: selected ? palette.accent : palette.muted,
+        );
+      }),
+      iconTheme: WidgetStateProperty.resolveWith((states) {
+        final selected = states.contains(WidgetState.selected);
+        return IconThemeData(
+          size: 24,
+          color: selected ? palette.accent : palette.muted,
+        );
+      }),
+    );
+  }
+
+  static const List<NavigationDestination> _destinations =
+      <NavigationDestination>[
+        NavigationDestination(
+          icon: Icon(Icons.home_outlined),
+          selectedIcon: Icon(Icons.home_rounded),
+          label: 'Inicio',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.library_music_outlined),
+          selectedIcon: Icon(Icons.library_music_rounded),
+          label: 'Biblioteca',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.queue_music_outlined),
+          selectedIcon: Icon(Icons.queue_music_rounded),
+          label: 'Listas',
+        ),
+        NavigationDestination(
+          icon: Icon(Icons.tune_outlined),
+          selectedIcon: Icon(Icons.tune_rounded),
+          label: 'Ajustes',
+        ),
+      ];
 }
