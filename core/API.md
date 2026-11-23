@@ -243,6 +243,8 @@ int32_t ch_engine_strip_silence(ch_engine* engine, const char* src_path, const c
 int32_t ch_engine_concat_wav(ch_engine* engine, const char* const* src_paths, int32_t count, const char* dst_path, int32_t rate);
 int32_t ch_engine_split_by_silence(ch_engine* engine, const char* src_path, const char* prefix, float threshold_db, double min_s, int32_t rate);
 int32_t ch_engine_spectrogram_png(ch_engine* engine, const char* utf8_path, const char* utf8_out, int32_t width, int32_t height);
+int32_t ch_library_export_json_meta(const ch_library* lib, const char* utf8_path);
+int32_t ch_engine_queue_add_library(ch_engine* engine, const ch_library* lib, const char* needle);
 double  ch_bpm_detect_path(const char* utf8_path);
 double  ch_engine_bpm(ch_engine* engine);
 double  ch_dr_measure_path(const char* utf8_path, uint32_t* out_blocks);

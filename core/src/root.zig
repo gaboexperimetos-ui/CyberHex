@@ -2260,16 +2260,12 @@ export fn ch_engine_queue_export_m3u_ext(self: ?*Engine, path: [*c]const u8) i32
     buf.appendSlice(e.allocator, "#EXTM3U\n") catch return -2;
     e.list_mutex.lock();
     for (e.playlist.items) |item| {
-        // Abrir el archivo para leer titulo/artista (rapido, solo si existe).
-        var title: []const u8 = "";
-        var artist: []const u8 = "";
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const t = std.mem.span(ch_decode_title(d));
-            const a = std.mem.span(ch_decode_artist(d));
-            if (t.len > 0) title = t;
-            if (a.len > 0) artist = a;
-            ch_decode_close(d);
-        }
+        // readFileMeta copia antes de cerrar el decodificador: los punteros de
+        // ch_decode_* dejan de ser validos en ch_decode_close.
+        var meta = readFileMeta(e.allocator, item) orelse FileMeta{ .title = &.{}, .artist = &.{}, .album = &.{}, .duration = 0 };
+        defer meta.deinit(e.allocator);
+        const title: []const u8 = meta.title;
+        const artist: []const u8 = meta.artist;
         var tmp: [512]u8 = undefined;
         const line = std.fmt.bufPrint(&tmp, "#EXTINF:-1,{s} - {s}\n{s}\n", .{ artist, title, item }) catch continue;
         buf.appendSlice(e.allocator, line) catch {};
@@ -2300,15 +2296,10 @@ export fn ch_engine_queue_export_m3u_relative(self: ?*Engine, path: [*c]const u8
         if (base.len > 0 and std.mem.startsWith(u8, full, base)) {
             rel = full[base.len..];
         }
-        var title: []const u8 = "";
-        var artist: []const u8 = "";
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const t = std.mem.span(ch_decode_title(d));
-            const a = std.mem.span(ch_decode_artist(d));
-            if (t.len > 0) title = t;
-            if (a.len > 0) artist = a;
-            ch_decode_close(d);
-        }
+        var meta = readFileMeta(e.allocator, item) orelse FileMeta{ .title = &.{}, .artist = &.{}, .album = &.{}, .duration = 0 };
+        defer meta.deinit(e.allocator);
+        const title: []const u8 = meta.title;
+        const artist: []const u8 = meta.artist;
         var tmp: [512]u8 = undefined;
         const line = std.fmt.bufPrint(&tmp, "#EXTINF:-1,{s} - {s}\n{s}\n", .{ artist, title, rel }) catch continue;
         buf.appendSlice(e.allocator, line) catch {};
@@ -2397,14 +2388,18 @@ export fn ch_engine_queue_sort_title(self: ?*Engine) i32 {
         return -2;
     };
     defer e.allocator.free(titles);
+    var owned = e.allocator.alloc([]u8, n) catch {
+        e.allocator.free(titles);
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer {
+        for (owned) |o| e.allocator.free(o);
+        e.allocator.free(owned);
+    }
     for (e.playlist.items, 0..) |item, i| {
-        var title: []const u8 = item;
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const t = std.mem.span(ch_decode_title(d));
-            if (t.len > 0) title = t;
-            ch_decode_close(d);
-        }
-        titles[i] = title;
+        owned[i] = readTagDup(e.allocator, item, "title");
+        titles[i] = if (owned[i].len > 0) owned[i] else item;
     }
     // Ordenar por titulo (simple insertion sort, n pequeno).
     var i: usize = 1;
@@ -2432,14 +2427,20 @@ export fn ch_engine_queue_sort_artist(self: ?*Engine) i32 {
         return -2;
     };
     defer e.allocator.free(arts);
+    // El tag vive dentro del decodificador y deja de ser valido al cerrarlo,
+    // asi que se copia y se libera despues de ordenar.
+    var metas = e.allocator.alloc(FileMeta, n) catch {
+        e.allocator.free(arts);
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer {
+        for (metas) |*m| m.deinit(e.allocator);
+        e.allocator.free(metas);
+    }
     for (e.playlist.items, 0..) |item, i| {
-        var artist: []const u8 = item;
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const a = std.mem.span(ch_decode_artist(d));
-            if (a.len > 0) artist = a;
-            ch_decode_close(d);
-        }
-        arts[i] = artist;
+        metas[i] = readFileMeta(e.allocator, item) orelse FileMeta{ .title = &.{}, .artist = &.{}, .album = &.{}, .duration = 0 };
+        arts[i] = if (metas[i].artist.len > 0) metas[i].artist else item;
     }
     var i: usize = 1;
     while (i < n) : (i += 1) {
@@ -2466,14 +2467,18 @@ export fn ch_engine_queue_sort_album(self: ?*Engine) i32 {
         return -2;
     };
     defer e.allocator.free(vals);
+    var metas = e.allocator.alloc(FileMeta, n) catch {
+        e.allocator.free(vals);
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer {
+        for (metas) |*m| m.deinit(e.allocator);
+        e.allocator.free(metas);
+    }
     for (e.playlist.items, 0..) |item, i| {
-        var album: []const u8 = item;
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const a = std.mem.span(ch_decode_album(d));
-            if (a.len > 0) album = a;
-            ch_decode_close(d);
-        }
-        vals[i] = album;
+        metas[i] = readFileMeta(e.allocator, item) orelse FileMeta{ .title = &.{}, .artist = &.{}, .album = &.{}, .duration = 0 };
+        vals[i] = if (metas[i].album.len > 0) metas[i].album else item;
     }
     var i: usize = 1;
     while (i < n) : (i += 1) {
@@ -2600,14 +2605,18 @@ export fn ch_engine_queue_sort_albumartist(self: ?*Engine) i32 {
         return -2;
     };
     defer e.allocator.free(vals);
+    var owned = e.allocator.alloc([]u8, n) catch {
+        e.allocator.free(vals);
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer {
+        for (owned) |o| e.allocator.free(o);
+        e.allocator.free(owned);
+    }
     for (e.playlist.items, 0..) |item, i| {
-        var v: []const u8 = item;
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const a = std.mem.span(ch_decode_tag(d, "albumartist"));
-            if (a.len > 0) v = a;
-            ch_decode_close(d);
-        }
-        vals[i] = v;
+        owned[i] = readTagDup(e.allocator, item, "albumartist");
+        vals[i] = if (owned[i].len > 0) owned[i] else item;
     }
     var i: usize = 1;
     while (i < n) : (i += 1) {
@@ -2634,14 +2643,18 @@ export fn ch_engine_queue_sort_genre(self: ?*Engine) i32 {
         return -2;
     };
     defer e.allocator.free(vals);
+    var owned = e.allocator.alloc([]u8, n) catch {
+        e.allocator.free(vals);
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer {
+        for (owned) |o| e.allocator.free(o);
+        e.allocator.free(owned);
+    }
     for (e.playlist.items, 0..) |item, i| {
-        var v: []const u8 = item;
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const g = std.mem.span(ch_decode_tag(d, "genre"));
-            if (g.len > 0) v = g;
-            ch_decode_close(d);
-        }
-        vals[i] = v;
+        owned[i] = readTagDup(e.allocator, item, "genre");
+        vals[i] = if (owned[i].len > 0) owned[i] else item;
     }
     var i: usize = 1;
     while (i < n) : (i += 1) {
@@ -2668,14 +2681,18 @@ export fn ch_engine_queue_sort_composer(self: ?*Engine) i32 {
         return -2;
     };
     defer e.allocator.free(vals);
+    var owned = e.allocator.alloc([]u8, n) catch {
+        e.allocator.free(vals);
+        e.list_mutex.unlock();
+        return -2;
+    };
+    defer {
+        for (owned) |o| e.allocator.free(o);
+        e.allocator.free(owned);
+    }
     for (e.playlist.items, 0..) |item, i| {
-        var v: []const u8 = item;
-        if (ch_decode_open(item.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-            const c = std.mem.span(ch_decode_tag(d, "composer"));
-            if (c.len > 0) v = c;
-            ch_decode_close(d);
-        }
-        vals[i] = v;
+        owned[i] = readTagDup(e.allocator, item, "composer");
+        vals[i] = if (owned[i].len > 0) owned[i] else item;
     }
     var i: usize = 1;
     while (i < n) : (i += 1) {
@@ -2892,14 +2909,17 @@ export fn ch_engine_queue_title(self: ?*Engine, index: i32) [*c]const u8 {
     e.list_mutex.lock();
     const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
     e.list_mutex.unlock();
-    const p = path orelse return @ptrCast("");
-    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-        const t = std.mem.span(ch_decode_title(d));
-        ch_decode_close(d);
-        // Copiar a un buffer persistente (thread-local).
-        return copyTls(t);
-    }
-    return @ptrCast("");
+    return tagToTls(path.?, "title");
+}
+
+/// Copia un tag de `path` al buffer TLS, cerrando el decodificador despues de
+/// copiar (los punteros de ch_decode_* no sobreviven a ch_decode_close).
+fn tagToTls(path: [*:0]const u8, key: [*:0]const u8) [*c]const u8 {
+    const d = ch_decode_open(path, SAMPLE_RATE, CHANNELS) orelse return @ptrCast("");
+    const v = ch_decode_tag(d, key);
+    const copy = copyTls(std.mem.span(v));
+    ch_decode_close(d);
+    return copy;
 }
 
 fn copyTls(s: []const u8) [*c]const u8 {
@@ -2919,13 +2939,7 @@ export fn ch_engine_queue_artist(self: ?*Engine, index: i32) [*c]const u8 {
     e.list_mutex.lock();
     const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
     e.list_mutex.unlock();
-    const p = path orelse return @ptrCast("");
-    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-        const a = std.mem.span(ch_decode_artist(d));
-        ch_decode_close(d);
-        return copyTls(a);
-    }
-    return @ptrCast("");
+    return tagToTls(path.?, "artist");
 }
 
 /// Album de la pista `index` de la cola ("" si no se puede leer).
@@ -2935,13 +2949,7 @@ export fn ch_engine_queue_album(self: ?*Engine, index: i32) [*c]const u8 {
     e.list_mutex.lock();
     const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
     e.list_mutex.unlock();
-    const p = path orelse return @ptrCast("");
-    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-        const a = std.mem.span(ch_decode_album(d));
-        ch_decode_close(d);
-        return copyTls(a);
-    }
-    return @ptrCast("");
+    return tagToTls(path.?, "album");
 }
 
 /// Duracion de la pista `index` de la cola en segundos (-1 si no se puede leer).
@@ -2983,13 +2991,7 @@ export fn ch_engine_queue_genre(self: ?*Engine, index: i32) [*c]const u8 {
     e.list_mutex.lock();
     const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
     e.list_mutex.unlock();
-    const p = path orelse return @ptrCast("");
-    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-        const g = std.mem.span(ch_decode_tag(d, "genre"));
-        ch_decode_close(d);
-        return copyTls(g);
-    }
-    return @ptrCast("");
+    return tagToTls(path.?, "genre");
 }
 
 /// Fecha de la pista `index` de la cola ("" si no se puede leer).
@@ -2999,13 +3001,7 @@ export fn ch_engine_queue_date(self: ?*Engine, index: i32) [*c]const u8 {
     e.list_mutex.lock();
     const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
     e.list_mutex.unlock();
-    const p = path orelse return @ptrCast("");
-    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-        const g = std.mem.span(ch_decode_tag(d, "date"));
-        ch_decode_close(d);
-        return copyTls(g);
-    }
-    return @ptrCast("");
+    return tagToTls(path.?, "date");
 }
 
 /// Compositor de la pista `index` de la cola ("" si no se puede leer).
@@ -3015,13 +3011,7 @@ export fn ch_engine_queue_composer(self: ?*Engine, index: i32) [*c]const u8 {
     e.list_mutex.lock();
     const path: ?[:0]u8 = if (index < @as(i32, @intCast(e.playlist.items.len))) e.playlist.items[@intCast(index)] else null;
     e.list_mutex.unlock();
-    const p = path orelse return @ptrCast("");
-    if (ch_decode_open(p.ptr, SAMPLE_RATE, CHANNELS)) |d| {
-        const g = std.mem.span(ch_decode_tag(d, "composer"));
-        ch_decode_close(d);
-        return copyTls(g);
-    }
-    return @ptrCast("");
+    return tagToTls(path.?, "composer");
 }
 
 export fn ch_engine_play(self: ?*Engine) i32 {
@@ -5158,17 +5148,12 @@ export fn ch_engine_export_queue_csv(self: ?*Engine, path: [*c]const u8) i32 {
     defer e.list_mutex.unlock();
     for (e.playlist.items, 0..) |item, i| {
         const path_s: []const u8 = item;
-        var title: []const u8 = "";
-        var artist: []const u8 = "";
-        var album: []const u8 = "";
-        var dur: f64 = 0;
-        if (ch_decode_open(item, 8000, 1)) |d| {
-            title = std.mem.span(ch_decode_title(d));
-            artist = std.mem.span(ch_decode_artist(d));
-            album = std.mem.span(ch_decode_album(d));
-            dur = ch_decode_duration(d);
-            ch_decode_close(d);
-        }
+        var meta = readFileMeta(e.allocator, item) orelse FileMeta{ .title = &.{}, .artist = &.{}, .album = &.{}, .duration = 0 };
+        defer meta.deinit(e.allocator);
+        const title: []const u8 = meta.title;
+        const artist: []const u8 = meta.artist;
+        const album: []const u8 = meta.album;
+        const dur: f64 = meta.duration;
         line.clearRetainingCapacity();
         line.appendSlice(e.allocator, tryFmt("{d}", .{i}) orelse "0") catch return -2;
         line.append(e.allocator, ',') catch return -2;
@@ -5185,6 +5170,52 @@ export fn ch_engine_export_queue_csv(self: ?*Engine, path: [*c]const u8) i32 {
         out.appendSlice(e.allocator, line.items) catch return -2;
     }
     return ch_file_write_atomic(path, out.items.ptr, out.items.len);
+}
+
+/// Metadatos de un archivo con memoria propia (el decodificador los libera al
+/// cerrarse, asi que hay que copiarlos antes de ch_decode_close).
+const FileMeta = struct {
+    title: []u8,
+    artist: []u8,
+    album: []u8,
+    duration: f64,
+
+    fn deinit(self: *FileMeta, a: Allocator) void {
+        a.free(self.title);
+        a.free(self.artist);
+        a.free(self.album);
+    }
+};
+
+fn readFileMeta(a: Allocator, path: []const u8) ?FileMeta {
+    const d = ch_decode_open(path.ptr, 8000, 1) orelse return null;
+    defer ch_decode_close(d);
+    const t = std.mem.span(ch_decode_title(d));
+    const ar = std.mem.span(ch_decode_artist(d));
+    const al = std.mem.span(ch_decode_album(d));
+    const dup = struct {
+        fn f(aa: Allocator, src: []const u8) []u8 {
+            const c = aa.dupe(u8, src) catch return aa.alloc(u8, 0) catch &.{};
+            return c;
+        }
+    }.f;
+    return .{
+        .title = dup(a, t),
+        .artist = dup(a, ar),
+        .album = dup(a, al),
+        .duration = ch_decode_duration(d),
+    };
+}
+
+/// Copia un tag de `path` a memoria propia ("" si no existe o no se puede leer).
+fn readTagDup(a: Allocator, path: []const u8, key: []const u8) []u8 {
+    const d = ch_decode_open(path.ptr, 8000, 1) orelse return a.alloc(u8, 0) catch &.{};
+    defer ch_decode_close(d);
+    const key_z = a.dupeSentinel(u8, key, 0) catch return a.alloc(u8, 0) catch &.{};
+    defer a.free(key_z);
+    const v = ch_decode_tag(d, key_z.ptr);
+    const copy = a.dupe(u8, std.mem.span(v)) catch return a.alloc(u8, 0) catch &.{};
+    return copy;
 }
 
 /// Buffer temporal para formatear un numero sin arriesgar el asignador.
@@ -5535,6 +5566,78 @@ export fn ch_library_export_csv(lib: ?*const ch_library, path: [*c]const u8) i32
         buf.append(alloc, '\n') catch return -2;
     }
     return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Exporta la biblioteca a un archivo JSON con metadatos por pista
+/// (titulo, artista, album, duracion). Devuelve 0 si ok.
+export fn ch_library_export_json_meta(lib: ?*const ch_library, path: [*c]const u8) i32 {
+    if (lib == null or path == null) return -1;
+    const alloc = std.heap.c_allocator;
+    var buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer buf.deinit(alloc);
+    buf.appendSlice(alloc, "{\n  \"tracks\": [\n") catch return -2;
+    const n = c_lib_count(lib);
+    var i: i32 = 0;
+    while (i < n) : (i += 1) {
+        const p: [*c]const u8 = c_lib_path(lib, i) orelse @ptrCast("");
+        const span = std.mem.span(p);
+        buf.appendSlice(alloc, "    {\"path\": \"") catch return -2;
+        appendJsonString(&buf, alloc, span) catch return -2;
+        buf.appendSlice(alloc, "\", \"title\": \"") catch return -2;
+
+        var meta = readFileMeta(alloc, span) orelse FileMeta{ .title = &.{}, .artist = &.{}, .album = &.{}, .duration = 0 };
+        defer meta.deinit(alloc);
+        const title: []const u8 = meta.title;
+        const artist: []const u8 = meta.artist;
+        const album: []const u8 = meta.album;
+        const dur: f64 = meta.duration;
+        appendJsonString(&buf, alloc, title) catch return -2;
+        buf.appendSlice(alloc, "\", \"artist\": \"") catch return -2;
+        appendJsonString(&buf, alloc, artist) catch return -2;
+        buf.appendSlice(alloc, "\", \"album\": \"") catch return -2;
+        appendJsonString(&buf, alloc, album) catch return -2;
+        var tmp: [64]u8 = undefined;
+        const ds = std.fmt.bufPrint(&tmp, "\", \"duration\": {d:.2}}}", .{dur}) catch return -2;
+        buf.appendSlice(alloc, ds) catch return -2;
+        if (i + 1 < n) buf.append(alloc, ',') catch return -2;
+        buf.append(alloc, '\n') catch return -2;
+    }
+    buf.appendSlice(alloc, "  ],\n  \"count\": ") catch return -2;
+    var tmp2: [32]u8 = undefined;
+    const num = std.fmt.bufPrint(&tmp2, "{d}", .{n}) catch return -2;
+    buf.appendSlice(alloc, num) catch return -2;
+    buf.appendSlice(alloc, "\n}\n") catch return -2;
+    return ch_file_write_atomic(path, buf.items.ptr, buf.items.len);
+}
+
+/// Añade a la cola todas las pistas de la biblioteca cuya ruta contenga
+/// `needle` (vacio = todas). Devuelve el numero anadido, o negativo si error.
+export fn ch_engine_queue_add_library(self: ?*Engine, lib: ?*const ch_library, needle: [*c]const u8) i32 {
+    const e = self orelse return -1;
+    if (lib == null) return -1;
+    const n = c_lib_count(lib);
+    const span: []const u8 = if (needle == null) "" else std.mem.span(needle);
+
+    var added: i32 = 0;
+    e.list_mutex.lock();
+    defer e.list_mutex.unlock();
+    var i: i32 = 0;
+    while (i < n) : (i += 1) {
+        const p: [*c]const u8 = c_lib_path(lib, i) orelse continue;
+        const path = std.mem.span(p);
+        if (span.len > 0 and std.mem.indexOf(u8, path, span) == null) continue;
+        const z = e.allocator.dupeSentinel(u8, path, 0) catch continue;
+        e.playlist.append(e.allocator, z) catch {
+            e.allocator.free(z);
+            continue;
+        };
+        added += 1;
+    }
+    if (added == 0) return 0;
+    e.order.clearRetainingCapacity();
+    e.order_pos = 0;
+    _ = e.pushEvent(EV_QUEUE, added, 0, 0);
+    return added;
 }
 
 /// Activa/desactiva "evitar repetir pista reciente" (shuffle con recencia).
