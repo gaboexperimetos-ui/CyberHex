@@ -75,6 +75,9 @@ class _PlayerPageState extends State<PlayerPage>
   /// Posición de la búsqueda fina mientras se arrastra en vertical.
   double? _fineSeek;
 
+  /// Cola abierta como panel derecho fijo (solo en ventanas anchas).
+  bool _showQueue = false;
+
   Offset? _doubleTapAt;
 
   StreamSubscription<List<String>>? _dropsSubscription;
@@ -169,8 +172,15 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  void _openQueue() =>
+  void _openQueue() {
+    final size = MediaQuery.sizeOf(context);
+    final wide = size.width >= 760 && size.width > size.height;
+    if (!wide) {
       QueueSheet.show(context, _controller, queues: _queues, automix: _automix);
+      return;
+    }
+    setState(() => _showQueue = !_showQueue);
+  }
 
   void _openLab() => AudioLabSheet.show(context, _controller);
 
@@ -344,6 +354,20 @@ class _PlayerPageState extends State<PlayerPage>
                                             palette,
                                           ),
                                         ),
+                                        if (_showQueue) ...[
+                                          const SizedBox(width: 20),
+                                          Expanded(
+                                            flex: 3,
+                                            child: QueueSheet(
+                                              controller: _controller,
+                                              queues: _queues,
+                                              automix: _automix,
+                                              onClose: () => setState(
+                                                () => _showQueue = false,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                     )
                                   else ...[

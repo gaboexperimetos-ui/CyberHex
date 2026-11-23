@@ -18,9 +18,15 @@ class QueueSheet extends StatefulWidget {
     required this.controller,
     this.queues,
     this.automix,
+    this.onClose,
   });
 
   final PlayerController controller;
+
+  /// Si está, el panel se puede cerrar desde su cabecera (modo panel lateral
+  /// en escritorio). Sin él, la hoja inferior se cierra deslizando o tocando
+  /// fuera, como siempre.
+  final VoidCallback? onClose;
 
   /// Cinco colas guardadas. Si falta, la hoja crea la suya (en producción la
   /// comparte con el resto de la app; en pruebas se inyecta).
@@ -217,6 +223,12 @@ class _QueueSheetState extends State<QueueSheet> {
           tooltip: 'Vaciar la cola',
           icon: const Icon(Icons.delete_sweep_rounded),
         ),
+        if (widget.onClose != null)
+          IconButton(
+            onPressed: widget.onClose,
+            tooltip: 'Cerrar la cola',
+            icon: const Icon(Icons.close_rounded),
+          ),
       ],
     );
   }
