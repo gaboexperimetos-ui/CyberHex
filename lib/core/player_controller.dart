@@ -32,8 +32,13 @@ class PlayerController extends ChangeNotifier {
   String? _error;
   double _volume = 1;
   bool _disposed = false;
+  List<String> _libraryTracks = const [];
+  double? _pendingRestorePosition;
+  DateTime? _restoreStartedAt;
 
   PlayerSnapshot get snapshot => _snapshot;
+
+  List<String> get libraryTracks => _libraryTracks;
 
   List<double> get eqGains => _player.eqGains;
 
@@ -55,8 +60,22 @@ class PlayerController extends ChangeNotifier {
     final restarted = _drainEvents();
     // Si el motor acaba de cambiar de pista, la posición es la de la pista
     // nueva (0) y no la vieja que todavía devuelve el getter.
-    if (!restarted) position.value = _player.position;
-    _refresh();
+    if (!restarted) {
+      final nativePosition = _player.position;
+      final restoreTarget = _pendingRestorePosition;
+      if (restoreTarget == null) {
+        position.value = nativePosition;
+      } else if ((nativePosition - restoreTarget).abs() < 0.5 ||
+          DateTime.now().difference(_restoreStartedAt!) >
+              const Duration(seconds: 3)) {
+        _pendingRestorePosition = null;
+        _restoreStartedAt = null;
+        position.value = nativePosition;
+      } else {
+        position.value = restoreTarget;
+      }
+    }
+    _refresh(force: restarted);
   }
 
   bool _drainEvents() {
@@ -71,14 +90,14 @@ class PlayerController extends ChangeNotifier {
       // cambiado sin pasar por load().
       if (event.kind == PlayerEventKind.track) {
         _player.syncTrackInfo();
-        position.value = 0;
+        if (_pendingRestorePosition == null) position.value = 0;
         restarted = true;
       }
     }
     return restarted;
   }
 
-  void _refresh() {
+  void _refresh({bool force = false}) {
     if (_disposed) return;
     final next = PlayerSnapshot(
       hasTrack: _player.hasTrack,
@@ -92,7 +111,7 @@ class PlayerController extends ChangeNotifier {
       volume: _volume,
       error: _error,
     );
-    if (next != _snapshot) {
+    if (force || next != _snapshot) {
       _snapshot = next;
       notifyListeners();
     }
@@ -104,6 +123,8 @@ class PlayerController extends ChangeNotifier {
   Future<String?> openFile(String path) async {
     if (_disposed || _loading != null) return null;
     final future = _player.loadAsync(path);
+    _pendingRestorePosition = null;
+    _restoreStartedAt = null;
     _loading = future;
     _refresh();
     final ok = await future;
@@ -115,7 +136,7 @@ class PlayerController extends ChangeNotifier {
     } else {
       _error = _player.lastError;
     }
-    _refresh();
+    _refresh(force: ok);
     return ok ? null : _error;
   }
 
@@ -144,6 +165,8 @@ class PlayerController extends ChangeNotifier {
   /// llega por `CH_EVENT_TRACK`, no aquí.
   void next() {
     if (_disposed) return;
+    _pendingRestorePosition = null;
+    _restoreStartedAt = null;
     _player.next();
     _refresh();
   }
@@ -155,6 +178,8 @@ class PlayerController extends ChangeNotifier {
   /// Spotify, Strawberry o Tauon.
   void previous() {
     if (_disposed) return;
+    _pendingRestorePosition = null;
+    _restoreStartedAt = null;
     if (position.value > _restartThreshold) {
       seek(0);
       return;
@@ -177,6 +202,8 @@ class PlayerController extends ChangeNotifier {
     if (target < 0) target = 0;
     if (duration > 0 && target > duration) target = duration;
     _player.seek(target);
+    _pendingRestorePosition = null;
+    _restoreStartedAt = null;
     position.value = target;
     _refresh();
   }
@@ -208,6 +235,12 @@ class PlayerController extends ChangeNotifier {
   int get queueCount => _player.queueCount;
 
   int get queueIndex => _player.queueIndex;
+
+  String get currentTrackPath {
+    final index = queueIndex;
+    if (index < 0 || index >= queueCount) return '';
+    return queueItem(index);
+  }
 
   String queueItem(int index) => _player.queueItem(index);
 
@@ -271,11 +304,13 @@ class PlayerController extends ChangeNotifier {
   /// Añade una pista al final de la cola y la reproduce.
   bool loadAndPlay(String path) {
     if (_disposed) return false;
+    _pendingRestorePosition = null;
+    _restoreStartedAt = null;
     final ok = _player.loadAdd(path);
     if (ok) {
       position.value = 0;
       _error = null;
-      _refresh();
+      _refresh(force: true);
     }
     return ok;
   }
@@ -283,6 +318,8 @@ class PlayerController extends ChangeNotifier {
   /// Salta a una pista de la cola. El título nuevo llega por `CH_EVENT_TRACK`.
   bool playIndex(int index) {
     if (_disposed) return false;
+    _pendingRestorePosition = null;
+    _restoreStartedAt = null;
     final ok = _player.playIndex(index);
     if (ok) position.value = 0;
     _refresh();
@@ -384,8 +421,7 @@ class PlayerController extends ChangeNotifier {
     _player.setTrimSilence(enabled, thresholdDb: thresholdDb);
   }
 
-  ({bool enabled, double thresholdDb}) get trimSilence =>
-      _player.trimSilence;
+  ({bool enabled, double thresholdDb}) get trimSilence => _player.trimSilence;
 
   void setReplayGain(bool enabled) {
     if (_disposed) return;
@@ -429,8 +465,15 @@ class PlayerController extends ChangeNotifier {
   // Biblioteca, marcadores, CUE y utilidades de archivo
   // ---------------------------------------------------------------------------
 
-  ({List<String> tracks, int removed})? scanLibrary(String root) =>
-      _disposed ? null : _player.scanLibrary(root);
+  ({List<String> tracks, int removed})? scanLibrary(String root) {
+    if (_disposed) return null;
+    final result = _player.scanLibrary(root);
+    if (result != null) {
+      _libraryTracks = List.unmodifiable(result.tracks);
+      notifyListeners();
+    }
+    return result;
+  }
 
   List<TrackMarker> loadMarkers(String path, String track) =>
       _disposed ? const [] : _player.loadMarkers(path, track);
@@ -461,10 +504,15 @@ class PlayerController extends ChangeNotifier {
   List<double> waveform(String path, int buckets) =>
       _disposed ? const [] : _player.waveform(path, buckets);
 
+  Future<List<double>> waveformAsync(String path, int buckets) =>
+      _disposed ? Future.value(const []) : _player.waveformAsync(path, buckets);
+
   String get coreVersion => _player.coreVersion;
 
-  ({double lead, double tail})? detectSilence(String path,
-          {double thresholdDb = -60}) =>
+  ({double lead, double tail})? detectSilence(
+    String path, {
+    double thresholdDb = -60,
+  }) =>
       _disposed ? null : _player.detectSilence(path, thresholdDb: thresholdDb);
 
   // ---------------------------------------------------------------------------
@@ -531,9 +579,17 @@ class PlayerController extends ChangeNotifier {
     if (_disposed) return null;
     final seconds = _player.loadState(path);
     if (seconds == null) return null;
-    position.value = seconds;
-    _refresh();
-    return seconds;
+    var restoredPosition = seconds.isFinite ? seconds : 0.0;
+    if (restoredPosition < 0) restoredPosition = 0;
+    final duration = _player.duration;
+    if (duration > 0 && restoredPosition > duration) {
+      restoredPosition = duration;
+    }
+    _pendingRestorePosition = restoredPosition > 0 ? restoredPosition : null;
+    _restoreStartedAt = restoredPosition > 0 ? DateTime.now() : null;
+    position.value = restoredPosition;
+    _refresh(force: true);
+    return restoredPosition;
   }
 
   @override

@@ -243,8 +243,10 @@ void main() {
 
     expect(controller.detectSilence('/musica/tema.flac'), isNull);
     fake.silence = (lead: 1.5, tail: 2.0);
-    expect(controller.detectSilence('/musica/tema.flac'),
-        (lead: 1.5, tail: 2.0));
+    expect(controller.detectSilence('/musica/tema.flac'), (
+      lead: 1.5,
+      tail: 2.0,
+    ));
 
     fake.bufferedSeconds = 3.75;
     fake.bufferUnderflows = 2;
@@ -321,10 +323,9 @@ void main() {
     ]);
 
     expect(controller.removeMarker('/m/marks.txt', '/m/a.flac', 0), isTrue);
-    expect(
-      controller.loadMarkers('/m/marks.txt', '/m/a.flac'),
-      const [TrackMarker(64.0, 'solo')],
-    );
+    expect(controller.loadMarkers('/m/marks.txt', '/m/a.flac'), const [
+      TrackMarker(64.0, 'solo'),
+    ]);
 
     expect(controller.clearMarkers('/m/marks.txt', '/m/a.flac'), isTrue);
     expect(controller.loadMarkers('/m/marks.txt', '/m/a.flac'), isEmpty);
@@ -385,5 +386,25 @@ void main() {
     fake.stateToLoad = 42.5;
     expect(controller.loadState('/tmp/cyberhex-state.json'), 42.5);
     expect(controller.position.value, 42.5);
+
+    fake.position = 0;
+    controller.pump();
+    expect(controller.position.value, 42.5);
+
+    fake.position = 42.7;
+    controller.pump();
+    expect(controller.position.value, 42.7);
+  });
+
+  test('la forma de onda se analiza de forma asíncrona', () async {
+    final fake = FakePlayer()..waveformPeaksValue = const [0.2, 0.8, 0.4];
+    final controller = PlayerController(fake);
+    addTearDown(controller.dispose);
+
+    expect(await controller.waveformAsync('/musica/tema.flac', 3), const [
+      0.2,
+      0.8,
+      0.4,
+    ]);
   });
 }

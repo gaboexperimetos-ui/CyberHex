@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
     <!--
       Biblioteca local de audio (el motor sabe escanear carpetas). En Android 13+
       basta READ_MEDIA_AUDIO; hasta Android 12 hacía falta READ_EXTERNAL_STORAGE.

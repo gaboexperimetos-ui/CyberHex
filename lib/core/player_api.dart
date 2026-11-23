@@ -147,8 +147,18 @@ class PlayerSnapshot {
   }
 
   @override
-  int get hashCode => Object.hash(hasTrack, title, artist, album, cover,
-      duration, playing, busy, volume, error);
+  int get hashCode => Object.hash(
+    hasTrack,
+    title,
+    artist,
+    album,
+    cover,
+    duration,
+    playing,
+    busy,
+    volume,
+    error,
+  );
 }
 
 /// Superficie que la UI necesita del motor.
@@ -374,8 +384,9 @@ abstract class PlayerApi {
 
   /// Silencio al principio y al final de un archivo (dBFS).
   ({double lead, double tail})? detectSilence(
-          String path, {double thresholdDb = -60}) =>
-      null;
+    String path, {
+    double thresholdDb = -60,
+  }) => null;
 
   // ---------------------------------------------------------------------------
   // Biblioteca, marcadores, CUE y utilidades de archivo
@@ -412,6 +423,10 @@ abstract class PlayerApi {
 
   /// Picos normalizados para dibujar la forma de onda (`buckets` valores).
   List<double> waveform(String path, int buckets) => const [];
+
+  /// Igual que [waveform], pero permite analizar el archivo fuera de la UI.
+  Future<List<double>> waveformAsync(String path, int buckets) async =>
+      waveform(path, buckets);
 
   /// Versión del núcleo cargado.
   String get coreVersion => '';

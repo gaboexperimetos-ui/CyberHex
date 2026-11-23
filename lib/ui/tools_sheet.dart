@@ -1,14 +1,26 @@
 import 'package:material_ui/material_ui.dart';
 
 import '../core/player_controller.dart';
+import '../platform/connections.dart';
+import '../platform/playback_session.dart';
 import '../theme.dart';
+import 'connection_sheet.dart';
 
 /// Ajustes de reproducción que el motor ya soporta: velocidad, tono,
 /// crossfade, preamp del EQ, mono, limitador, salida de audio y temporizador.
 class ToolsSheet extends StatefulWidget {
-  const ToolsSheet({super.key, required this.controller});
+  const ToolsSheet({
+    super.key,
+    required this.controller,
+    this.connections,
+    this.session,
+    this.fullPage = false,
+  });
 
   final PlayerController controller;
+  final CyberHexConnections? connections;
+  final PlaybackSessionPersistence? session;
+  final bool fullPage;
 
   @override
   State<ToolsSheet> createState() => _ToolsSheetState();
@@ -41,156 +53,198 @@ class _ToolsSheetState extends State<ToolsSheet> {
     final devices = _controller.outputDevices;
     final remaining = _controller.sleepRemaining;
     final device = _controller.outputDevice;
-    return SizedBox(
-      height: MediaQuery.sizeOf(context).height * 0.78,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-        children: [
-          Text('Ajustes', style: chDisplay.copyWith(fontSize: 20)),
-          const SizedBox(height: 4),
-          _LabeledSlider(
-            label: 'Velocidad',
-            valueLabel: '${_speed.toStringAsFixed(2)}x',
-            value: _speed,
-            min: 0.5,
-            max: 2,
-            onChanged: (value) {
-              setState(() => _speed = value);
-              _controller.speed = value;
-            },
-          ),
-          _LabeledSlider(
-            label: 'Tono',
-            valueLabel: '${_pitch.toStringAsFixed(1)} st',
-            value: _pitch,
-            min: -6,
-            max: 6,
-            onChanged: (value) {
-              setState(() => _pitch = value);
-              _controller.pitch = value;
-            },
-          ),
-          _LabeledSlider(
-            label: 'Crossfade',
-            valueLabel: '${_crossfade.toStringAsFixed(1)} s',
-            value: _crossfade,
-            min: 0,
-            max: 12,
-            onChanged: (value) {
-              setState(() => _crossfade = value);
-              _controller.crossfadeSeconds = value;
-            },
-          ),
-          _LabeledSlider(
-            label: 'Preamp del EQ',
-            valueLabel: '${_preamp.toStringAsFixed(0)} dB',
-            value: _preamp,
-            min: -24,
-            max: 0,
-            onChanged: (value) {
-              setState(() => _preamp = value);
-              _controller.eqPreamp = value;
-            },
-          ),
-          SwitchListTile(
-            value: _mono,
-            onChanged: (value) {
-              setState(() => _mono = value);
-              _controller.setMono(value);
-            },
-            title: const Text('Mono'),
-            subtitle: const Text('La misma señal en los dos altavoces'),
+    final content = ListView(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
+      children: [
+        Text('Ajustes', style: chDisplay.copyWith(fontSize: 20)),
+        const SizedBox(height: 4),
+        if (widget.connections case final connections?) ...[
+          ListTile(
             contentPadding: EdgeInsets.zero,
-          ),
-          SwitchListTile(
-            value: _limiter,
-            onChanged: (value) {
-              setState(() => _limiter = value);
-              _controller.setLimiter(value);
-            },
-            title: const Text('Limitador de picos'),
-            subtitle: const Text('Techo a -1 dBFS'),
-            contentPadding: EdgeInsets.zero,
-          ),
-          if (devices.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                const Text('Salida de audio'),
-                const Spacer(),
-                DropdownButton<int>(
-                  value: device >= devices.length ? -1 : device,
-                  items: [
-                    const DropdownMenuItem(
-                      value: -1,
-                      child: Text('Predeterminada'),
-                    ),
-                    for (var i = 0; i < devices.length; i++)
-                      DropdownMenuItem(value: i, child: Text(devices[i])),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() {});
-                    _controller.outputDevice = value;
-                  },
-                ),
-              ],
+            leading: const Icon(Icons.hub_outlined, color: chAccent),
+            title: const Text('Conectar con Study Platform'),
+            subtitle: Text(
+              connections.studyConfigured
+                  ? 'MCP configurado'
+                  : 'API local y notas MCP',
+              style: const TextStyle(color: chMuted, fontSize: 12),
             ),
-          ],
-          const SizedBox(height: 16),
-          const Text('Temporizador', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => showModalBottomSheet<void>(
+              context: context,
+              showDragHandle: true,
+              isScrollControlled: true,
+              builder: (_) => ConnectionSheet(
+                connections: connections,
+                controller: _controller,
+              ),
+            ),
+          ),
+          const Divider(height: 8),
+        ],
+        if (widget.session case final session?) ...[
+          ListenableBuilder(
+            listenable: session,
+            builder: (context, _) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.history_rounded, color: chAccent),
+              title: const Text('Restauración automática'),
+              subtitle: Text(
+                session.status,
+                style: const TextStyle(color: chMuted, fontSize: 12),
+              ),
+            ),
+          ),
+          const Divider(height: 8),
+        ],
+        _LabeledSlider(
+          label: 'Velocidad',
+          valueLabel: '${_speed.toStringAsFixed(2)}x',
+          value: _speed,
+          min: 0.5,
+          max: 2,
+          onChanged: (value) {
+            setState(() => _speed = value);
+            _controller.speed = value;
+          },
+        ),
+        _LabeledSlider(
+          label: 'Tono',
+          valueLabel: '${_pitch.toStringAsFixed(1)} st',
+          value: _pitch,
+          min: -6,
+          max: 6,
+          onChanged: (value) {
+            setState(() => _pitch = value);
+            _controller.pitch = value;
+          },
+        ),
+        _LabeledSlider(
+          label: 'Crossfade',
+          valueLabel: '${_crossfade.toStringAsFixed(1)} s',
+          value: _crossfade,
+          min: 0,
+          max: 12,
+          onChanged: (value) {
+            setState(() => _crossfade = value);
+            _controller.crossfadeSeconds = value;
+          },
+        ),
+        _LabeledSlider(
+          label: 'Preamp del EQ',
+          valueLabel: '${_preamp.toStringAsFixed(0)} dB',
+          value: _preamp,
+          min: -24,
+          max: 0,
+          onChanged: (value) {
+            setState(() => _preamp = value);
+            _controller.eqPreamp = value;
+          },
+        ),
+        SwitchListTile(
+          value: _mono,
+          onChanged: (value) {
+            setState(() => _mono = value);
+            _controller.setMono(value);
+          },
+          title: const Text('Mono'),
+          subtitle: const Text('La misma señal en los dos altavoces'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        SwitchListTile(
+          value: _limiter,
+          onChanged: (value) {
+            setState(() => _limiter = value);
+            _controller.setLimiter(value);
+          },
+          title: const Text('Limitador de picos'),
+          subtitle: const Text('Techo a -1 dBFS'),
+          contentPadding: EdgeInsets.zero,
+        ),
+        if (devices.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Row(
             children: [
-              for (final minutes in const [0, 15, 30, 60])
-                ChoiceChip(
-                  label: Text(minutes == 0 ? 'Apagado' : '$minutes min'),
-                  selected: false,
-                  onSelected: (_) =>
-                      _controller.setSleepTimer(minutes * 60.0),
-                ),
+              const Text('Salida de audio'),
+              const Spacer(),
+              DropdownButton<int>(
+                value: device >= devices.length ? -1 : device,
+                items: [
+                  const DropdownMenuItem(
+                    value: -1,
+                    child: Text('Predeterminada'),
+                  ),
+                  for (var i = 0; i < devices.length; i++)
+                    DropdownMenuItem(value: i, child: Text(devices[i])),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {});
+                  _controller.outputDevice = value;
+                },
+              ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            remaining > 0
-                ? 'Quedan ${remaining.ceil()} s de reproducción'
-                : 'Sin temporizador activo',
-            style: const TextStyle(color: chMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 20),
-          Text('Letra y descarga', style: chDisplay.copyWith(fontSize: 20)),
-          const SizedBox(height: 4),
-          const Text(
-            'Busca la letra en Lrclib (sincronizada) y, si no aparece, usa IA '
-            'de respaldo cuando esté configurada. La descarga admite URL directa '
-            'o Jamendo (sin anuncios).',
-            style: TextStyle(color: chMuted, fontSize: 12),
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: () => _fetchLyrics(context),
-            icon: const Icon(Icons.lyrics_outlined),
-            label: const Text('Buscar letra (IA respaldo)'),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: () => _showDownloadDialog(context),
-            icon: const Icon(Icons.download_outlined),
-            label: const Text('Descargar pista'),
-          ),
         ],
-      ),
+        const SizedBox(height: 16),
+        const Text(
+          'Temporizador',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final minutes in const [0, 15, 30, 60])
+              ChoiceChip(
+                label: Text(minutes == 0 ? 'Apagado' : '$minutes min'),
+                selected: false,
+                onSelected: (_) => _controller.setSleepTimer(minutes * 60.0),
+              ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          remaining > 0
+              ? 'Quedan ${remaining.ceil()} s de reproducción'
+              : 'Sin temporizador activo',
+          style: const TextStyle(color: chMuted, fontSize: 12),
+        ),
+        const SizedBox(height: 20),
+        Text('Letra y descarga', style: chDisplay.copyWith(fontSize: 20)),
+        const SizedBox(height: 4),
+        const Text(
+          'Busca la letra en Lrclib (sincronizada) y, si no aparece, usa IA '
+          'de respaldo cuando esté configurada. La descarga admite URL directa '
+          'o Jamendo (sin anuncios).',
+          style: TextStyle(color: chMuted, fontSize: 12),
+        ),
+        const SizedBox(height: 10),
+        FilledButton.icon(
+          onPressed: () => _fetchLyrics(context),
+          icon: const Icon(Icons.lyrics_outlined),
+          label: const Text('Buscar letra (IA respaldo)'),
+        ),
+        const SizedBox(height: 8),
+        FilledButton.icon(
+          onPressed: () => _showDownloadDialog(context),
+          icon: const Icon(Icons.download_outlined),
+          label: const Text('Descargar pista'),
+        ),
+      ],
     );
+    return widget.fullPage
+        ? content
+        : SizedBox(
+            height: MediaQuery.sizeOf(context).height * 0.78,
+            child: content,
+          );
   }
 
   Future<void> _fetchLyrics(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
-    messenger.showSnackBar(
-      const SnackBar(content: Text('Buscando letra...')),
-    );
+    messenger.showSnackBar(const SnackBar(content: Text('Buscando letra...')));
     final result = await _controller.fetchLyrics(useAiFallback: true);
     if (!context.mounted) return;
     messenger.hideCurrentSnackBar();
@@ -267,9 +321,7 @@ class _ToolsSheetState extends State<ToolsSheet> {
       );
       return;
     }
-    messenger.showSnackBar(
-      const SnackBar(content: Text('Descargando...')),
-    );
+    messenger.showSnackBar(const SnackBar(content: Text('Descargando...')));
     final r = await _controller.downloadTrack(url: url, destPath: dest);
     if (!context.mounted) return;
     messenger.hideCurrentSnackBar();
@@ -318,12 +370,7 @@ class _LabeledSlider extends StatelessWidget {
             ),
           ],
         ),
-        Slider(
-          value: current,
-          min: min,
-          max: max,
-          onChanged: onChanged,
-        ),
+        Slider(value: current, min: min, max: max, onChanged: onChanged),
       ],
     );
   }

@@ -3,7 +3,8 @@
 Reproductor de música nativo para **Linux y Android**: motor propio en **Zig +
 C23** con FFmpeg para decodificar, y **UI Flutter** que lo consume por FFI.
 
-Todo ocurre en local: no hay cuentas, ni red, ni telemetría.
+Por defecto, todo ocurre en local: no hay cuentas ni telemetría. La integración
+opcional con Study Platform usa una conexión autenticada en `localhost`.
 
 ```
 ┌──────────────────────────────┐
@@ -29,11 +30,48 @@ espectro, ReplayGain y normalización R128, limitador, crossfeed, temporizador,
 dispositivos de salida, carátulas múltiples, letras LRC, biblioteca incremental,
 marcadores persistentes y hojas CUE.
 
-La interfaz ya usa cola, modos de reproducción, letras, ajustes de DSP,
-visualizador de espectro, metadatos y EQ real de 36 bandas. Falta dibujar la
-biblioteca con búsqueda, la forma de onda y la restauración de sesión.
+La interfaz adaptable para celular y PC incluye reproducción, biblioteca local
+con búsqueda, cola, modos de reproducción, letras, ajustes de DSP, visualizador
+de espectro, forma de onda por pista, metadatos y EQ real de 36 bandas. La cola,
+la posición y los ajustes de reproducción se restauran automáticamente en el
+mismo dispositivo; la sesión vuelve pausada.
 
 La referencia completa de la API está en [`core/API.md`](core/API.md).
+
+## Integración local con Study Platform
+
+CyberHex ofrece una API REST y un servidor MCP stateless en
+`http://127.0.0.1:8765`; ambos escuchan solo en loopback y exigen una clave
+`Authorization: Bearer`. La clave se genera al iniciar y se guarda con
+almacenamiento seguro; se puede copiar desde **Ajustes → Conectar con Study
+Platform**. No compartas esa clave: permite controlar el reproductor y su cola.
+
+La REST v1 expone:
+
+| Método y ruta | Función |
+|---|---|
+| `GET /api/v1/status` | Estado y metadatos de la pista actual |
+| `GET /api/v1/library?q=<texto>` | Buscar en la biblioteca ya escaneada |
+| `GET /api/v1/queue` | Leer la cola |
+| `POST /api/v1/command` | `play`, `pause`, `toggle`, `next`, `previous` o `seek` |
+| `POST /api/v1/volume` | Definir volumen entre `0` y `1` |
+| `POST /api/v1/queue` | Añadir pista indexada, reproducir/eliminar por índice o vaciar |
+
+Todas las rutas requieren `Authorization: Bearer <clave>`. Añadir pistas solo
+acepta rutas devueltas por la biblioteca escaneada. El MCP en `/mcp` publica
+`cyberhex_status`, `cyberhex_search_library`, `cyberhex_queue`,
+`cyberhex_control` y `cyberhex_queue_add`.
+
+Study Platform puede exponer las herramientas MCP `cyberhex_status`,
+`cyberhex_library_search`, `cyberhex_queue`, `cyberhex_playback`,
+`cyberhex_set_volume` y `cyberhex_queue_add`, respaldadas por la REST local.
+Configura allí `CYBERHEX_API_URL=http://127.0.0.1:8765` y
+`CYBERHEX_API_KEY=<clave copiada desde CyberHex>`.
+
+Para el sentido inverso, configura el endpoint MCP de Study Platform
+(`http://127.0.0.1:8090/mcp` por defecto) y su `CUSTOM_MCP_API_KEY` en los
+ajustes de CyberHex. La conexión se prueba con `initialize` y `tools/list`;
+las credenciales se almacenan de forma segura.
 
 ## Requisitos
 
