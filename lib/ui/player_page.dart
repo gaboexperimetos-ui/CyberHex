@@ -14,6 +14,7 @@ import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../core/stats_store.dart';
 import '../core/theme_controller.dart';
+import '../platform/connections.dart';
 import '../platform/desktop_channel.dart';
 import '../theme.dart';
 import 'settings_page.dart';
@@ -32,6 +33,7 @@ class PlayerPage extends StatefulWidget {
     required this.controller,
     this.theme,
     this.desktop,
+    this.connections,
   });
 
   final PlayerController controller;
@@ -42,6 +44,9 @@ class PlayerPage extends StatefulWidget {
 
   /// Puente de escritorio (Linux): MPRIS y drag & drop. En el móvil es `null`.
   final DesktopChannel? desktop;
+
+  /// API local y conexiones MCP. `null` en pruebas o si no se montaron.
+  final CyberHexConnections? connections;
 
   @override
   State<PlayerPage> createState() => _PlayerPageState();
@@ -758,6 +763,7 @@ class _PlayerPageState extends State<PlayerPage>
           theme: _theme,
           player: _controller,
           desktop: widget.desktop,
+          connections: widget.connections,
         ),
       ),
     );

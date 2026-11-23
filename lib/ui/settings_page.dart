@@ -10,9 +10,11 @@ import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../core/scrobbler.dart';
 import '../core/theme_controller.dart';
+import '../platform/connections.dart';
 import '../platform/desktop_channel.dart';
 import '../theme.dart';
 import 'audio_export_sheet.dart';
+import 'connection_sheet.dart';
 
 /// Ajustes de aspecto, gestos y capa Android.
 ///
@@ -29,6 +31,7 @@ class SettingsPage extends StatefulWidget {
     this.desktop,
     this.scrobbler,
     this.backup,
+    this.connections,
   });
 
   final ThemeController theme;
@@ -44,6 +47,11 @@ class SettingsPage extends StatefulWidget {
 
   /// Copia de seguridad; se crea uno si no se inyecta.
   final BackupService? backup;
+
+  /// Conexiones (API local + Study Platform). Si es `null`, Ajustes no muestra
+  /// la sección de conexiones.
+  final CyberHexConnections? connections;
+
 
   /// Estado del interruptor «siempre encima» (el runner no lo reporta).
   static final ValueNotifier<bool> alwaysOnTop = ValueNotifier<bool>(false);
@@ -530,8 +538,39 @@ class _SettingsPageState extends State<SettingsPage> {
                   ],
                 ),
               ],
-              const _Section('Acerca de'),
-              Text(
+              if (widget.connections != null && player != null) ...[
+                const _Section('Conexiones'),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Icon(
+                    Icons.hub_outlined,
+                    size: 20,
+                    color: palette.muted,
+                  ),
+                  title: const Text(
+                    'API local y Study Platform',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  subtitle: Text(
+                    widget.connections!.localApiUrl == null
+                        ? (widget.connections!.localApiError ??
+                            'Iniciando API local…')
+                        : 'API local en ${widget.connections!.localApiUrl}',
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ConnectionSheet(
+                        connections: widget.connections!,
+                        controller: player!,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              const _Section('Acerca de'),              Text(
                 'CyberHex · motor propio (Zig + C23) · Flutter\n'
                 'Sin dependencias externas de audio, imagen ni red.',
                 style: TextStyle(fontSize: 12, color: palette.muted, height: 1.5),

@@ -8,6 +8,7 @@ import 'core/player_controller.dart';
 import 'core/scrobbler.dart';
 import 'core/session_store.dart';
 import 'core/theme_controller.dart';
+import 'platform/connections.dart';
 import 'platform/external_file_channel.dart';
 import 'platform/desktop_channel.dart';
 import 'platform/media_session_channel.dart';
@@ -41,6 +42,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
   ExternalFileChannel? _externalFiles;
   DesktopChannel? _desktop;
   Scrobbler? _scrobbler;
+  CyberHexConnections? _connections;
   SessionKeeper? _session;
   late final ThemeController _theme = ThemeController();
   bool _ownsController = false;
@@ -68,6 +70,21 @@ class _CyberHexAppState extends State<CyberHexApp> {
     _controller = controller;
     _attachPlatformChannels(controller);
     _attachSession(controller);
+    _attachConnections(controller);
+  }
+
+  /// API local (HTTP/MCP autenticada) y conexión con Study Platform. Se arranca
+  /// sola; si el almacenamiento seguro o el puerto fallan queda inerte y la
+  /// sección de Ajustes explica el motivo.
+  void _attachConnections(PlayerController controller) {
+    if (!_ownsController) return;
+    final connections = CyberHexConnections();
+    _connections = connections;
+    unawaited(
+      connections.initialize(controller).catchError((Object error) {
+        // Sin plugin de llavero o sin red: no rompe el arranque.
+      }),
+    );
   }
 
   /// Restaura la sesión anterior en segundo plano. Solo en producción: en las
@@ -160,6 +177,8 @@ class _CyberHexAppState extends State<CyberHexApp> {
     ScrobblerHost.attach(null);
     _scrobbler?.dispose();
     _scrobbler = null;
+    _connections?.dispose();
+    _connections = null;
     if (_ownsController) {
       _controller?.dispose();
     }
@@ -182,6 +201,7 @@ class _CyberHexAppState extends State<CyberHexApp> {
                 controller: controller,
                 theme: _theme,
                 desktop: _desktop,
+                connections: _connections,
               ),
       ),
     );
