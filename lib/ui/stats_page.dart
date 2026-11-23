@@ -37,7 +37,7 @@ class _StatsPageState extends State<StatsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: chSurface,
+        backgroundColor: paletteOf(context).surface,
         title: const Text('¿Borrar las estadísticas?'),
         content: const Text(
           'Se pierden el historial, los totales y la franja horaria. '
@@ -60,6 +60,7 @@ class _StatsPageState extends State<StatsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final stats = widget.stats;
     final top = stats.topTracks(8);
     final artists = stats.topArtists(6);
@@ -75,13 +76,17 @@ class _StatsPageState extends State<StatsPage> {
         ],
       ),
       body: stats.totalPlays == 0
-          ? const Center(
+          ? Center(
               child: Padding(
-                padding: EdgeInsets.all(28),
+                padding: const EdgeInsets.all(28),
                 child: Text(
                   'Todavía no hay nada que contar.\nDale al play y vuelve por aquí.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: chMuted, height: 1.5),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: palette.muted,
+                    height: 1.5,
+                  ),
                 ),
               ),
             )
@@ -133,7 +138,7 @@ class _StatsPageState extends State<StatsPage> {
                 _HourChart(hours: stats.byHour, peak: stats.favoriteHour),
                 const _Title('Más escuchadas'),
                 if (top.isEmpty)
-                  const Text('—', style: TextStyle(color: chMuted))
+                  Text('—', style: TextStyle(color: palette.muted))
                 else
                   for (var i = 0; i < top.length; i++)
                     _RankRow(
@@ -145,7 +150,7 @@ class _StatsPageState extends State<StatsPage> {
                     ),
                 const _Title('Artistas'),
                 if (artists.isEmpty)
-                  const Text('—', style: TextStyle(color: chMuted))
+                  Text('—', style: TextStyle(color: palette.muted))
                 else
                   Wrap(
                     spacing: 8,
@@ -153,8 +158,8 @@ class _StatsPageState extends State<StatsPage> {
                     children: [
                       for (final artist in artists)
                         Chip(
-                          backgroundColor: chSurfaceHigh,
-                          side: const BorderSide(color: chBorder),
+                          backgroundColor: palette.surfaceHigh,
+                          side: BorderSide(color: palette.border),
                           label: Text(
                             '${artist.key} · ${artist.value}',
                             style: const TextStyle(fontSize: 11),
@@ -164,7 +169,7 @@ class _StatsPageState extends State<StatsPage> {
                   ),
                 const _Title('Historial reciente'),
                 if (stats.history.isEmpty)
-                  const Text('—', style: TextStyle(color: chMuted))
+                  Text('—', style: TextStyle(color: palette.muted))
                 else
                   for (final entry in stats.history.take(12))
                     ListTile(
@@ -172,7 +177,7 @@ class _StatsPageState extends State<StatsPage> {
                       contentPadding: EdgeInsets.zero,
                       leading: Text(
                         entry.clock,
-                        style: const TextStyle(fontSize: 11, color: chMuted),
+                        style: TextStyle(fontSize: 11, color: palette.muted),
                       ),
                       title: Text(
                         entry.label,
@@ -186,7 +191,10 @@ class _StatsPageState extends State<StatsPage> {
                               entry.artist,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 11, color: chMuted),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: palette.muted,
+                              ),
                             ),
                     ),
               ],
@@ -212,11 +220,11 @@ class _Title extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(0, 18, 0, 8),
       child: Text(
         text.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           letterSpacing: 1.6,
           fontWeight: FontWeight.w600,
-          color: chMuted,
+          color: paletteOf(context).muted,
         ),
       ),
     );
@@ -232,16 +240,17 @@ class _Figure extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: chSurface,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: chBorder.withValues(alpha: 0.6)),
+        border: Border.all(color: palette.border.withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: chAccent),
+          Icon(icon, size: 20, color: palette.accent),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -251,13 +260,16 @@ class _Figure extends StatelessWidget {
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
                 Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10, color: chMuted),
+                  style: TextStyle(fontSize: 10, color: palette.muted),
                 ),
               ],
             ),
@@ -277,7 +289,11 @@ class _HourChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final max = hours.values.fold<int>(0, (best, value) => value > best ? value : best);
+    final palette = paletteOf(context);
+    final max = hours.values.fold<int>(
+      0,
+      (best, value) => value > best ? value : best,
+    );
     return SizedBox(
       height: 74,
       child: Row(
@@ -296,8 +312,8 @@ class _HourChart extends StatelessWidget {
                           : 2 + 50 * ((hours[hour] ?? 0) / max),
                       decoration: BoxDecoration(
                         color: hour == peak
-                            ? chAccent
-                            : chAccent.withValues(alpha: 0.28),
+                            ? palette.accent
+                            : palette.accent.withValues(alpha: 0.28),
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
@@ -306,7 +322,7 @@ class _HourChart extends StatelessWidget {
                         padding: const EdgeInsets.only(top: 3),
                         child: Text(
                           '$hour',
-                          style: const TextStyle(fontSize: 8, color: chMuted),
+                          style: TextStyle(fontSize: 8, color: palette.muted),
                         ),
                       )
                     else
@@ -322,7 +338,11 @@ class _HourChart extends StatelessWidget {
 }
 
 class _RankRow extends StatelessWidget {
-  const _RankRow({required this.position, required this.title, required this.subtitle});
+  const _RankRow({
+    required this.position,
+    required this.title,
+    required this.subtitle,
+  });
 
   final int position;
   final String title;
@@ -330,6 +350,7 @@ class _RankRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
@@ -338,7 +359,7 @@ class _RankRow extends StatelessWidget {
             width: 22,
             child: Text(
               '$position',
-              style: const TextStyle(fontSize: 12, color: chMuted),
+              style: TextStyle(fontSize: 12, color: palette.muted),
             ),
           ),
           Expanded(
@@ -355,7 +376,7 @@ class _RankRow extends StatelessWidget {
                   subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: chMuted),
+                  style: TextStyle(fontSize: 11, color: palette.muted),
                 ),
               ],
             ),

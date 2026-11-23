@@ -71,11 +71,11 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
   }
 
   List<Playlist> get _smart => _store.smartLists(
-        library: <String>[
-          for (final track in _controller.libraryTracks) track.path,
-        ],
-        plays: _stats.playsOf,
-      );
+    library: <String>[
+      for (final track in _controller.libraryTracks) track.path,
+    ],
+    plays: _stats.playsOf,
+  );
 
   Future<void> _create() async {
     final name = await _prompt('Nueva lista', 'Nombre de la lista');
@@ -89,7 +89,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
     return showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: chSurface,
+        backgroundColor: paletteOf(context).surface,
         title: Text(title, style: const TextStyle(fontSize: 16)),
         content: TextField(
           controller: text,
@@ -117,13 +117,17 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
       extensions: <String>['m3u', 'm3u8', 'pls'],
     );
     try {
-      final file = await openFile(acceptedTypeGroups: const <XTypeGroup>[group]);
+      final file = await openFile(
+        acceptedTypeGroups: const <XTypeGroup>[group],
+      );
       if (file == null) return;
       final playlist = await _store.importFile(File(file.path));
       if (!mounted) return;
-      setState(() => _message = playlist == null
-          ? 'No se pudo leer «${file.name}».'
-          : 'Importadas ${playlist.length} pistas en «${playlist.name}».');
+      setState(
+        () => _message = playlist == null
+            ? 'No se pudo leer «${file.name}».'
+            : 'Importadas ${playlist.length} pistas en «${playlist.name}».',
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _message = 'No se pudo importar: $error');
@@ -142,11 +146,16 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
         acceptedTypeGroups: const <XTypeGroup>[group],
       );
       if (location == null) return;
-      final written = await _store.exportPlaylist(playlist, File(location.path));
+      final written = await _store.exportPlaylist(
+        playlist,
+        File(location.path),
+      );
       if (!mounted) return;
-      setState(() => _message = written == null
-          ? 'No se pudo escribir el archivo.'
-          : 'Exportada a ${written.path}');
+      setState(
+        () => _message = written == null
+            ? 'No se pudo escribir el archivo.'
+            : 'Exportada a ${written.path}',
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _message = 'No se pudo exportar: $error');
@@ -163,7 +172,9 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
     }
     await _controller.openFile(paths.first);
     if (!mounted) return;
-    setState(() => _message = 'Sonando «${playlist.name}» (${paths.length} pistas).');
+    setState(
+      () => _message = 'Sonando «${playlist.name}» (${paths.length} pistas).',
+    );
   }
 
   void _open(Playlist playlist) {
@@ -202,8 +213,10 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
           if (widget.showMiniPlayer)
             MiniPlayer(
               controller: _controller,
-              onOpen: widget.onOpenPlayer ??
-                  () => Navigator.of(context).popUntil((route) => route.isFirst),
+              onOpen:
+                  widget.onOpenPlayer ??
+                  () =>
+                      Navigator.of(context).popUntil((route) => route.isFirst),
             ),
         ],
       ),
@@ -211,92 +224,98 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
   }
 
   Widget _list() {
+    final palette = paletteOf(context);
     final smart = _smart;
     final mine = _store.playlists;
     return ListView(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-        children: [
-          if (_message != null)
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      children: [
+        if (_message != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: Text(
+              _message!,
+              style: TextStyle(fontSize: 12, color: palette.accent),
+            ),
+          ),
+        const _SectionLabel('Inteligentes'),
+        for (final playlist in smart) ...[
+          _PlaylistTile(
+            playlist: playlist,
+            onTap: playlist.isEmpty ? null : () => _open(playlist),
+            onPlay: playlist.isEmpty ? null : () => _playAll(playlist),
+            onExport: null,
+            onRename: null,
+            onDuplicate: null,
+            onDelete: null,
+          ),
+          if (playlist.id == SmartList.top25.id && playlist.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                _message!,
-                style: const TextStyle(fontSize: 12, color: chAccent),
+                'Aún no hay reproducciones: escucha algo y vuelve.',
+                style: TextStyle(fontSize: 11, color: palette.muted),
               ),
-            ),
-          const _SectionLabel('Inteligentes'),
-          for (final playlist in smart) ...[
-            _PlaylistTile(
-              playlist: playlist,
-              onTap: playlist.isEmpty ? null : () => _open(playlist),
-              onPlay: playlist.isEmpty ? null : () => _playAll(playlist),
-              onExport: null,
-              onRename: null,
-              onDuplicate: null,
-              onDelete: null,
-            ),
-            if (playlist.id == SmartList.top25.id && playlist.isEmpty)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  'Aún no hay reproducciones: escucha algo y vuelve.',
-                  style: TextStyle(fontSize: 11, color: chMuted),
-                ),
-              ),
-          ],
-          const SizedBox(height: 8),
-          const _SectionLabel('Tus listas'),
-          if (mine.isEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Text(
-                'Crea una lista con el botón + o importa un .m3u de otro '
-                'reproductor.',
-                style: TextStyle(fontSize: 12, color: chMuted, height: 1.4),
-              ),
-            ),
-          for (final playlist in mine)
-            _PlaylistTile(
-              playlist: playlist,
-              onTap: () => _open(playlist),
-              onPlay: () => _playAll(playlist),
-              onExport: () => _export(playlist),
-              onRename: () async {
-                final name = await _prompt(
-                  'Renombrar',
-                  'Nuevo nombre',
-                  initial: playlist.name,
-                );
-                if (name != null) _store.rename(playlist.id, name);
-              },
-              onDuplicate: () {
-                final copy = _store.duplicate(playlist.id);
-                setState(() => _message = copy == null ? null : 'Duplicada «${copy.name}»');
-              },
-              onDelete: () async {
-                final confirmed = await showDialog<bool>(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    backgroundColor: chSurface,
-                    title: const Text('¿Borrar la lista?'),
-                    content: Text('«${playlist.name}» se quitará. Los archivos no.'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(false),
-                        child: const Text('Cancelar'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.of(context).pop(true),
-                        child: const Text('Borrar'),
-                      ),
-                    ],
-                  ),
-                );
-                if (confirmed == true) _store.delete(playlist.id);
-              },
             ),
         ],
-      );
+        const SizedBox(height: 8),
+        const _SectionLabel('Tus listas'),
+        if (mine.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              'Crea una lista con el botón + o importa un .m3u de otro '
+              'reproductor.',
+              style: TextStyle(fontSize: 12, color: palette.muted, height: 1.4),
+            ),
+          ),
+        for (final playlist in mine)
+          _PlaylistTile(
+            playlist: playlist,
+            onTap: () => _open(playlist),
+            onPlay: () => _playAll(playlist),
+            onExport: () => _export(playlist),
+            onRename: () async {
+              final name = await _prompt(
+                'Renombrar',
+                'Nuevo nombre',
+                initial: playlist.name,
+              );
+              if (name != null) _store.rename(playlist.id, name);
+            },
+            onDuplicate: () {
+              final copy = _store.duplicate(playlist.id);
+              setState(
+                () =>
+                    _message = copy == null ? null : 'Duplicada «${copy.name}»',
+              );
+            },
+            onDelete: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: paletteOf(context).surface,
+                  title: const Text('¿Borrar la lista?'),
+                  content: Text(
+                    '«${playlist.name}» se quitará. Los archivos no.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(false),
+                      child: const Text('Cancelar'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(true),
+                      child: const Text('Borrar'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true) _store.delete(playlist.id);
+            },
+          ),
+      ],
+    );
   }
 
   static String _slug(String name) => name
@@ -316,10 +335,10 @@ class _SectionLabel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(8, 12, 8, 6),
       child: Text(
         text.toUpperCase(),
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           letterSpacing: 1.6,
-          color: chMuted,
+          color: paletteOf(context).muted,
           fontWeight: FontWeight.w600,
         ),
       ),
@@ -348,23 +367,26 @@ class _PlaylistTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final editable = onRename != null;
     return Card(
-      color: chSurface,
+      color: palette.surface,
       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: chBorder.withValues(alpha: 0.5)),
+        side: BorderSide(color: palette.border.withValues(alpha: 0.5)),
       ),
       child: ListTile(
         onTap: onTap,
         leading: CircleAvatar(
-          backgroundColor: (playlist.smart ? chSecondary : chAccent)
+          backgroundColor: (playlist.smart ? palette.secondary : palette.accent)
               .withValues(alpha: 0.18),
           child: Icon(
-            playlist.smart ? Icons.auto_awesome_rounded : Icons.queue_music_rounded,
+            playlist.smart
+                ? Icons.auto_awesome_rounded
+                : Icons.queue_music_rounded,
             size: 18,
-            color: playlist.smart ? chForeground : chAccent,
+            color: playlist.smart ? palette.foreground : palette.accent,
           ),
         ),
         title: Text(
@@ -373,7 +395,7 @@ class _PlaylistTile extends StatelessWidget {
         ),
         subtitle: Text(
           playlist.summary,
-          style: const TextStyle(fontSize: 11, color: chMuted),
+          style: TextStyle(fontSize: 11, color: palette.muted),
         ),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -459,6 +481,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final playlist = _playlist;
     if (playlist == null) {
       return Scaffold(
@@ -472,28 +495,31 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         actions: [
           IconButton(
             tooltip: 'Reproducir todo',
-            onPressed: playlist.isEmpty
-                ? null
-                : () => _play(playlist, 0),
+            onPressed: playlist.isEmpty ? null : () => _play(playlist, 0),
             icon: const Icon(Icons.play_circle_fill_rounded),
           ),
         ],
       ),
       body: playlist.isEmpty
-          ? const Center(
+          ? Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(24),
                 child: Text(
                   'Esta lista está vacía.\nAñade pistas desde la biblioteca '
                   '(menú de cada pista → «Añadir a lista»).',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 13, color: chMuted, height: 1.5),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: palette.muted,
+                    height: 1.5,
+                  ),
                 ),
               ),
             )
           : ListView.separated(
               itemCount: playlist.paths.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: chBorder),
+              separatorBuilder: (_, _) =>
+                  Divider(height: 1, color: palette.border),
               itemBuilder: (context, index) {
                 final path = playlist.paths[index];
                 final name = path.split(RegExp(r'[/\\]')).last;
@@ -501,7 +527,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                   dense: true,
                   leading: Text(
                     '${index + 1}',
-                    style: const TextStyle(fontSize: 12, color: chMuted),
+                    style: TextStyle(fontSize: 12, color: palette.muted),
                   ),
                   title: Text(
                     name,
@@ -513,7 +539,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     path,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 10, color: chMuted),
+                    style: TextStyle(fontSize: 10, color: palette.muted),
                   ),
                   onTap: () => _play(playlist, index),
                   trailing: Row(
@@ -523,13 +549,24 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                         tooltip: 'Subir',
                         onPressed: index == 0
                             ? null
-                            : () => widget.store.move(playlist.id, index, index - 1),
-                        icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 18),
+                            : () => widget.store.move(
+                                playlist.id,
+                                index,
+                                index - 1,
+                              ),
+                        icon: const Icon(
+                          Icons.keyboard_arrow_up_rounded,
+                          size: 18,
+                        ),
                       ),
                       IconButton(
                         tooltip: 'Quitar de la lista',
-                        onPressed: () => widget.store.removeAt(playlist.id, index),
-                        icon: const Icon(Icons.remove_circle_outline_rounded, size: 18),
+                        onPressed: () =>
+                            widget.store.removeAt(playlist.id, index),
+                        icon: const Icon(
+                          Icons.remove_circle_outline_rounded,
+                          size: 18,
+                        ),
                       ),
                     ],
                   ),

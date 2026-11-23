@@ -39,14 +39,18 @@ class QueueSheet extends StatefulWidget {
     return showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: chSurface,
+      backgroundColor: paletteOf(context).surface,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) => FractionallySizedBox(
         heightFactor: 0.78,
-        child: QueueSheet(controller: controller, queues: queues, automix: automix),
+        child: QueueSheet(
+          controller: controller,
+          queues: queues,
+          automix: automix,
+        ),
       ),
     );
   }
@@ -56,9 +60,11 @@ class QueueSheet extends StatefulWidget {
 }
 
 class _QueueSheetState extends State<QueueSheet> {
-  late final MultiQueueStore _queues = widget.queues ?? MultiQueueStore.memory();
+  late final MultiQueueStore _queues =
+      widget.queues ?? MultiQueueStore.memory();
 
-  late final AutomixEngine _automix = widget.automix ??
+  late final AutomixEngine _automix =
+      widget.automix ??
       AutomixEngine(controller: widget.controller, enabled: false);
 
   bool _ownsAutomix = false;
@@ -86,11 +92,9 @@ class _QueueSheetState extends State<QueueSheet> {
   /// cambios de cola no deben repintar la hoja en mitad de un gesto).
   void _captureCurrent() {
     final snapshot = _controller.snapshot;
-    _queues.capture(
-      _queues.active,
-      <String>[for (final item in snapshot.queue) item.path],
-      snapshot.queueIndex,
-    );
+    _queues.capture(_queues.active, <String>[
+      for (final item in snapshot.queue) item.path,
+    ], snapshot.queueIndex);
   }
 
   /// Cambia de cola: guarda la actual y carga la elegida en el motor.
@@ -127,7 +131,7 @@ class _QueueSheetState extends State<QueueSheet> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: chSurface,
+        backgroundColor: paletteOf(context).surface,
         title: const Text('¿Vaciar la cola?'),
         content: Text(
           count == 1
@@ -151,6 +155,7 @@ class _QueueSheetState extends State<QueueSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
@@ -169,7 +174,7 @@ class _QueueSheetState extends State<QueueSheet> {
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     _message!,
-                    style: const TextStyle(fontSize: 11, color: chAccent),
+                    style: TextStyle(fontSize: 11, color: palette.accent),
                   ),
                 ),
               const SizedBox(height: 6),
@@ -201,8 +206,8 @@ class _QueueSheetState extends State<QueueSheet> {
                 count == 0
                     ? 'Sin pistas'
                     : '$count ${count == 1 ? 'pista' : 'pistas'} · '
-                        'arrastra para ordenar, desliza para quitar',
-                style: const TextStyle(fontSize: 12, color: chMuted),
+                          'arrastra para ordenar, desliza para quitar',
+                style: TextStyle(fontSize: 12, color: paletteOf(context).muted),
               ),
             ],
           ),
@@ -217,20 +222,21 @@ class _QueueSheetState extends State<QueueSheet> {
   }
 
   Widget _empty() {
+    final palette = paletteOf(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.queue_music_rounded, size: 42, color: chMuted),
+          Icon(Icons.queue_music_rounded, size: 42, color: palette.muted),
           const SizedBox(height: 10),
-          const Text('La cola está vacía', style: TextStyle(color: chMuted)),
+          Text('La cola está vacía', style: TextStyle(color: palette.muted)),
           const SizedBox(height: 4),
           Text(
             _controller.queueProtected
                 ? 'Abre un archivo y se añadirá al final.'
                 : 'Abre un archivo para empezar a llenarla.',
             textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: chMuted),
+            style: TextStyle(fontSize: 12, color: palette.muted),
           ),
         ],
       ),
@@ -274,12 +280,13 @@ class _QueueSheetState extends State<QueueSheet> {
 
   /// Cinco colas: la activa se marca; tocar otra la trae al motor.
   Widget _slotBar() {
+    final palette = paletteOf(context);
     return SizedBox(
       height: 36,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: MultiQueueStore.slotCount,
-        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
         itemBuilder: (context, index) {
           final slot = _queues.slots[index];
           final active = index == _queues.active;
@@ -288,14 +295,14 @@ class _QueueSheetState extends State<QueueSheet> {
               '${index + 1} · ${slot.paths.length}',
               style: TextStyle(
                 fontSize: 11,
-                color: active ? chOnAccent : chMuted,
+                color: active ? palette.onAccent : palette.muted,
               ),
             ),
             tooltip: slot.label,
             selected: active,
-            selectedColor: chAccent,
-            backgroundColor: chSurfaceHigh,
-            side: BorderSide(color: active ? chAccent : chBorder),
+            selectedColor: palette.accent,
+            backgroundColor: palette.surfaceHigh,
+            side: BorderSide(color: active ? palette.accent : palette.border),
             onSelected: (_) => _switchTo(index),
           );
         },
@@ -320,7 +327,7 @@ class _QueueSheetState extends State<QueueSheet> {
           _automix.enabled
               ? '${_automix.status} · ${automixLabel(_automix.phase)}'
               : automixHint(snapshot),
-          style: const TextStyle(fontSize: 11, color: chMuted),
+          style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
         ),
       ),
     ];
@@ -333,9 +340,9 @@ class _QueueSheetState extends State<QueueSheet> {
       value: _controller.queueProtected,
       onChanged: (value) => _controller.queueProtected = value,
       title: const Text('Cola protegida', style: TextStyle(fontSize: 14)),
-      subtitle: const Text(
+      subtitle: Text(
         'Abrir un archivo lo añade al final en vez de vaciar la cola.',
-        style: TextStyle(fontSize: 12, color: chMuted),
+        style: TextStyle(fontSize: 12, color: paletteOf(context).muted),
       ),
     );
   }
@@ -356,10 +363,12 @@ class _QueueTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     // Del núcleo solo se conoce el artista de la pista que suena; para el
     // resto, la carpeta dice más que una línea vacía.
-    final subtitle =
-        item.artist.isNotEmpty ? item.artist : _parentOf(item.path);
+    final subtitle = item.artist.isNotEmpty
+        ? item.artist
+        : _parentOf(item.path);
     return ListTile(
       dense: true,
       onTap: onTap,
@@ -367,10 +376,10 @@ class _QueueTile extends StatelessWidget {
         width: 34,
         child: Center(
           child: active
-              ? const Icon(Icons.graphic_eq_rounded, size: 20, color: chAccent)
+              ? Icon(Icons.graphic_eq_rounded, size: 20, color: palette.accent)
               : Text(
                   '${index + 1}',
-                  style: const TextStyle(fontSize: 12, color: chMuted),
+                  style: TextStyle(fontSize: 12, color: palette.muted),
                 ),
         ),
       ),
@@ -381,7 +390,7 @@ class _QueueTile extends StatelessWidget {
         style: TextStyle(
           fontSize: 14,
           fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-          color: active ? chAccent : chForeground,
+          color: active ? palette.accent : palette.foreground,
         ),
       ),
       subtitle: subtitle.isEmpty
@@ -390,7 +399,7 @@ class _QueueTile extends StatelessWidget {
               subtitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: chMuted),
+              style: TextStyle(fontSize: 11, color: palette.muted),
             ),
     );
   }
@@ -406,11 +415,12 @@ class _RemoveBackground extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Container(
-      color: const Color(0x33FF5370),
+      color: palette.error.withValues(alpha: 0.2),
       alignment: Alignment.centerRight,
       padding: const EdgeInsets.only(right: 20),
-      child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFFF5370)),
+      child: Icon(Icons.delete_outline_rounded, color: palette.error),
     );
   }
 }
