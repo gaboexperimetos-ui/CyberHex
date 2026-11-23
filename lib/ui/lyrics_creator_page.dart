@@ -114,7 +114,11 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
     final key = _rowKeys[index];
     final context = key?.currentContext;
     if (context != null) {
-      Scrollable.ensureVisible(context, alignment: 0.5, duration: const Duration(milliseconds: 220));
+      Scrollable.ensureVisible(
+        context,
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 220),
+      );
     }
   }
 
@@ -162,12 +166,13 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final snapshot = _controller.snapshot;
     return Scaffold(
-      backgroundColor: chBackground,
+      backgroundColor: palette.background,
       appBar: AppBar(
-        backgroundColor: chBackground,
-        foregroundColor: chForeground,
+        backgroundColor: palette.background,
+        foregroundColor: palette.foreground,
         title: const Text('Estudio de letras', style: TextStyle(fontSize: 17)),
         actions: [
           IconButton(
@@ -187,10 +192,13 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
             ),
             if (_message != null)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
                 child: Text(
                   _message!,
-                  style: const TextStyle(fontSize: 12, color: chAccent),
+                  style: TextStyle(fontSize: 12, color: palette.accent),
                 ),
               ),
             if (_lines.isEmpty) _pastePanel() else _editorPanel(),
@@ -201,23 +209,24 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
   }
 
   Widget _pastePanel() {
+    final palette = paletteOf(context);
     return Expanded(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Pega la letra (una línea por verso)',
-              style: TextStyle(fontSize: 13, color: chMuted),
+              style: TextStyle(fontSize: 13, color: palette.muted),
             ),
             const SizedBox(height: 8),
             Expanded(
               child: Container(
                 decoration: BoxDecoration(
-                  color: chSurface,
+                  color: palette.surface,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: chBorder),
+                  border: Border.all(color: palette.border),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: TextField(
@@ -239,8 +248,8 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
               icon: const Icon(Icons.format_list_numbered_rounded, size: 18),
               label: const Text('Preparar versos'),
               style: FilledButton.styleFrom(
-                backgroundColor: chAccent,
-                foregroundColor: chOnAccent,
+                backgroundColor: palette.accent,
+                foregroundColor: palette.onAccent,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
@@ -251,6 +260,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
   }
 
   Widget _editorPanel() {
+    final palette = paletteOf(context);
     final position = _controller.position;
     return Expanded(
       child: Column(
@@ -270,11 +280,14 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                     borderRadius: BorderRadius.circular(10),
                     onTap: () => setState(() => _cursor = index),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         color: current
-                            ? chAccent.withValues(alpha: 0.12)
-                            : chSurface.withValues(alpha: 0.5),
+                            ? palette.accent.withValues(alpha: 0.12)
+                            : palette.surface.withValues(alpha: 0.5),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -284,8 +297,12 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                               _lines[index].text,
                               style: TextStyle(
                                 fontSize: 14,
-                                color: stamp >= 0 ? chForeground : chMuted,
-                                fontWeight: current ? FontWeight.w600 : FontWeight.w400,
+                                color: stamp >= 0
+                                    ? palette.foreground
+                                    : palette.muted,
+                                fontWeight: current
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
                               ),
                             ),
                           ),
@@ -294,8 +311,12 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                             stamp >= 0 ? _stamp(stamp) : '—',
                             style: TextStyle(
                               fontSize: 11,
-                              color: stamp >= 0 ? chAccent : chMuted,
-                              fontFeatures: const [FontFeature.tabularFigures()],
+                              color: stamp >= 0
+                                  ? palette.accent
+                                  : palette.muted,
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
                             ),
                           ),
                         ],
@@ -312,7 +333,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 'Posición: ${_stamp(seconds)} · verso ${(_cursor + 1).clamp(1, _lines.length)} de ${_lines.length}',
-                style: const TextStyle(fontSize: 11, color: chMuted),
+                style: TextStyle(fontSize: 11, color: palette.muted),
               ),
             ),
           ),
@@ -327,8 +348,8 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                     icon: const Icon(Icons.flag_rounded, size: 18),
                     label: const Text('Marcar verso'),
                     style: FilledButton.styleFrom(
-                      backgroundColor: chAccent,
-                      foregroundColor: chOnAccent,
+                      backgroundColor: palette.accent,
+                      foregroundColor: palette.onAccent,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                     ),
                   ),
@@ -378,7 +399,11 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
 
 /// Transporte mínimo: play/pausa y saltos de cinco segundos.
 class _Transport extends StatelessWidget {
-  const _Transport({required this.controller, required this.title, required this.artist});
+  const _Transport({
+    required this.controller,
+    required this.title,
+    required this.artist,
+  });
 
   final PlayerController controller;
   final String title;
@@ -386,14 +411,15 @@ class _Transport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final snapshot = controller.snapshot;
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: chSurface,
+        color: palette.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: chBorder.withValues(alpha: 0.6)),
+        border: Border.all(color: palette.border.withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
@@ -405,14 +431,17 @@ class _Transport extends StatelessWidget {
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 if (artist.isNotEmpty)
                   Text(
                     artist,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11, color: chMuted),
+                    style: TextStyle(fontSize: 11, color: palette.muted),
                   ),
               ],
             ),
@@ -430,7 +459,7 @@ class _Transport extends StatelessWidget {
             onPressed: controller.toggle,
             icon: Icon(
               snapshot.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: chAccent,
+              color: palette.accent,
             ),
           ),
           IconButton(

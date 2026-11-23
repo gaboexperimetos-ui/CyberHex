@@ -62,7 +62,6 @@ class _PlayerPageState extends State<PlayerPage>
     duration: const Duration(seconds: 12),
   );
 
-
   late final ThemeController _theme = widget.theme ?? ThemeController.memory();
 
   /// Atajo: el motor llega por constructor y no cambia en toda la página.
@@ -161,7 +160,8 @@ class _PlayerPageState extends State<PlayerPage>
   /// El disco solo gira con audio sonando y sin carátula (arte estático).
   void _syncSpin() {
     final snapshot = _controller.snapshot;
-    final shouldSpin = snapshot.playing && snapshot.cover == null && !snapshot.busy;
+    final shouldSpin =
+        snapshot.playing && snapshot.cover == null && !snapshot.busy;
     if (shouldSpin && !_spin.isAnimating) {
       _spin.repeat();
     } else if (!shouldSpin && _spin.isAnimating) {
@@ -169,12 +169,8 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
-  void _openQueue() => QueueSheet.show(
-        context,
-        _controller,
-        queues: _queues,
-        automix: _automix,
-      );
+  void _openQueue() =>
+      QueueSheet.show(context, _controller, queues: _queues, automix: _automix);
 
   void _openLab() => AudioLabSheet.show(context, _controller);
 
@@ -186,7 +182,9 @@ class _PlayerPageState extends State<PlayerPage>
   /// abrir la hoja (si no hay, la hoja deja escribir uno).
   Future<void> _openShare() async {
     final path = _currentPath();
-    final lyrics = path.isEmpty ? Lyrics.empty : await LyricsParser.loadForAudio(path);
+    final lyrics = path.isEmpty
+        ? Lyrics.empty
+        : await LyricsParser.loadForAudio(path);
     if (!mounted) return;
     await ShareCardSheet.show(context, _controller, lyrics: lyrics);
   }
@@ -228,9 +226,7 @@ class _PlayerPageState extends State<PlayerPage>
     if (!mounted || error == null) {
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(error)),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
   }
 
   void _toggle() {
@@ -295,67 +291,77 @@ class _PlayerPageState extends State<PlayerPage>
             child: Focus(
               autofocus: true,
               child: Scaffold(
-              body: Stack(
-                children: [
-                  Positioned.fill(child: _background(snapshot, palette)),
-                  SafeArea(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onDoubleTapDown: (details) =>
-                          _doubleTapAt = details.localPosition,
-                      onDoubleTap: () => _handleDoubleTap(context, snapshot, palette),
-                      child: Center(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 20,
-                          ),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(maxWidth: wide ? 980 : 460),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _Header(
-                                  onOpen: _openFile,
-                                  onQueue: _openQueue,
-                                  onLibrary: _openLibrary,
-                                  onSettings: _openSettings,
-                                  onPocket: _enterPocket,
-                                  palette: palette,
-                                ),
-                                const SizedBox(height: 20),
-                                if (wide)
-                                  Row(
-                                    key: const ValueKey<String>('player-panes'),
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        flex: 5,
-                                        child: _coverArea(snapshot, palette),
+                body: Stack(
+                  children: [
+                    Positioned.fill(child: _background(snapshot, palette)),
+                    SafeArea(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onDoubleTapDown: (details) =>
+                            _doubleTapAt = details.localPosition,
+                        onDoubleTap: () =>
+                            _handleDoubleTap(context, snapshot, palette),
+                        child: Center(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 20,
+                            ),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: wide ? 980 : 460,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  _Header(
+                                    onOpen: _openFile,
+                                    onQueue: _openQueue,
+                                    onLibrary: _openLibrary,
+                                    onSettings: _openSettings,
+                                    onPocket: _enterPocket,
+                                    palette: palette,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  if (wide)
+                                    Row(
+                                      key: const ValueKey<String>(
+                                        'player-panes',
                                       ),
-                                      const SizedBox(width: 28),
-                                      Expanded(
-                                        flex: 6,
-                                        child: _controls(context, snapshot, palette),
-                                      ),
-                                    ],
-                                  )
-                                else ...[
-                                  _coverArea(snapshot, palette),
-                                  const SizedBox(height: 24),
-                                  _controls(context, snapshot, palette),
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          flex: 5,
+                                          child: _coverArea(snapshot, palette),
+                                        ),
+                                        const SizedBox(width: 28),
+                                        Expanded(
+                                          flex: 6,
+                                          child: _controls(
+                                            context,
+                                            snapshot,
+                                            palette,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  else ...[
+                                    _coverArea(snapshot, palette),
+                                    const SizedBox(height: 24),
+                                    _controls(context, snapshot, palette),
+                                  ],
                                 ],
-                              ],
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  if (_pocket)
-                    Positioned.fill(child: _pocketOverlay(snapshot, palette)),
-                ],
-              ),
+                    if (_pocket)
+                      Positioned.fill(child: _pocketOverlay(snapshot, palette)),
+                  ],
+                ),
               ),
             ),
           ),
@@ -411,7 +417,11 @@ class _PlayerPageState extends State<PlayerPage>
       CoverStyle.spinningDisc => _Disc(spin: _spin, snapshot: snapshot),
       CoverStyle.square => _CoverFrame(snapshot: snapshot, radius: 12),
       CoverStyle.rounded => _CoverFrame(snapshot: snapshot, radius: 44),
-      CoverStyle.fullBleed => _CoverFrame(snapshot: snapshot, radius: 0, size: 300),
+      CoverStyle.fullBleed => _CoverFrame(
+        snapshot: snapshot,
+        radius: 0,
+        size: 300,
+      ),
     };
     return GestureDetector(
       key: const ValueKey<String>('player-cover'),
@@ -750,8 +760,8 @@ class _PlayerPageState extends State<PlayerPage>
           opened == 0
               ? 'No se pudo abrir nada de lo que soltaste ($failed fallo(s)).'
               : 'Soltado: $opened en reproducción, $enqueued en cola'
-                  '${scanned > 0 ? ', $scanned pista(s) escaneadas' : ''}'
-                  '${failed > 0 ? ', $failed fallo(s)' : ''}.',
+                    '${scanned > 0 ? ', $scanned pista(s) escaneadas' : ''}'
+                    '${failed > 0 ? ', $failed fallo(s)' : ''}.',
         ),
       ),
     );
@@ -790,7 +800,6 @@ class _PlayerIntent extends Intent {
 
   final _PlayerCommand command;
 }
-
 
 class _Header extends StatelessWidget {
   const _Header({
@@ -956,6 +965,7 @@ class _Disc extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final image = snapshot.cover;
     return Center(
@@ -970,7 +980,9 @@ class _Disc extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: [
                   BoxShadow(
-                    color: chAccent.withValues(alpha: snapshot.playing ? 0.28 : 0.10),
+                    color: palette.accent.withValues(
+                      alpha: snapshot.playing ? 0.28 : 0.10,
+                    ),
                     blurRadius: snapshot.playing ? 70 : 40,
                     spreadRadius: snapshot.playing ? 12 : 4,
                   ),
@@ -986,18 +998,18 @@ class _Disc extends StatelessWidget {
                   fit: BoxFit.cover,
                   gaplessPlayback: true,
                   cacheWidth: 472,
-                  errorBuilder: (_, __, ___) => _vinyl(reduceMotion),
+                  errorBuilder: (_, _, _) => _vinyl(reduceMotion, palette),
                 ),
               )
             else
-              _vinyl(reduceMotion),
+              _vinyl(reduceMotion, palette),
             if (snapshot.busy)
               Container(
                 width: 236,
                 height: 236,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Color(0xAA0F0F23),
+                  color: palette.background.withValues(alpha: 0.66),
                 ),
                 child: const Center(
                   child: SizedBox(
@@ -1013,7 +1025,7 @@ class _Disc extends StatelessWidget {
     );
   }
 
-  Widget _vinyl(bool reduceMotion) {
+  Widget _vinyl(bool reduceMotion, CyberHexPalette palette) {
     return RotationTransition(
       turns: reduceMotion ? const AlwaysStoppedAnimation(0.1) : spin,
       child: Container(
@@ -1031,7 +1043,7 @@ class _Disc extends StatelessWidget {
             ],
             stops: [0, 0.3, 0.5, 0.7, 1],
           ),
-          border: Border.all(color: chBorder, width: 1),
+          border: Border.all(color: palette.border, width: 1),
         ),
         child: Center(
           child: Container(
@@ -1039,15 +1051,15 @@ class _Disc extends StatelessWidget {
             height: 78,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: chBackground,
-              border: Border.all(color: chBorder),
+              color: palette.background,
+              border: Border.all(color: palette.border),
             ),
             child: Icon(
               snapshot.hasTrack
                   ? Icons.graphic_eq_rounded
                   : Icons.music_note_rounded,
               size: 34,
-              color: snapshot.hasTrack ? chAccent : chMuted,
+              color: snapshot.hasTrack ? palette.accent : palette.muted,
             ),
           ),
         ),
@@ -1064,19 +1076,24 @@ class _TrackInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     if (!snapshot.hasTrack) {
       return Column(
         children: [
           const Text(
             'Tu música, en tu máquina',
             textAlign: TextAlign.center,
-            style: TextStyle(fontFamily: 'Righteous', fontSize: 20, letterSpacing: 0.5),
+            style: TextStyle(
+              fontFamily: 'Righteous',
+              fontSize: 20,
+              letterSpacing: 0.5,
+            ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Abre un archivo de audio y CyberHex lo decodifica con su propio motor en Zig y C23. Nada sale de tu equipo.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: chMuted, height: 1.5),
+            style: TextStyle(color: palette.muted, height: 1.5),
           ),
           const SizedBox(height: 18),
           FilledButton.icon(
@@ -1084,8 +1101,8 @@ class _TrackInfo extends StatelessWidget {
             icon: const Icon(Icons.play_arrow_rounded),
             label: const Text('Abrir audio'),
             style: FilledButton.styleFrom(
-              backgroundColor: chAccent,
-              foregroundColor: chOnAccent,
+              backgroundColor: palette.accent,
+              foregroundColor: palette.onAccent,
               padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
             ),
           ),
@@ -1093,9 +1110,10 @@ class _TrackInfo extends StatelessWidget {
       );
     }
 
-    final subtitle = [snapshot.artist, snapshot.album]
-        .where((part) => part.isNotEmpty)
-        .join(' · ');
+    final subtitle = [
+      snapshot.artist,
+      snapshot.album,
+    ].where((part) => part.isNotEmpty).join(' · ');
     return Column(
       children: [
         Text(
@@ -1112,13 +1130,17 @@ class _TrackInfo extends StatelessWidget {
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: chForeground, fontSize: 13),
+            style: TextStyle(color: palette.foreground, fontSize: 13),
           ),
         ],
         const SizedBox(height: 6),
         Text(
           '${_clock(snapshot.duration)} · motor nativo 48 kHz',
-          style: const TextStyle(color: chMuted, fontSize: 12, letterSpacing: 0.4),
+          style: TextStyle(
+            color: palette.muted,
+            fontSize: 12,
+            letterSpacing: 0.4,
+          ),
         ),
       ],
     );
@@ -1146,6 +1168,7 @@ class _SeekBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final duration = math.max(snapshot.duration, 0.001);
     final enabled = snapshot.hasTrack && !snapshot.busy;
     return ValueListenableBuilder<double>(
@@ -1172,11 +1195,13 @@ class _SeekBar extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(_clock(current.toDouble()),
-                      style: const TextStyle(fontSize: 11, color: chMuted)),
+                  Text(
+                    _clock(current.toDouble()),
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
                   Text(
                     snapshot.hasTrack ? _clock(snapshot.duration) : '--:--',
-                    style: const TextStyle(fontSize: 11, color: chMuted),
+                    style: TextStyle(fontSize: 11, color: palette.muted),
                   ),
                 ],
               ),
@@ -1259,7 +1284,8 @@ class _ModeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = active ? chAccent : chMuted;
+    final palette = paletteOf(context);
+    final color = active ? palette.accent : palette.muted;
     return Tooltip(
       message: tooltip,
       child: TextButton.icon(
@@ -1274,14 +1300,15 @@ class _ModeButton extends StatelessWidget {
           ),
         ),
         style: TextButton.styleFrom(
-          backgroundColor:
-              active ? chAccent.withValues(alpha: 0.14) : Colors.transparent,
+          backgroundColor: active
+              ? palette.accent.withValues(alpha: 0.14)
+              : Colors.transparent,
           foregroundColor: color,
           shape: const StadiumBorder(),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           minimumSize: Size.zero,
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          side: BorderSide(color: active ? chAccent : chBorder),
+          side: BorderSide(color: active ? palette.accent : palette.border),
         ),
       ),
     );
@@ -1303,13 +1330,15 @@ class _Controls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final enabled = snapshot.hasTrack && !snapshot.busy;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         IconButton(
-          onPressed:
-              enabled ? () => onSeek(math.max(position.value - 10, 0)) : null,
+          onPressed: enabled
+              ? () => onSeek(math.max(position.value - 10, 0))
+              : null,
           tooltip: 'Retroceder 10 s',
           iconSize: 30,
           icon: const Icon(Icons.replay_10_rounded),
@@ -1322,9 +1351,9 @@ class _Controls extends StatelessWidget {
             onPressed: enabled ? onToggle : null,
             style: FilledButton.styleFrom(
               shape: const CircleBorder(),
-              backgroundColor: chAccent,
-              foregroundColor: chOnAccent,
-              disabledBackgroundColor: chSurfaceHigh,
+              backgroundColor: palette.accent,
+              foregroundColor: palette.onAccent,
+              disabledBackgroundColor: palette.surfaceHigh,
               padding: EdgeInsets.zero,
             ),
             child: Icon(
@@ -1455,6 +1484,7 @@ class _FooterRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final volume = snapshot.volume;
     return Column(
       children: [
@@ -1463,7 +1493,7 @@ class _FooterRow extends StatelessWidget {
             Icon(
               volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
               size: 20,
-              color: chMuted,
+              color: palette.muted,
             ),
             Expanded(
               child: Slider(value: volume, onChanged: onVolume),
@@ -1479,8 +1509,8 @@ class _FooterRow extends StatelessWidget {
                 icon: const Icon(Icons.equalizer_rounded, size: 18),
                 label: const Text('Ecualizador'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: chForeground,
-                  side: const BorderSide(color: chBorder),
+                  foregroundColor: palette.foreground,
+                  side: BorderSide(color: palette.border),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
@@ -1492,8 +1522,8 @@ class _FooterRow extends StatelessWidget {
                 icon: const Icon(Icons.tune_rounded, size: 18),
                 label: const Text('Laboratorio'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: chForeground,
-                  side: const BorderSide(color: chBorder),
+                  foregroundColor: palette.foreground,
+                  side: BorderSide(color: palette.border),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
@@ -1510,7 +1540,9 @@ class _FooterRow extends StatelessWidget {
                   ? Icons.nights_stay_outlined
                   : Icons.water_drop_rounded,
               size: 18,
-              color: soundscape == SoundscapePreset.off ? chMuted : chAccent,
+              color: soundscape == SoundscapePreset.off
+                  ? palette.muted
+                  : palette.accent,
             ),
             label: Text(
               switch (soundscape) {
@@ -1521,12 +1553,16 @@ class _FooterRow extends StatelessWidget {
               },
               style: TextStyle(
                 fontSize: 12,
-                color: soundscape == SoundscapePreset.off ? chMuted : chAccent,
+                color: soundscape == SoundscapePreset.off
+                    ? palette.muted
+                    : palette.accent,
               ),
             ),
             style: OutlinedButton.styleFrom(
               side: BorderSide(
-                color: soundscape == SoundscapePreset.off ? chBorder : chAccent,
+                color: soundscape == SoundscapePreset.off
+                    ? palette.border
+                    : palette.accent,
               ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             ),

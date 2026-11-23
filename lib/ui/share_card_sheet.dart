@@ -56,8 +56,9 @@ class ShareCardSheet extends StatefulWidget {
 
 class _ShareCardSheetState extends State<ShareCardSheet> {
   final GlobalKey _cardKey = GlobalKey();
-  late final TextEditingController _verse =
-      TextEditingController(text: widget.initialVerse ?? '');
+  late final TextEditingController _verse = TextEditingController(
+    text: widget.initialVerse ?? '',
+  );
   int _verseIndex = -1;
   bool _busy = false;
   String? _message;
@@ -65,9 +66,9 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
   PlayerController get _controller => widget.controller;
 
   List<String> get _candidates => <String>[
-        for (final line in widget.lyrics?.lines ?? const <LyricLine>[])
-          if (line.text.trim().isNotEmpty) line.text.trim(),
-      ];
+    for (final line in widget.lyrics?.lines ?? const <LyricLine>[])
+      if (line.text.trim().isNotEmpty) line.text.trim(),
+  ];
 
   @override
   void initState() {
@@ -93,7 +94,10 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
   void _nextVerse() {
     final lines = _candidates;
     if (lines.isEmpty) {
-      setState(() => _message = 'Esta pista no tiene letra: escribe el verso que quieras.');
+      setState(
+        () => _message =
+            'Esta pista no tiene letra: escribe el verso que quieras.',
+      );
       return;
     }
     _verseIndex = (_verseIndex + 1) % lines.length;
@@ -157,6 +161,7 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final snapshot = _controller.snapshot;
     return SafeArea(
       child: ConstrainedBox(
@@ -175,7 +180,7 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
               const SizedBox(height: 4),
               const Text(
                 'Se exporta tal cual se ve, a 3× (unas 1020 × 1320 px).',
-                style: TextStyle(fontSize: 12, color: chMuted),
+                style: TextStyle(fontSize: 12),
               ),
               const SizedBox(height: 14),
               Center(
@@ -198,16 +203,16 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
                 style: const TextStyle(fontSize: 14, height: 1.35),
                 decoration: InputDecoration(
                   labelText: 'Verso de la tarjeta',
-                  labelStyle: const TextStyle(fontSize: 12, color: chMuted),
+                  labelStyle: TextStyle(fontSize: 12, color: palette.muted),
                   filled: true,
-                  fillColor: chSurface,
+                  fillColor: palette.surface,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: chBorder),
+                    borderSide: BorderSide(color: palette.border),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: chBorder),
+                    borderSide: BorderSide(color: palette.border),
                   ),
                 ),
                 onChanged: (_) => setState(() {}),
@@ -235,8 +240,8 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
                           : const Icon(Icons.ios_share_rounded, size: 18),
                       label: const Text('Guardar PNG'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: chAccent,
-                        foregroundColor: chOnAccent,
+                        backgroundColor: palette.accent,
+                        foregroundColor: palette.onAccent,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
@@ -247,7 +252,7 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
                 const SizedBox(height: 10),
                 Text(
                   _message!,
-                  style: const TextStyle(fontSize: 12, color: chAccent),
+                  style: TextStyle(fontSize: 12, color: palette.accent),
                 ),
               ],
             ],
@@ -287,7 +292,11 @@ class ShareCard extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: <Color>[Color(0xFF17173A), Color(0xFF0B0B1A), Color(0xFF101033)],
+          colors: <Color>[
+            Color(0xFF17173A),
+            Color(0xFF0B0B1A),
+            Color(0xFF101033),
+          ],
         ),
         border: Border.all(color: chAccent.withValues(alpha: 0.35)),
         boxShadow: <BoxShadow>[
@@ -370,7 +379,10 @@ class ShareCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      <String>[artist, album].where((part) => part.isNotEmpty).join(' · '),
+                      <String>[
+                        artist,
+                        album,
+                      ].where((part) => part.isNotEmpty).join(' · '),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 11, color: chMuted),

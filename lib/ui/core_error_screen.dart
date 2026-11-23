@@ -11,6 +11,7 @@ class CoreErrorScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Scaffold(
       body: Center(
         child: Padding(
@@ -18,7 +19,7 @@ class CoreErrorScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline_rounded, color: chError, size: 40),
+              Icon(Icons.error_outline_rounded, color: palette.error, size: 40),
               const SizedBox(height: 16),
               const Text(
                 'No se pudo iniciar el motor de audio',
@@ -29,7 +30,7 @@ class CoreErrorScreen extends StatelessWidget {
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: chMuted),
+                style: TextStyle(color: palette.muted),
               ),
             ],
           ),

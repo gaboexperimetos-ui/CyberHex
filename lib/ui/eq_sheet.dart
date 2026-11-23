@@ -30,6 +30,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final gains = widget.controller.eqGains;
     final frequencies = widget.controller.eqBandFrequencies;
     return SafeArea(
@@ -55,7 +56,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
             ),
             Text(
               '${gains.length} bandas · 20 Hz – 20 kHz · ±18 dB',
-              style: const TextStyle(fontSize: 12, color: chMuted),
+              style: TextStyle(fontSize: 12, color: palette.muted),
             ),
             const SizedBox(height: 10),
             SizedBox(
@@ -72,8 +73,8 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                       style: const TextStyle(fontSize: 11),
                     ),
                     tooltip: preset.description,
-                    backgroundColor: chSurfaceHigh,
-                    side: const BorderSide(color: chBorder),
+                    backgroundColor: palette.surfaceHigh,
+                    side: BorderSide(color: palette.border),
                     onPressed: () {
                       applyEqPreset(widget.controller, preset);
                       setState(() {});
@@ -113,8 +114,9 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                           child: _Band(
                             label: _formatHz(frequencies[i]),
                             value: gains[i],
-                            onChanged: (value) =>
-                                setState(() => widget.controller.setBand(i, value)),
+                            onChanged: (value) => setState(
+                              () => widget.controller.setBand(i, value),
+                            ),
                           ),
                         ),
                     ],
@@ -125,7 +127,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
             const SizedBox(height: 6),
             Text(
               'Desliza en horizontal para recorrer todo el espectro.',
-              style: const TextStyle(fontSize: 11, color: chMuted),
+              style: TextStyle(fontSize: 11, color: palette.muted),
             ),
           ],
         ),
@@ -146,7 +148,11 @@ String _formatHz(double hz) {
 }
 
 class _Band extends StatelessWidget {
-  const _Band({required this.label, required this.value, required this.onChanged});
+  const _Band({
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
 
   final String label;
   final double value;
@@ -154,6 +160,7 @@ class _Band extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
@@ -163,7 +170,7 @@ class _Band extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(
               value.abs() < 0.05 ? '' : value.toStringAsFixed(0),
-              style: const TextStyle(fontSize: 10, color: chMuted),
+              style: TextStyle(fontSize: 10, color: palette.muted),
             ),
           ),
         ),
@@ -185,7 +192,7 @@ class _Band extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(
               label,
-              style: const TextStyle(fontSize: 9, color: chMuted),
+              style: TextStyle(fontSize: 9, color: palette.muted),
             ),
           ),
         ),

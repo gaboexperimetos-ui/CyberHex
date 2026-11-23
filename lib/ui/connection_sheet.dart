@@ -211,22 +211,35 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
         listenable: widget.connections,
         builder: (context, _) {
           final connections = widget.connections;
+          final palette = paletteOf(context);
           return ListView(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
             children: [
-              Text('Conexiones', style: chDisplay.copyWith(fontSize: 20)),
+              Text(
+                'Conexiones',
+                style: chDisplay.copyWith(
+                  fontSize: 20,
+                  color: palette.foreground,
+                ),
+              ),
               const SizedBox(height: 4),
-              const Text(
+              Text(
                 'Enlace local y autenticado entre el reproductor y Study Platform.',
-                style: TextStyle(color: chMuted, height: 1.5),
+                style: TextStyle(color: palette.muted, height: 1.5),
               ),
               const SizedBox(height: 20),
-              Text('API de CyberHex', style: chDisplay.copyWith(fontSize: 16)),
+              Text(
+                'API de CyberHex',
+                style: chDisplay.copyWith(
+                  fontSize: 16,
+                  color: palette.foreground,
+                ),
+              ),
               const SizedBox(height: 6),
               Text(
                 connections.localApiError ??
                     'Solo escucha en este equipo: ${connections.localApiUrl ?? 'iniciando…'}',
-                style: const TextStyle(color: chMuted, fontSize: 12),
+                style: TextStyle(color: palette.muted, fontSize: 12),
               ),
               const SizedBox(height: 8),
               TextFormField(
@@ -256,11 +269,21 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                 ),
               ),
               const Divider(height: 28),
-              Text('Study Platform', style: chDisplay.copyWith(fontSize: 16)),
+              Text(
+                'Study Platform',
+                style: chDisplay.copyWith(
+                  fontSize: 16,
+                  color: palette.foreground,
+                ),
+              ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Introduce su endpoint MCP y la CUSTOM_MCP_API_KEY configurada en el servidor.',
-                style: TextStyle(color: chMuted, fontSize: 12, height: 1.5),
+                style: TextStyle(
+                  color: palette.muted,
+                  fontSize: 12,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -285,7 +308,9 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                 const SizedBox(height: 12),
                 Text(
                   _message!,
-                  style: TextStyle(color: _success ? chAccent : chError),
+                  style: TextStyle(
+                    color: _success ? palette.accent : palette.error,
+                  ),
                 ),
               ],
               const SizedBox(height: 16),
@@ -313,14 +338,24 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                 ],
               ),
               const SizedBox(height: 12),
-              const Text(
+              Text(
                 'La clave se guarda en el almacenamiento seguro del dispositivo. '
                 'No compartas la clave de CyberHex: da acceso local a la reproducción y la cola.',
-                style: TextStyle(color: chMuted, fontSize: 11, height: 1.5),
+                style: TextStyle(
+                  color: palette.muted,
+                  fontSize: 11,
+                  height: 1.5,
+                ),
               ),
               if (connections.studyConfigured) ...[
                 const Divider(height: 32),
-                Text('Notas', style: chDisplay.copyWith(fontSize: 16)),
+                Text(
+                  'Notas',
+                  style: chDisplay.copyWith(
+                    fontSize: 16,
+                    color: palette.foreground,
+                  ),
+                ),
                 const SizedBox(height: 8),
                 TextField(
                   controller: _noteQuery,

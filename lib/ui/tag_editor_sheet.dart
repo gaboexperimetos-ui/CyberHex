@@ -37,7 +37,9 @@ class TagEditorSheet extends StatefulWidget {
       isScrollControlled: true,
       showDragHandle: true,
       builder: (_) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: TagEditorSheet(controller: controller, path: path),
       ),
     );
@@ -112,22 +114,27 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
       _cover = tags.cover;
       _dropCover = false;
       _loaded = true;
-      _message = tags.isEmpty ? 'Este archivo no trae etiquetas todavía.' : null;
+      _message = tags.isEmpty
+          ? 'Este archivo no trae etiquetas todavía.'
+          : null;
     });
   }
 
   TrackTags get _edited => TrackTags(
-        title: _title.text.trim(),
-        artist: _artist.text.trim(),
-        album: _album.text.trim(),
-        year: _year.text.trim(),
-        genre: _genre.text.trim(),
-        track: int.tryParse(_track.text.trim()) ?? 0,
-        cover: _dropCover ? null : _cover,
-      );
+    title: _title.text.trim(),
+    artist: _artist.text.trim(),
+    album: _album.text.trim(),
+    year: _year.text.trim(),
+    genre: _genre.text.trim(),
+    track: int.tryParse(_track.text.trim()) ?? 0,
+    cover: _dropCover ? null : _cover,
+  );
 
   Future<void> _pickCover() async {
-    const group = XTypeGroup(label: 'Imagen', extensions: <String>['jpg', 'jpeg', 'png']);
+    const group = XTypeGroup(
+      label: 'Imagen',
+      extensions: <String>['jpg', 'jpeg', 'png'],
+    );
     final file = await openFile(acceptedTypeGroups: const <XTypeGroup>[group]);
     if (file == null) return;
     try {
@@ -152,8 +159,10 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
     }
     final file = File(path);
     if (!TagEditor.canWrite(path)) {
-      setState(() => _message =
-          'Este formato no admite edición de etiquetas (solo .mp3 y .flac).');
+      setState(
+        () => _message =
+            'Este formato no admite edición de etiquetas (solo .mp3 y .flac).',
+      );
       return;
     }
     setState(() {
@@ -169,7 +178,7 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
       _busy = false;
       _message = report.ok
           ? '${report.written} archivo(s) actualizados. '
-              'Vuelve a abrir la pista para ver los datos nuevos.'
+                'Vuelve a abrir la pista para ver los datos nuevos.'
           : 'Falló ${report.failed.length} archivo(s): ${report.error ?? ''}';
       if (report.ok) _original = tags;
     });
@@ -177,6 +186,7 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final path = _path;
     final name = path.isEmpty ? '' : path.split(RegExp(r'[/\\]')).last;
     return SafeArea(
@@ -194,7 +204,10 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   const Expanded(
                     child: Text(
                       'Etiquetas y carátula',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -209,7 +222,7 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, color: chMuted),
+                  style: TextStyle(fontSize: 12, color: palette.muted),
                 ),
               const SizedBox(height: 14),
               if (!_loaded)
@@ -232,7 +245,9 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   children: [
                     Expanded(child: _field(_year, 'Año', Icons.event_rounded)),
                     const SizedBox(width: 10),
-                    Expanded(child: _field(_genre, 'Género', Icons.category_rounded)),
+                    Expanded(
+                      child: _field(_genre, 'Género', Icons.category_rounded),
+                    ),
                   ],
                 ),
                 _field(
@@ -245,15 +260,17 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   contentPadding: EdgeInsets.zero,
                   dense: true,
                   value: _albumScope,
-                  onChanged: _busy ? null : (value) => setState(() => _albumScope = value),
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _albumScope = value),
                   title: const Text(
                     'Aplicar al álbum completo',
                     style: TextStyle(fontSize: 13),
                   ),
-                  subtitle: const Text(
+                  subtitle: Text(
                     'Mismo artista, álbum y carátula a los archivos del directorio '
                     'con el mismo álbum; cada uno conserva su título y su número.',
-                    style: TextStyle(fontSize: 11, color: chMuted),
+                    style: TextStyle(fontSize: 11, color: palette.muted),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -266,13 +283,17 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                             ? const SizedBox(
                                 width: 16,
                                 height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : const Icon(Icons.save_rounded, size: 18),
-                        label: Text(_albumScope ? 'Guardar en el álbum' : 'Guardar'),
+                        label: Text(
+                          _albumScope ? 'Guardar en el álbum' : 'Guardar',
+                        ),
                         style: FilledButton.styleFrom(
-                          backgroundColor: chAccent,
-                          foregroundColor: chOnAccent,
+                          backgroundColor: palette.accent,
+                          foregroundColor: palette.onAccent,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                       ),
@@ -288,7 +309,7 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   const SizedBox(height: 10),
                   Text(
                     _message!,
-                    style: const TextStyle(fontSize: 12, color: chAccent),
+                    style: TextStyle(fontSize: 12, color: palette.accent),
                   ),
                 ],
                 if (!_original.isEmpty) ...[
@@ -296,7 +317,7 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   Text(
                     'En el archivo: ${_original.summary}'
                     '${_original.hasCover ? ' · carátula incrustada' : ''}',
-                    style: const TextStyle(fontSize: 11, color: chMuted),
+                    style: TextStyle(fontSize: 11, color: palette.muted),
                   ),
                 ],
               ],
@@ -313,6 +334,7 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
     IconData icon, {
     TextInputType? keyboard,
   }) {
+    final palette = paletteOf(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: TextField(
@@ -321,18 +343,18 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
         style: const TextStyle(fontSize: 14),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(fontSize: 12, color: chMuted),
-          prefixIcon: Icon(icon, size: 18, color: chMuted),
+          labelStyle: TextStyle(fontSize: 12, color: palette.muted),
+          prefixIcon: Icon(icon, size: 18, color: palette.muted),
           filled: true,
-          fillColor: chSurface,
+          fillColor: palette.surface,
           isDense: true,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: chBorder),
+            borderSide: BorderSide(color: palette.border),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: chBorder),
+            borderSide: BorderSide(color: palette.border),
           ),
         ),
       ),
@@ -356,6 +378,7 @@ class _CoverRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final image = cover;
     return Row(
       children: [
@@ -365,18 +388,21 @@ class _CoverRow extends StatelessWidget {
             width: 84,
             height: 84,
             child: image == null
-                ? const ColoredBox(
-                    color: chSurfaceHigh,
-                    child: Icon(Icons.image_outlined, color: chMuted),
+                ? ColoredBox(
+                    color: palette.surfaceHigh,
+                    child: Icon(Icons.image_outlined, color: palette.muted),
                   )
                 : Image.memory(
                     image,
                     fit: BoxFit.cover,
                     gaplessPlayback: true,
                     cacheWidth: 168,
-                    errorBuilder: (_, __, ___) => const ColoredBox(
-                      color: chSurfaceHigh,
-                      child: Icon(Icons.broken_image_outlined, color: chMuted),
+                    errorBuilder: (_, _, _) => ColoredBox(
+                      color: palette.surfaceHigh,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: palette.muted,
+                      ),
                     ),
                   ),
           ),
@@ -388,7 +414,7 @@ class _CoverRow extends StatelessWidget {
             children: [
               Text(
                 image == null ? 'Sin carátula' : 'Carátula incrustada',
-                style: const TextStyle(fontSize: 13, color: chForeground),
+                style: TextStyle(fontSize: 13, color: palette.foreground),
               ),
               const SizedBox(height: 4),
               Wrap(
@@ -397,12 +423,18 @@ class _CoverRow extends StatelessWidget {
                   TextButton.icon(
                     onPressed: busy ? null : onPick,
                     icon: const Icon(Icons.folder_open_rounded, size: 16),
-                    label: const Text('Elegir…', style: TextStyle(fontSize: 12)),
+                    label: const Text(
+                      'Elegir…',
+                      style: TextStyle(fontSize: 12),
+                    ),
                   ),
                   if (image != null)
                     TextButton(
                       onPressed: busy ? null : onDrop,
-                      child: const Text('Quitar', style: TextStyle(fontSize: 12)),
+                      child: const Text(
+                        'Quitar',
+                        style: TextStyle(fontSize: 12),
+                      ),
                     ),
                 ],
               ),

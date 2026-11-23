@@ -19,11 +19,7 @@ import '../theme.dart';
 /// la cola en un toque; para que aparezca en la **biblioteca** hay que reescanear
 /// la carpeta (el núcleo indexa, no se le puede «inyectar» una ruta).
 class DownloaderPage extends StatefulWidget {
-  const DownloaderPage({
-    super.key,
-    required this.controller,
-    this.downloader,
-  });
+  const DownloaderPage({super.key, required this.controller, this.downloader});
 
   final PlayerController controller;
 
@@ -35,7 +31,8 @@ class DownloaderPage extends StatefulWidget {
 }
 
 class _DownloaderPageState extends State<DownloaderPage> {
-  late final AudioDownloader _downloader = widget.downloader ?? AudioDownloader();
+  late final AudioDownloader _downloader =
+      widget.downloader ?? AudioDownloader();
   final TextEditingController _query = TextEditingController();
   final TextEditingController _url = TextEditingController();
 
@@ -147,9 +144,11 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final file = _downloaded;
     if (file == null) return;
     final ok = widget.controller.enqueue(file.path);
-    setState(() => _message = ok
-        ? '«${file.path.split(Platform.pathSeparator).last}» añadida a la cola.'
-        : 'El motor no aceptó la pista.');
+    setState(
+      () => _message = ok
+          ? '«${file.path.split(Platform.pathSeparator).last}» añadida a la cola.'
+          : 'El motor no aceptó la pista.',
+    );
   }
 
   Future<void> _downloadUrl() async {
@@ -163,6 +162,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final progress = _progress;
     final fraction = progress?.fraction;
     return Scaffold(
@@ -177,7 +177,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
             decoration: InputDecoration(
               labelText: 'Buscar en Internet Archive',
               hintText: 'por ejemplo: blues 1927, piano nocturno…',
-              labelStyle: const TextStyle(fontSize: 12, color: chMuted),
+              labelStyle: TextStyle(fontSize: 12, color: palette.muted),
               prefixIcon: const Icon(Icons.search_rounded, size: 20),
               suffixIcon: IconButton(
                 tooltip: 'Buscar',
@@ -199,7 +199,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
             decoration: InputDecoration(
               labelText: 'URL directa de audio',
               hintText: 'https://…/episodio.mp3',
-              labelStyle: const TextStyle(fontSize: 12, color: chMuted),
+              labelStyle: TextStyle(fontSize: 12, color: palette.muted),
               prefixIcon: const Icon(Icons.link_rounded, size: 20),
               suffixIcon: IconButton(
                 tooltip: 'Descargar la URL',
@@ -213,31 +213,31 @@ class _DownloaderPageState extends State<DownloaderPage> {
               padding: const EdgeInsets.only(top: 10),
               child: Text(
                 _message!,
-                style: const TextStyle(fontSize: 12, color: chAccent),
+                style: TextStyle(fontSize: 12, color: palette.accent),
               ),
             ),
           if (_downloading != null) ...[
             const SizedBox(height: 14),
             Text(
               'Descargando ${_downloading!.name}',
-              style: const TextStyle(fontSize: 12, color: chForeground),
+              style: TextStyle(fontSize: 12, color: palette.foreground),
             ),
             const SizedBox(height: 6),
             LinearProgressIndicator(
               value: fraction,
               minHeight: 6,
-              backgroundColor: chSurfaceHigh,
-              color: chAccent,
+              backgroundColor: palette.surfaceHigh,
+              color: palette.accent,
             ),
             const SizedBox(height: 4),
             Text(
               progress == null
                   ? ''
                   : fraction == null
-                      ? '${_kib(progress.received)} recibidos'
-                      : '${(fraction * 100).round()} % · '
-                          '${_kib(progress.received)} de ${_kib(progress.total)}',
-              style: const TextStyle(fontSize: 11, color: chMuted),
+                  ? '${_kib(progress.received)} recibidos'
+                  : '${(fraction * 100).round()} % · '
+                        '${_kib(progress.received)} de ${_kib(progress.total)}',
+              style: TextStyle(fontSize: 11, color: palette.muted),
             ),
           ],
           if (_downloaded != null)
@@ -259,7 +259,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
                   _selected?.identifier == item.identifier
                       ? Icons.radio_button_checked_rounded
                       : Icons.album_outlined,
-                  color: chAccent,
+                  color: palette.accent,
                   size: 20,
                 ),
                 title: Text(
@@ -272,7 +272,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
                   item.subtitle.isEmpty ? item.identifier : item.subtitle,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: chMuted),
+                  style: TextStyle(fontSize: 11, color: palette.muted),
                 ),
                 onTap: _loadingFiles ? null : () => _openItem(item),
               ),
@@ -288,7 +288,11 @@ class _DownloaderPageState extends State<DownloaderPage> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.audio_file_outlined, size: 20, color: chMuted),
+                leading: Icon(
+                  Icons.audio_file_outlined,
+                  size: 20,
+                  color: palette.muted,
+                ),
                 title: Text(
                   candidate.name,
                   maxLines: 1,
@@ -297,7 +301,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
                 ),
                 subtitle: Text(
                   '${candidate.format} · ${candidate.sizeLabel}',
-                  style: const TextStyle(fontSize: 11, color: chMuted),
+                  style: TextStyle(fontSize: 11, color: palette.muted),
                 ),
                 trailing: IconButton(
                   tooltip: 'Descargar',
@@ -331,7 +335,11 @@ class _Label extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(0, 18, 0, 4),
       child: Text(
         text,
-        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: chMuted),
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: paletteOf(context).muted,
+        ),
       ),
     );
   }

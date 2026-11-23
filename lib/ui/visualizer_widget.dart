@@ -17,8 +17,9 @@ enum VisualizerStyle {
 
   String get label => this == VisualizerStyle.bars ? 'Barras' : 'Hexágonos';
 
-  VisualizerStyle get next =>
-      this == VisualizerStyle.bars ? VisualizerStyle.hexagon : VisualizerStyle.bars;
+  VisualizerStyle get next => this == VisualizerStyle.bars
+      ? VisualizerStyle.hexagon
+      : VisualizerStyle.bars;
 }
 
 /// Vúmetro (RMS y pico por canal) + espectro, leyendo del motor.
@@ -113,7 +114,8 @@ class _VisualizerWidgetState extends State<VisualizerWidget> {
       _timer?.cancel();
       _timer = null;
     }
-    final color = widget.color ?? chAccent;
+    final palette = paletteOf(context);
+    final color = widget.color ?? palette.accent;
     return Semantics(
       label: 'Visualizador: ${widget.style.label}',
       value: _levels.isSilent ? 'silencio' : _levels.toString(),
@@ -128,6 +130,8 @@ class _VisualizerWidgetState extends State<VisualizerWidget> {
                 values: _smooth,
                 style: widget.style,
                 color: color,
+                surface: palette.surface,
+                border: palette.border,
               ),
               child: const SizedBox.expand(),
             ),
@@ -154,9 +158,19 @@ class _MeterRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        _MeterBar(label: 'L', rms: levels.rmsLeft, peak: levels.peakLeft, color: color),
+        _MeterBar(
+          label: 'L',
+          rms: levels.rmsLeft,
+          peak: levels.peakLeft,
+          color: color,
+        ),
         const SizedBox(height: 6),
-        _MeterBar(label: 'R', rms: levels.rmsRight, peak: levels.peakRight, color: color),
+        _MeterBar(
+          label: 'R',
+          rms: levels.rmsRight,
+          peak: levels.peakRight,
+          color: color,
+        ),
       ],
     );
   }
@@ -177,6 +191,7 @@ class _MeterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final clipped = peak >= 0.999;
     return Row(
       children: [
@@ -184,7 +199,7 @@ class _MeterBar extends StatelessWidget {
           width: 14,
           child: Text(
             label,
-            style: const TextStyle(fontSize: 10, color: chMuted),
+            style: TextStyle(fontSize: 10, color: palette.muted),
           ),
         ),
         Expanded(
@@ -194,7 +209,7 @@ class _MeterBar extends StatelessWidget {
               height: 8,
               child: Stack(
                 children: [
-                  Container(color: chSurfaceHigh),
+                  Container(color: palette.surfaceHigh),
                   FractionallySizedBox(
                     widthFactor: rms.clamp(0.0, 1.0).toDouble(),
                     child: Container(color: color.withValues(alpha: 0.55)),
@@ -202,7 +217,7 @@ class _MeterBar extends StatelessWidget {
                   FractionallySizedBox(
                     widthFactor: peak.clamp(0.0, 1.0).toDouble(),
                     child: Container(
-                      color: clipped ? chError : color,
+                      color: clipped ? palette.error : color,
                       // El pico se ve como una línea fina: es el nivel real.
                       alignment: Alignment.centerRight,
                       child: const SizedBox(width: 2),
@@ -220,7 +235,7 @@ class _MeterBar extends StatelessWidget {
             textAlign: TextAlign.right,
             style: TextStyle(
               fontSize: 10,
-              color: clipped ? chError : chMuted,
+              color: clipped ? palette.error : palette.muted,
               fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
@@ -241,16 +256,20 @@ class _SpectrumPainter extends CustomPainter {
     required this.values,
     required this.style,
     required this.color,
+    required this.surface,
+    required this.border,
   });
 
   final List<double> values;
   final VisualizerStyle style;
   final Color color;
+  final Color surface;
+  final Color border;
 
   @override
   void paint(Canvas canvas, Size size) {
     if (values.isEmpty || size.isEmpty) return;
-    final background = Paint()..color = chSurface.withValues(alpha: 0.45);
+    final background = Paint()..color = surface.withValues(alpha: 0.45);
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
     canvas.drawRRect(
       RRect.fromRectAndRadius(rect, const Radius.circular(12)),
@@ -268,16 +287,14 @@ class _SpectrumPainter extends CustomPainter {
       final scaled = math.pow(level, 0.65).toDouble();
       final height = math.max(scaled * (size.height - 12), 2.0);
       final paint = Paint()
-        ..shader = LinearGradient(
-          begin: Alignment.bottomCenter,
-          end: Alignment.topCenter,
-          colors: <Color>[
-            color.withValues(alpha: 0.35),
-            color,
-          ],
-        ).createShader(
-          Rect.fromLTWH(left, size.height - height - 6, slot, height),
-        );
+        ..shader =
+            LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: <Color>[color.withValues(alpha: 0.35), color],
+            ).createShader(
+              Rect.fromLTWH(left, size.height - height - 6, slot, height),
+            );
 
       if (style == VisualizerStyle.bars) {
         canvas.drawRRect(
@@ -312,7 +329,7 @@ class _SpectrumPainter extends CustomPainter {
       final center = Offset(left + width / 2, centerY);
       final cellPaint = c < lit
           ? paint
-          : (Paint()..color = chBorder.withValues(alpha: 0.35));
+          : (Paint()..color = border.withValues(alpha: 0.35));
       canvas.drawPath(_hexagon(center, radius), cellPaint);
     }
   }
@@ -337,6 +354,8 @@ class _SpectrumPainter extends CustomPainter {
   @override
   bool shouldRepaint(_SpectrumPainter oldDelegate) =>
       oldDelegate.color != color ||
+      oldDelegate.surface != surface ||
+      oldDelegate.border != border ||
       oldDelegate.style != style ||
       oldDelegate.values.length != values.length ||
       _changed(oldDelegate.values, values);

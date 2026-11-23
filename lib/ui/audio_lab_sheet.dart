@@ -87,11 +87,7 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
     );
     if (location == null || !mounted) return;
     setState(() => _status = 'Exportando…');
-    final ok = await _controller.renderWav(
-      path,
-      location.path,
-      withDsp: true,
-    );
+    final ok = await _controller.renderWav(path, location.path, withDsp: true);
     if (!mounted) return;
     setState(() {
       _status = ok
@@ -124,6 +120,7 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
         listenable: _controller,
         builder: (context, _) {
           final snapshot = _controller.snapshot;
+          final palette = paletteOf(context);
           return ConstrainedBox(
             constraints: BoxConstraints(
               maxHeight: MediaQuery.sizeOf(context).height * 0.88,
@@ -172,8 +169,7 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         label: 'Audio 9D',
                         subtitle: 'El frente gira alrededor de la cabeza',
                         value: snapshot.nineDEnabled,
-                        onChanged: (value) =>
-                            _controller.set9D(enabled: value),
+                        onChanged: (value) => _controller.set9D(enabled: value),
                       ),
                       _SliderRow(
                         label: 'Velocidad del giro',
@@ -197,15 +193,17 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         format: (v) => v < 0.95
                             ? '${(v * 100).round()} % (mono)'
                             : v > 1.05
-                                ? '${v.toStringAsFixed(2)}× (amplio)'
-                                : 'normal',
-                        onChanged: (v) => _controller.setStereoEnhance(width: v),
+                            ? '${v.toStringAsFixed(2)}× (amplio)'
+                            : 'normal',
+                        onChanged: (v) =>
+                            _controller.setStereoEnhance(width: v),
                       ),
                       _SliderRow(
                         label: 'Punch de graves',
                         value: snapshot.bassPunch,
                         format: _percent,
-                        onChanged: (v) => _controller.setStereoEnhance(bassPunch: v),
+                        onChanged: (v) =>
+                            _controller.setStereoEnhance(bassPunch: v),
                       ),
                       _ToggleRow(
                         label: 'Crossfeed Bauer',
@@ -230,7 +228,8 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         label: 'Modo noche',
                         subtitle: 'Sube los pasajes flojos, doma los picos',
                         value: snapshot.nightModeEnabled,
-                        onChanged: (value) => _controller.setNightMode(enabled: value),
+                        onChanged: (value) =>
+                            _controller.setNightMode(enabled: value),
                       ),
                       _SliderRow(
                         label: 'Compresión de noche',
@@ -252,15 +251,19 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         format: (v) => v.abs() < 0.02
                             ? 'centro'
                             : v < 0
-                                ? 'izquierda ${(v.abs() * 100).round()} %'
-                                : 'derecha ${(v * 100).round()} %',
+                            ? 'izquierda ${(v.abs() * 100).round()} %'
+                            : 'derecha ${(v * 100).round()} %',
                         onChanged: _controller.setBalance,
                       ),
                       _ChoiceRow<int>(
                         label: 'Canales',
                         options: const <int>[0, 1, 2],
                         value: _choice(0, const <int>[0, 1, 2]),
-                        labels: const <String>['Estéreo', 'Mono', 'Intercambiado'],
+                        labels: const <String>[
+                          'Estéreo',
+                          'Mono',
+                          'Intercambiado',
+                        ],
                         onSelected: _controller.setChannelMode,
                       ),
                       _ToggleRow(
@@ -308,9 +311,8 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         value: _controller.crossfade,
                         min: 0,
                         max: 12,
-                        format: (v) => v <= 0
-                            ? 'apagado'
-                            : '${v.toStringAsFixed(1)} s',
+                        format: (v) =>
+                            v <= 0 ? 'apagado' : '${v.toStringAsFixed(1)} s',
                         onChanged: _controller.setCrossfade,
                       ),
                       _ToggleRow(
@@ -331,7 +333,12 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         label: 'Fondo',
                         options: SoundscapePreset.values,
                         value: _controller.soundscape,
-                        labels: const <String>['Ninguno', 'Lluvia', 'Marrón', 'Vinilo'],
+                        labels: const <String>[
+                          'Ninguno',
+                          'Lluvia',
+                          'Marrón',
+                          'Vinilo',
+                        ],
                         onSelected: (preset) => _controller.setSoundscape(
                           preset,
                           level: preset == SoundscapePreset.off ? 0 : null,
@@ -349,7 +356,7 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                       const Text(
                         'Se mezcla bajo la música antes del limitador: nunca tapa '
                         'la pista y no cuesta nada cuando está apagado.',
-                        style: TextStyle(fontSize: 11, color: chMuted, height: 1.4),
+                        style: TextStyle(fontSize: 11, height: 1.4),
                       ),
                     ],
                   ),
@@ -384,7 +391,9 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                                 ? const SizedBox(
                                     width: 16,
                                     height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
                                   )
                                 : const Icon(Icons.speed_rounded, size: 18),
                             label: Text(
@@ -400,24 +409,35 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                           ),
                           OutlinedButton.icon(
                             onPressed: _openCue,
-                            icon: const Icon(Icons.playlist_play_rounded, size: 18),
+                            icon: const Icon(
+                              Icons.playlist_play_rounded,
+                              size: 18,
+                            ),
                             label: const Text('Abrir .cue'),
                           ),
                           OutlinedButton.icon(
                             onPressed: () {
                               final ok = _controller.addMarkerHere();
-                              _say(ok
-                                  ? 'Marca puesta en la posición actual.'
-                                  : 'Abre una pista para poner marcas.');
+                              _say(
+                                ok
+                                    ? 'Marca puesta en la posición actual.'
+                                    : 'Abre una pista para poner marcas.',
+                              );
                             },
-                            icon: const Icon(Icons.bookmark_add_rounded, size: 18),
+                            icon: const Icon(
+                              Icons.bookmark_add_rounded,
+                              size: 18,
+                            ),
                             label: const Text('Marcar aquí'),
                           ),
                           OutlinedButton.icon(
                             onPressed: () {
                               applyEqPreset(_controller, _pickPreset());
                             },
-                            icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                            icon: const Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 18,
+                            ),
                             label: const Text('Preset de EQ'),
                           ),
                         ],
@@ -426,7 +446,7 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                         const SizedBox(height: 10),
                         Text(
                           _status!,
-                          style: const TextStyle(fontSize: 12, color: chAccent),
+                          style: TextStyle(fontSize: 12, color: palette.accent),
                         ),
                       ],
                     ],
@@ -481,15 +501,16 @@ class _SectionState extends State<_Section> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     // `Material` y no `Container`: el `ListTile` pinta su fondo y sus ondas en
     // el `Material` más cercano; con un `DecoratedBox` por medio, Flutter avisa
     // (y en las pruebas eso rompe el test).
     return Material(
-      color: chSurface,
+      color: palette.surface,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: chBorder.withValues(alpha: 0.6)),
+        side: BorderSide(color: palette.border.withValues(alpha: 0.6)),
       ),
       child: Column(
         children: [
@@ -500,7 +521,7 @@ class _SectionState extends State<_Section> {
             ),
             trailing: Icon(
               _open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-              color: chMuted,
+              color: palette.muted,
             ),
             onTap: () => setState(() => _open = !_open),
             dense: true,
@@ -540,7 +561,10 @@ class _ToggleRow extends StatelessWidget {
       title: Text(label, style: const TextStyle(fontSize: 13)),
       subtitle: subtitle == null
           ? null
-          : Text(subtitle!, style: const TextStyle(fontSize: 11, color: chMuted)),
+          : Text(
+              subtitle!,
+              style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
+            ),
       value: value,
       onChanged: onChanged,
     );
@@ -572,21 +596,14 @@ class _SliderRow extends StatelessWidget {
       children: [
         Row(
           children: [
-            Expanded(
-              child: Text(label, style: const TextStyle(fontSize: 13)),
-            ),
+            Expanded(child: Text(label, style: const TextStyle(fontSize: 13))),
             Text(
               format(clamped),
-              style: const TextStyle(fontSize: 11, color: chMuted),
+              style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
             ),
           ],
         ),
-        Slider(
-          value: clamped,
-          min: min,
-          max: max,
-          onChanged: onChanged,
-        ),
+        Slider(value: clamped, min: min, max: max, onChanged: onChanged),
       ],
     );
   }
@@ -609,6 +626,7 @@ class _ChoiceRow<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Column(
@@ -628,9 +646,13 @@ class _ChoiceRow<T> extends StatelessWidget {
                   ),
                   selected: options[i] == value,
                   onSelected: (_) => onSelected(options[i]),
-                  selectedColor: chAccent.withValues(alpha: 0.22),
-                  backgroundColor: chSurfaceHigh,
-                  side: BorderSide(color: options[i] == value ? chAccent : chBorder),
+                  selectedColor: palette.accent.withValues(alpha: 0.22),
+                  backgroundColor: palette.surfaceHigh,
+                  side: BorderSide(
+                    color: options[i] == value
+                        ? palette.accent
+                        : palette.border,
+                  ),
                 ),
             ],
           ),
@@ -662,9 +684,9 @@ class _LoopRow extends StatelessWidget {
               Text(
                 active
                     ? '${controller.loopStart.toStringAsFixed(1)} – '
-                        '${controller.loopEnd.toStringAsFixed(1)} s'
+                          '${controller.loopEnd.toStringAsFixed(1)} s'
                     : 'apagado',
-                style: const TextStyle(fontSize: 11, color: chMuted),
+                style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
               ),
             ],
           ),
@@ -723,7 +745,7 @@ class _SleepRowState extends State<_SleepRow> {
               ),
               Text(
                 remaining > 0 ? '${(remaining / 60).ceil()} min' : 'apagado',
-                style: const TextStyle(fontSize: 11, color: chMuted),
+                style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
               ),
             ],
           ),
@@ -764,6 +786,7 @@ class _CueList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -777,7 +800,10 @@ class _CueList extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text(
                 '${tracks.length} cortes',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
             Flexible(
@@ -791,13 +817,16 @@ class _CueList extends StatelessWidget {
                     dense: true,
                     leading: Text(
                       '${track.number}',
-                      style: const TextStyle(color: chMuted, fontSize: 12),
+                      style: TextStyle(color: palette.muted, fontSize: 12),
                     ),
-                    title: Text(track.label, style: const TextStyle(fontSize: 13)),
+                    title: Text(
+                      track.label,
+                      style: const TextStyle(fontSize: 13),
+                    ),
                     subtitle: Text(
                       '${_time(track.start)}'
                       '${duration > 0 ? ' · ${duration.toStringAsFixed(0)} s' : ''}',
-                      style: const TextStyle(fontSize: 11, color: chMuted),
+                      style: TextStyle(fontSize: 11, color: palette.muted),
                     ),
                     onTap: track.file.isEmpty
                         ? null

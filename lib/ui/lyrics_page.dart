@@ -139,8 +139,9 @@ class _LyricsPageState extends State<LyricsPage> {
   Future<void> _openCreator() async {
     final saved = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
-        builder: (_) => LyricsCreatorPage(controller: _controller, lyrics: _lyrics),
-         fullscreenDialog: true,
+        builder: (_) =>
+            LyricsCreatorPage(controller: _controller, lyrics: _lyrics),
+        fullscreenDialog: true,
       ),
     );
     if (saved == true) await _load();
@@ -148,16 +149,17 @@ class _LyricsPageState extends State<LyricsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final snapshot = _controller.snapshot;
     final cover = snapshot.cover;
     final hasTranslation = _lyrics.lines.any((line) => line.hasTranslation);
     return Scaffold(
-      backgroundColor: chBackground,
+      backgroundColor: palette.background,
       extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        foregroundColor: chForeground,
+        foregroundColor: palette.foreground,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -171,14 +173,16 @@ class _LyricsPageState extends State<LyricsPage> {
               _subtitle(snapshot),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, color: chMuted),
+              style: TextStyle(fontSize: 11, color: palette.muted),
             ),
           ],
         ),
         actions: [
           if (hasTranslation)
             IconButton(
-              tooltip: _bilingual ? 'Ocultar la traducción' : 'Mostrar la traducción',
+              tooltip: _bilingual
+                  ? 'Ocultar la traducción'
+                  : 'Mostrar la traducción',
               onPressed: () => setState(() => _bilingual = !_bilingual),
               icon: Icon(
                 _bilingual ? Icons.translate_rounded : Icons.translate_outlined,
@@ -199,9 +203,7 @@ class _LyricsPageState extends State<LyricsPage> {
       body: Stack(
         children: [
           _Backdrop(cover: cover),
-          SafeArea(
-            child: _body(context, snapshot),
-          ),
+          SafeArea(child: _body(context, snapshot)),
         ],
       ),
     );
@@ -216,17 +218,18 @@ class _LyricsPageState extends State<LyricsPage> {
         'sin letra'
       else
         '${_lyrics.lines.length} líneas · ${_originLabel()}',
-      if (_lyrics.offsetMs != 0) 'offset ${_lyrics.offsetMs > 0 ? '+' : ''}${_lyrics.offsetMs} ms',
+      if (_lyrics.offsetMs != 0)
+        'offset ${_lyrics.offsetMs > 0 ? '+' : ''}${_lyrics.offsetMs} ms',
     ];
     return parts.join(' · ');
   }
 
   String _originLabel() => switch (_source) {
-        'embedded' => 'incrustada',
-        'plain' => 'sin tiempo',
-        'lrc' => '.lrc',
-        _ => 'letra',
-      };
+    'embedded' => 'incrustada',
+    'plain' => 'sin tiempo',
+    'lrc' => '.lrc',
+    _ => 'letra',
+  };
 
   Widget _body(BuildContext context, PlayerSnapshot snapshot) {
     if (_loading) {
@@ -273,6 +276,7 @@ class _Backdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final image = cover;
     return Positioned.fill(
       child: Stack(
@@ -286,17 +290,22 @@ class _Backdrop extends StatelessWidget {
                 fit: BoxFit.cover,
                 gaplessPlayback: true,
                 cacheWidth: 360,
-                errorBuilder: (_, __, ___) => const ColoredBox(color: chBackground),
+                errorBuilder: (_, _, _) =>
+                    ColoredBox(color: palette.background),
               ),
             )
           else
-            const DecoratedBox(
+            DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: <Color>[Color(0xFF141433), chBackground, Color(0xFF090912)],
-                  stops: <double>[0, 0.45, 1],
+                  colors: <Color>[
+                    palette.surfaceHigh,
+                    palette.background,
+                    palette.background,
+                  ],
+                  stops: const <double>[0, 0.45, 1],
                 ),
               ),
             ),
@@ -306,9 +315,9 @@ class _Backdrop extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: <Color>[
-                  chBackground.withValues(alpha: 0.72),
-                  chBackground.withValues(alpha: 0.86),
-                  chBackground.withValues(alpha: 0.96),
+                  palette.background.withValues(alpha: 0.72),
+                  palette.background.withValues(alpha: 0.86),
+                  palette.background.withValues(alpha: 0.96),
                 ],
               ),
             ),
@@ -335,6 +344,7 @@ class _LyricRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
@@ -344,7 +354,9 @@ class _LyricRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(14),
-          color: active ? chAccent.withValues(alpha: 0.10) : Colors.transparent,
+          color: active
+              ? palette.accent.withValues(alpha: 0.10)
+              : Colors.transparent,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -356,8 +368,10 @@ class _LyricRow extends StatelessWidget {
                 height: 1.32,
                 fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                 color: active
-                    ? chForeground
-                    : chForeground.withValues(alpha: line.isTimed ? 0.62 : 0.42),
+                    ? palette.foreground
+                    : palette.foreground.withValues(
+                        alpha: line.isTimed ? 0.62 : 0.42,
+                      ),
               ),
             ),
             if (showTranslation && line.hasTranslation)
@@ -368,7 +382,7 @@ class _LyricRow extends StatelessWidget {
                   style: TextStyle(
                     fontSize: active ? 15 : 13,
                     height: 1.3,
-                    color: active ? chAccent : chMuted,
+                    color: active ? palette.accent : palette.muted,
                   ),
                 ),
               ),
@@ -392,27 +406,32 @@ class _EmptyLyrics extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.lyrics_outlined, size: 52, color: chMuted),
+            Icon(Icons.lyrics_outlined, size: 52, color: palette.muted),
             const SizedBox(height: 14),
             Text(
               hasTrack
                   ? 'Esta pista no trae letra.'
                   : 'Abre una pista para ver su letra.',
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 16, color: chForeground),
+              style: TextStyle(fontSize: 16, color: palette.foreground),
             ),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'CyberHex busca un archivo .lrc junto al audio y, si no hay, '
               'las letras incrustadas en el MP3 (USLT) o en el FLAC (LYRICS).',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, height: 1.45, color: chMuted),
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.45,
+                color: palette.muted,
+              ),
             ),
             const SizedBox(height: 20),
             FilledButton.icon(
@@ -420,12 +439,15 @@ class _EmptyLyrics extends StatelessWidget {
               icon: const Icon(Icons.mic_external_on_rounded, size: 18),
               label: const Text('Crear la letra'),
               style: FilledButton.styleFrom(
-                backgroundColor: chAccent,
-                foregroundColor: chOnAccent,
+                backgroundColor: palette.accent,
+                foregroundColor: palette.onAccent,
               ),
             ),
             const SizedBox(height: 6),
-            TextButton(onPressed: onReload, child: const Text('Buscar de nuevo')),
+            TextButton(
+              onPressed: onReload,
+              child: const Text('Buscar de nuevo'),
+            ),
           ],
         ),
       ),

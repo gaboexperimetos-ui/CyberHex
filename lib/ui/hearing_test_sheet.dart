@@ -33,7 +33,18 @@ class HearingTestSheet extends StatefulWidget {
 
 class _HearingTestSheetState extends State<HearingTestSheet> {
   /// Bandas elegidas para la prueba (las 10 más representativas de 36).
-  static const List<int> _testBands = <int>[0, 4, 8, 12, 16, 20, 24, 28, 32, 35];
+  static const List<int> _testBands = <int>[
+    0,
+    4,
+    8,
+    12,
+    16,
+    20,
+    24,
+    28,
+    32,
+    35,
+  ];
 
   late List<double> _original;
   late List<bool> _heard;
@@ -103,8 +114,10 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final frequencies = widget.controller.eqBandFrequencies;
-    final band = _testBands[_step < _testBands.length ? _step : _testBands.length - 1];
+    final band =
+        _testBands[_step < _testBands.length ? _step : _testBands.length - 1];
     final hz = band < frequencies.length ? frequencies[band] : 0.0;
     final missing = _heard.where((value) => !value).length;
 
@@ -120,35 +133,35 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Se aísla una banda cada vez sobre la música que está sonando. '
               'Marca lo que oigas: al final se propone una curva suave.',
-              style: TextStyle(fontSize: 12, color: chMuted, height: 1.4),
+              style: TextStyle(fontSize: 12, color: palette.muted, height: 1.4),
             ),
             const SizedBox(height: 18),
             if (!_finished) ...[
               LinearProgressIndicator(
                 value: (_step + 1) / _testBands.length,
                 minHeight: 4,
-                backgroundColor: chSurfaceHigh,
-                color: chAccent,
+                backgroundColor: palette.surfaceHigh,
+                color: palette.accent,
               ),
               const SizedBox(height: 18),
               Center(
                 child: Text(
                   '${_formatHz(hz)} · ${_step + 1}/${_testBands.length}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.w600,
-                    color: chForeground,
+                    color: palette.foreground,
                   ),
                 ),
               ),
               const SizedBox(height: 6),
-              const Center(
+              Center(
                 child: Text(
                   '¿Oyes este tono sobre la música?',
-                  style: TextStyle(fontSize: 13, color: chMuted),
+                  style: TextStyle(fontSize: 13, color: palette.muted),
                 ),
               ),
               const SizedBox(height: 20),
@@ -157,11 +170,14 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: () => _answer(false),
-                      icon: const Icon(Icons.hearing_disabled_rounded, size: 18),
+                      icon: const Icon(
+                        Icons.hearing_disabled_rounded,
+                        size: 18,
+                      ),
                       label: const Text('No lo oigo'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: chMuted,
-                        side: const BorderSide(color: chBorder),
+                        foregroundColor: palette.muted,
+                        side: BorderSide(color: palette.border),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
@@ -173,8 +189,8 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
                       icon: const Icon(Icons.hearing_rounded, size: 18),
                       label: const Text('Lo oigo'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: chAccent,
-                        foregroundColor: chOnAccent,
+                        backgroundColor: palette.accent,
+                        foregroundColor: palette.onAccent,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                     ),
@@ -182,21 +198,25 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
                 ],
               ),
             ] else ...[
-              const Icon(Icons.check_circle_rounded, size: 44, color: chAccent),
+              Icon(Icons.check_circle_rounded, size: 44, color: palette.accent),
               const SizedBox(height: 10),
               Text(
                 missing == 0
                     ? 'Has oído todas las bandas: no hace falta compensar nada.'
                     : 'No has oído $missing de ${_testBands.length} bandas.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 14, color: chForeground),
+                style: TextStyle(fontSize: 14, color: palette.foreground),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'La compensación es suave (+12 dB como mucho en las bandas '
                 'perdidas) y se puede deshacer con el preset Plano.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: chMuted, height: 1.4),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: palette.muted,
+                  height: 1.4,
+                ),
               ),
               const SizedBox(height: 18),
               if (missing > 0)
@@ -205,8 +225,8 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
                   icon: const Icon(Icons.tune_rounded, size: 18),
                   label: const Text('Aplicar «Mi oído»'),
                   style: FilledButton.styleFrom(
-                    backgroundColor: chAccent,
-                    foregroundColor: chOnAccent,
+                    backgroundColor: palette.accent,
+                    foregroundColor: palette.onAccent,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                 ),
