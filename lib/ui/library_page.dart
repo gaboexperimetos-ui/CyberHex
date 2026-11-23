@@ -13,6 +13,7 @@ import '../core/stats_store.dart';
 import '../theme.dart';
 import 'audio_export_sheet.dart';
 import 'downloader_page.dart';
+import 'hex_cover.dart';
 import 'network_page.dart';
 import 'radio_page.dart';
 import 'mini_player.dart';
@@ -76,13 +77,15 @@ class LibraryPage extends StatefulWidget {
 
 class _LibraryPageState extends State<LibraryPage>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs =
-      TabController(length: LibraryTab.values.length, vsync: this)
-        ..addListener(_onTabChanged);
+  late final TabController _tabs = TabController(
+    length: LibraryTab.values.length,
+    vsync: this,
+  )..addListener(_onTabChanged);
 
   late final FavoritesStore _favorites = widget.favorites ?? FavoritesStore();
 
-  late final LongTrackMemory _longTracks = widget.longTracks ?? LongTrackMemory();
+  late final LongTrackMemory _longTracks =
+      widget.longTracks ?? LongTrackMemory();
 
   final Map<String, double> _durations = <String, double>{};
   final TextEditingController _search = TextEditingController();
@@ -142,7 +145,11 @@ class _LibraryPageState extends State<LibraryPage>
     if (index < 0 || index >= snapshot.queue.length) return;
     final track = snapshot.queue[index];
     if (!track.isPlayable || snapshot.duration <= 0) return;
-    _longTracks.remember(track.path, _controller.position.value, snapshot.duration);
+    _longTracks.remember(
+      track.path,
+      _controller.position.value,
+      snapshot.duration,
+    );
     if (_durations[track.path] == snapshot.duration) return;
     setState(() => _durations[track.path] = snapshot.duration);
   }
@@ -163,9 +170,8 @@ class _LibraryPageState extends State<LibraryPage>
     final stats = widget.stats ?? StatsStore.memory();
     await stats.load();
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => StatsPage(stats: stats)),
-    );
+    await Navigator.of(context)
+        .push(MaterialPageRoute<void>(builder: (_) => StatsPage(stats: stats)));
   }
 
   /// Radios por Internet. El almacén se lee de disco al abrir la página, así
@@ -240,7 +246,9 @@ class _LibraryPageState extends State<LibraryPage>
       _scanning = false;
     });
     // «Añadidas este mes» sale de aquí: la biblioteca apunta lo que ha visto.
-    widget.playlists?.remember(<String>[for (final track in tracks) track.path]);
+    widget.playlists?.remember(<String>[
+      for (final track in tracks) track.path,
+    ]);
   }
 
   Future<void> _pickFolder() async {
@@ -284,12 +292,20 @@ class _LibraryPageState extends State<LibraryPage>
 
   void _playNext(_Entry entry) {
     final ok = _controller.playNext(entry.track.path);
-    _say(ok ? '«${entry.track.title}» suena después' : 'El motor no aceptó la pista');
+    _say(
+      ok
+          ? '«${entry.track.title}» suena después'
+          : 'El motor no aceptó la pista',
+    );
   }
 
   void _enqueue(_Entry entry) {
     final ok = _controller.enqueue(entry.track.path);
-    _say(ok ? '«${entry.track.title}» añadida a la cola' : 'El motor no aceptó la pista');
+    _say(
+      ok
+          ? '«${entry.track.title}» añadida a la cola'
+          : 'El motor no aceptó la pista',
+    );
   }
 
   Future<void> _toggleFavorite(_Entry entry) async {
@@ -303,11 +319,13 @@ class _LibraryPageState extends State<LibraryPage>
     final messenger = ScaffoldMessenger.maybeOf(context);
     messenger
       ?..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
   }
 
   void _showDetails(_Entry entry) {
@@ -328,7 +346,7 @@ class _LibraryPageState extends State<LibraryPage>
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: chSurface,
+        backgroundColor: paletteOf(context).surface,
         title: Text(entry.track.title),
         content: SingleChildScrollView(
           child: Column(
@@ -336,14 +354,25 @@ class _LibraryPageState extends State<LibraryPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _DetailRow('Formato', entry.track.extension.toUpperCase()),
-              _DetailRow('Duración',
-                  duration == null ? 'desconocida' : _mmss(duration)),
+              _DetailRow(
+                'Duración',
+                duration == null ? 'desconocida' : _mmss(duration),
+              ),
               _DetailRow('Tamaño', size),
-              _DetailRow('Artista', entry.artist.isEmpty ? 'sin clasificar' : entry.artist),
-              _DetailRow('Álbum', entry.album.isEmpty ? 'sin clasificar' : entry.album),
+              _DetailRow(
+                'Artista',
+                entry.artist.isEmpty ? 'sin clasificar' : entry.artist,
+              ),
+              _DetailRow(
+                'Álbum',
+                entry.album.isEmpty ? 'sin clasificar' : entry.album,
+              ),
               _DetailRow('Carpeta', entry.folder),
               const SizedBox(height: 10),
-              const Text('Ruta', style: TextStyle(fontSize: 12, color: chMuted)),
+              Text(
+                'Ruta',
+                style: TextStyle(fontSize: 12, color: paletteOf(context).muted),
+              ),
               const SizedBox(height: 2),
               SelectableText(path, style: const TextStyle(fontSize: 12)),
             ],
@@ -394,7 +423,8 @@ class _LibraryPageState extends State<LibraryPage>
       }
       if (query.isNotEmpty) {
         final haystack = _normalize(
-            '${entry.track.title} ${entry.artist} ${entry.album} ${entry.folder}');
+          '${entry.track.title} ${entry.artist} ${entry.album} ${entry.folder}',
+        );
         if (!haystack.contains(query)) continue;
       }
       list.add(entry);
@@ -426,8 +456,10 @@ class _LibraryPageState extends State<LibraryPage>
     }
   }
 
-  Map<String, List<_Entry>> _group(String Function(_Entry) keyOf,
-      {required String fallback}) {
+  Map<String, List<_Entry>> _group(
+    String Function(_Entry) keyOf, {
+    required String fallback,
+  }) {
     final groups = <String, List<_Entry>>{};
     for (final entry in _visible) {
       final raw = keyOf(entry).trim();
@@ -437,16 +469,33 @@ class _LibraryPageState extends State<LibraryPage>
     return groups;
   }
 
-  static int _cmp(String a, String b) =>
-      _normalize(a).compareTo(_normalize(b));
+  static int _cmp(String a, String b) => _normalize(a).compareTo(_normalize(b));
 
   static const Map<String, String> _accents = <String, String>{
-    'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a',
-    'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
-    'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i',
-    'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
-    'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u',
-    'ñ': 'n', 'ç': 'c',
+    'á': 'a',
+    'à': 'a',
+    'ä': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'é': 'e',
+    'è': 'e',
+    'ë': 'e',
+    'ê': 'e',
+    'í': 'i',
+    'ì': 'i',
+    'ï': 'i',
+    'î': 'i',
+    'ó': 'o',
+    'ò': 'o',
+    'ö': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ú': 'u',
+    'ù': 'u',
+    'ü': 'u',
+    'û': 'u',
+    'ñ': 'n',
+    'ç': 'c',
   };
 
   /// Búsqueda insensible a mayúsculas y a tildes.
@@ -480,7 +529,9 @@ class _LibraryPageState extends State<LibraryPage>
               PopupMenuItem(value: LibrarySort.artist, child: Text('Artista')),
               PopupMenuItem(value: LibrarySort.album, child: Text('Álbum')),
               PopupMenuItem(
-                  value: LibrarySort.duration, child: Text('Duración')),
+                value: LibrarySort.duration,
+                child: Text('Duración'),
+              ),
             ],
           ),
           IconButton(
@@ -513,7 +564,10 @@ class _LibraryPageState extends State<LibraryPage>
               PopupMenuItem(value: 'downloads', child: Text('Descargas')),
               PopupMenuItem(value: 'radio', child: Text('Radios por Internet')),
               PopupMenuItem(value: 'network', child: Text('Red y nube')),
-              PopupMenuItem(value: 'export', child: Text('Exportar la pista actual')),
+              PopupMenuItem(
+                value: 'export',
+                child: Text('Exportar la pista actual'),
+              ),
             ],
           ),
         ],
@@ -541,8 +595,10 @@ class _LibraryPageState extends State<LibraryPage>
           if (widget.showMiniPlayer)
             MiniPlayer(
               controller: _controller,
-              onOpen: widget.onOpenPlayer ??
-                  () => Navigator.of(context).popUntil((route) => route.isFirst),
+              onOpen:
+                  widget.onOpenPlayer ??
+                  () =>
+                      Navigator.of(context).popUntil((route) => route.isFirst),
             ),
         ],
       ),
@@ -588,7 +644,10 @@ class _LibraryPageState extends State<LibraryPage>
           child: Row(
             children: [
               FilterChip(
-                label: const Text('Ocultar < 30 s', style: TextStyle(fontSize: 12)),
+                label: const Text(
+                  'Ocultar < 30 s',
+                  style: TextStyle(fontSize: 12),
+                ),
                 selected: _hideShort,
                 onSelected: (value) => setState(() => _hideShort = value),
               ),
@@ -599,7 +658,10 @@ class _LibraryPageState extends State<LibraryPage>
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 11, color: chMuted),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: paletteOf(context).muted,
+                  ),
                 ),
               ),
             ],
@@ -614,7 +676,9 @@ class _LibraryPageState extends State<LibraryPage>
   String get _rootLabel {
     final root = _root;
     if (root == null) return '';
-    final trimmed = root.length > 40 ? '…${root.substring(root.length - 39)}' : root;
+    final trimmed = root.length > 40
+        ? '…${root.substring(root.length - 39)}'
+        : root;
     return trimmed;
   }
 
@@ -629,7 +693,7 @@ class _LibraryPageState extends State<LibraryPage>
                 ? 'No hay audio en esta carpeta'
                 : 'Nada que mostrar con estos filtros',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: chMuted),
+            style: TextStyle(color: paletteOf(context).muted),
           ),
         ),
       );
@@ -642,24 +706,16 @@ class _LibraryPageState extends State<LibraryPage>
           itemBuilder: (context, index) => _trackTile(visible[index]),
         );
       case LibraryTab.albums:
-        return _groups(
-          _group((e) => e.album, fallback: 'Sin álbum'),
-          icon: Icons.album_rounded,
-        );
+        return _groups(_group((e) => e.album, fallback: 'Sin álbum'));
       case LibraryTab.artists:
-        return _groups(
-          _group((e) => e.artist, fallback: 'Sin clasificar'),
-          icon: Icons.person_rounded,
-        );
+        return _groups(_group((e) => e.artist, fallback: 'Sin clasificar'));
       case LibraryTab.folders:
-        return _groups(
-          _group((e) => e.folder, fallback: 'Raíz'),
-          icon: Icons.folder_rounded,
-        );
+        return _groups(_group((e) => e.folder, fallback: 'Raíz'));
     }
   }
 
-  Widget _groups(Map<String, List<_Entry>> groups, {required IconData icon}) {
+  Widget _groups(Map<String, List<_Entry>> groups) {
+    final palette = paletteOf(context);
     final keys = groups.keys.toList()..sort(_cmp);
     return ListView.builder(
       itemCount: keys.length,
@@ -668,21 +724,20 @@ class _LibraryPageState extends State<LibraryPage>
         final items = groups[key]!;
         return ExpansionTile(
           key: PageStorageKey<String>('group-$key'),
-          leading: Icon(icon, size: 20, color: chAccent),
+          leading: HexCover(seed: key, palette: palette, size: 38),
           title: Text(key, maxLines: 1, overflow: TextOverflow.ellipsis),
           subtitle: Text(
             items.length == 1 ? '1 pista' : '${items.length} pistas',
-            style: const TextStyle(fontSize: 11, color: chMuted),
+            style: TextStyle(fontSize: 11, color: palette.muted),
           ),
-          children: [
-            for (final entry in items) _trackTile(entry, inner: true),
-          ],
+          children: [for (final entry in items) _trackTile(entry, inner: true)],
         );
       },
     );
   }
 
   Widget _trackTile(_Entry entry, {bool inner = false}) {
+    final palette = paletteOf(context);
     final favorite = _favorites.contains(entry.track.path);
     final duration = _durationOf(entry);
     final subtitle = <String>[
@@ -697,21 +752,25 @@ class _LibraryPageState extends State<LibraryPage>
       leading: Icon(
         favorite ? Icons.favorite_rounded : Icons.music_note_rounded,
         size: 20,
-        color: favorite ? chAccent : chMuted,
+        color: favorite ? palette.accent : palette.muted,
       ),
-      title: Text(entry.track.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        entry.track.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
       subtitle: Text(
         subtitle,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 11, color: chMuted),
+        style: TextStyle(fontSize: 11, color: palette.muted),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             duration > 0 ? _mmss(duration) : '—',
-            style: const TextStyle(fontSize: 11, color: chMuted),
+            style: TextStyle(fontSize: 11, color: palette.muted),
           ),
           PopupMenuButton<_TrackAction>(
             tooltip: 'Opciones',
@@ -732,7 +791,9 @@ class _LibraryPageState extends State<LibraryPage>
               ),
               PopupMenuItem(
                 value: _TrackAction.favorite,
-                child: Text(favorite ? 'Quitar de favoritos' : 'Marcar favorito'),
+                child: Text(
+                  favorite ? 'Quitar de favoritos' : 'Marcar favorito',
+                ),
               ),
               const PopupMenuItem(
                 value: _TrackAction.details,
@@ -746,31 +807,32 @@ class _LibraryPageState extends State<LibraryPage>
   }
 
   Widget _welcome() {
+    final palette = paletteOf(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.library_music_rounded, size: 54, color: chMuted),
+            Icon(Icons.library_music_rounded, size: 54, color: palette.muted),
             const SizedBox(height: 14),
             const Text(
               'Tu biblioteca',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
-            const Text(
+            Text(
               'Elige una carpeta y CyberHex la recorrerá en busca de FLAC, '
               'MP3, WAV, OGG, OPUS, M4A, AAC y ALAC.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: chMuted),
+              style: TextStyle(fontSize: 12, color: palette.muted),
             ),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(
                 _error!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: chError),
+                style: TextStyle(fontSize: 12, color: palette.error),
               ),
             ],
             const SizedBox(height: 18),
@@ -839,8 +901,10 @@ class _DetailRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 78,
-            child: Text(label,
-                style: const TextStyle(fontSize: 12, color: chMuted)),
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: paletteOf(context).muted),
+            ),
           ),
           Expanded(child: Text(value, style: const TextStyle(fontSize: 12))),
         ],

@@ -2,6 +2,7 @@ import 'package:cyberhex/core/favorites_store.dart';
 import 'package:cyberhex/core/player_api.dart';
 import 'package:cyberhex/core/player_controller.dart';
 import 'package:cyberhex/theme.dart';
+import 'package:cyberhex/ui/hex_cover.dart';
 import 'package:cyberhex/ui/library_page.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -30,29 +31,37 @@ Future<FavoritesStore> _pumpLibrary(
   final store = favorites ?? FavoritesStore.memory();
   addTearDown(player.dispose);
 
-  await tester.pumpWidget(MaterialApp(
-    theme: buildCyberHexTheme(),
-    home: LibraryPage(
-      controller: player,
-      favorites: store,
-      initialRoot: '/m',
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: buildCyberHexTheme(),
+      home: LibraryPage(
+        controller: player,
+        favorites: store,
+        initialRoot: '/m',
+      ),
     ),
-  ));
+  );
   // El escaneo es asíncrono aunque el doble responda al instante.
   await tester.pumpAndSettle();
   return store;
 }
 
 void main() {
-  testWidgets('sin carpeta enseña la bienvenida y el botón de elegir',
-      (tester) async {
+  testWidgets('sin carpeta enseña la bienvenida y el botón de elegir', (
+    tester,
+  ) async {
     final controller = PlayerController(FakePlayer());
     addTearDown(controller.dispose);
 
-    await tester.pumpWidget(MaterialApp(
-      theme: buildCyberHexTheme(),
-      home: LibraryPage(controller: controller, favorites: FavoritesStore.memory()),
-    ));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildCyberHexTheme(),
+        home: LibraryPage(
+          controller: controller,
+          favorites: FavoritesStore.memory(),
+        ),
+      ),
+    );
 
     expect(find.text('Tu biblioteca'), findsOneWidget);
     expect(find.text('Elegir carpeta'), findsOneWidget);
@@ -61,8 +70,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('lista las pistas escaneadas con su nombre y formato',
-      (tester) async {
+  testWidgets('lista las pistas escaneadas con su nombre y formato', (
+    tester,
+  ) async {
     await _pumpLibrary(tester);
 
     expect(find.text('Uno'), findsOneWidget);
@@ -80,8 +90,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('la búsqueda filtra al escribir, sin tildes ni mayúsculas',
-      (tester) async {
+  testWidgets('la búsqueda filtra al escribir, sin tildes ni mayúsculas', (
+    tester,
+  ) async {
     await _pumpLibrary(tester);
 
     await tester.enterText(find.byType(TextField), 'CLASICOS');
@@ -112,6 +123,8 @@ void main() {
     expect(find.text('2 pistas'), findsOneWidget);
     expect(find.text('1 pista'), findsNWidgets(2));
     expect(find.text('Sin álbum'), findsOneWidget);
+    // Cada grupo lleva su carátula-emblema hexagonal.
+    expect(find.byType(HexCover), findsNWidgets(3));
 
     await tester.pumpWidget(const SizedBox());
   });
@@ -132,8 +145,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('los favoritos se listan y se pueden marcar desde el menú',
-      (tester) async {
+  testWidgets('los favoritos se listan y se pueden marcar desde el menú', (
+    tester,
+  ) async {
     final store = await _pumpLibrary(tester);
 
     await tester.tap(find.text('Favoritos'));
@@ -158,8 +172,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('el menú añade a la cola y a reproducir siguiente',
-      (tester) async {
+  testWidgets('el menú añade a la cola y a reproducir siguiente', (
+    tester,
+  ) async {
     final fake = _fakeWithLibrary();
     final controller = PlayerController(fake);
     await _pumpLibrary(tester, controller: controller);
@@ -176,14 +191,17 @@ void main() {
     await tester.tap(find.text('Reproducir siguiente'));
     await tester.pumpAndSettle();
     expect(fake.playNextCalls, 1);
-    expect(fake.queuePaths,
-        ['/m/Rock/Clásicos/Dos.mp3', '/m/Rock/Clásicos/Dos.mp3']);
+    expect(fake.queuePaths, [
+      '/m/Rock/Clásicos/Dos.mp3',
+      '/m/Rock/Clásicos/Dos.mp3',
+    ]);
 
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('reproducir ahora abre la pista en el controlador',
-      (tester) async {
+  testWidgets('reproducir ahora abre la pista en el controlador', (
+    tester,
+  ) async {
     final fake = _fakeWithLibrary();
     final controller = PlayerController(fake);
     await _pumpLibrary(tester, controller: controller);
@@ -197,8 +215,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('la ficha técnica enseña ruta, formato y duración',
-      (tester) async {
+  testWidgets('la ficha técnica enseña ruta, formato y duración', (
+    tester,
+  ) async {
     await _pumpLibrary(tester);
 
     await tester.tap(find.byIcon(Icons.more_vert_rounded).first);
@@ -218,8 +237,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('ocultar las pistas cortas solo descarta las que se sabe cortas',
-      (tester) async {
+  testWidgets('ocultar las pistas cortas solo descarta las que se sabe cortas', (
+    tester,
+  ) async {
     final fake = _fakeWithLibrary();
     final controller = PlayerController(fake);
     await _pumpLibrary(tester, controller: controller);
@@ -247,8 +267,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('ordenar por duración no descarta pistas desconocidas',
-      (tester) async {
+  testWidgets('ordenar por duración no descarta pistas desconocidas', (
+    tester,
+  ) async {
     await _pumpLibrary(tester);
 
     await tester.tap(find.byIcon(Icons.sort_rounded));
