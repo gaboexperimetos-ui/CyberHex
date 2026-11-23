@@ -95,6 +95,328 @@ static int write_wav(const char* path) {
     return 0;
 }
 
+/* --- utilidades de construccion para MP4/AIFF en las pruebas --- */
+typedef struct {
+    unsigned char* d;
+    size_t n, cap;
+} tbuf;
+
+static void tb_put(tbuf* b, const void* p, size_t n) {
+    if (b->n + n > b->cap) {
+        size_t c = b->cap ? b->cap : 256;
+        while (c < b->n + n) c *= 2;
+        b->d = (unsigned char*)realloc(b->d, c);
+        b->cap = c;
+    }
+    if (n) memcpy(b->d + b->n, p, n);
+    b->n += n;
+}
+
+static void tb_zero(tbuf* b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        unsigned char z = 0;
+        tb_put(b, &z, 1);
+    }
+}
+
+static void tb_be32(tbuf* b, uint32_t v) {
+    unsigned char t[4] = {(unsigned char)(v >> 24), (unsigned char)(v >> 16),
+                          (unsigned char)(v >> 8), (unsigned char)v};
+    tb_put(b, t, 4);
+}
+
+static void tb_box(tbuf* out, const char* type, const tbuf* body) {
+    tb_be32(out, (uint32_t)(body->n + 8));
+    tb_put(out, type, 4);
+    tb_put(out, body->d, body->n);
+}
+
+static uint32_t rd_be32(const unsigned char* p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static long find_bytes(const unsigned char* h, size_t hn, const void* nd, size_t nn) {
+    if (nn == 0 || hn < nn) return -1;
+    for (size_t i = 0; i + nn <= hn; i++) {
+        if (memcmp(h + i, nd, nn) == 0) return (long)i;
+    }
+    return -1;
+}
+
+static unsigned char* read_whole(const char* path, size_t* out_n) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char* b = (unsigned char*)malloc(sz > 0 ? (size_t)sz : 1);
+    if (!b) { fclose(f); return NULL; }
+    size_t rd = fread(b, 1, (size_t)sz, f);
+    fclose(f);
+    *out_n = rd;
+    return b;
+}
+
+static int file_contains(const char* path, const void* nd, size_t nn) {
+    size_t n = 0;
+    unsigned char* b = read_whole(path, &n);
+    if (!b) return 0;
+    int ok = find_bytes(b, n, nd, nn) >= 0;
+    free(b);
+    return ok;
+}
+
+static void mp4_hdlr_body(tbuf* out) {
+    tb_zero(out, 8);
+    tb_put(out, "mdir", 4);
+    tb_put(out, "appl", 4);
+    tb_zero(out, 9);
+}
+
+static int write_mp4(const char* path) {
+    tbuf ftyp = {0};
+    {
+        tbuf b = {0};
+        tb_put(&b, "M4A ", 4);
+        tb_be32(&b, 0);
+        tb_put(&b, "M4A ", 4);
+        tb_put(&b, "isom", 4);
+        tb_box(&ftyp, "ftyp", &b);
+        free(b.d);
+    }
+    tbuf moov = {0};
+    {
+        tbuf body = {0};
+        {
+            tbuf mvhd = {0};
+            tb_zero(&mvhd, 100);
+            tb_box(&body, "mvhd", &mvhd);
+            free(mvhd.d);
+        }
+        {
+            tbuf trak = {0};
+            {
+                tbuf x = {0};
+                tb_zero(&x, 84);
+                tb_box(&trak, "tkhd", &x);
+                free(x.d);
+            }
+            {
+                tbuf mdia = {0};
+                {
+                    tbuf x = {0};
+                    tb_zero(&x, 24);
+                    tb_box(&mdia, "mdhd", &x);
+                    free(x.d);
+                }
+                {
+                    tbuf x = {0};
+                    mp4_hdlr_body(&x);
+                    tb_box(&mdia, "hdlr", &x);
+                    free(x.d);
+                }
+                {
+                    tbuf minf = {0};
+                    {
+                        tbuf x = {0};
+                        tb_zero(&x, 8);
+                        tb_box(&minf, "smhd", &x);
+                        free(x.d);
+                    }
+                    {
+                        tbuf dinf = {0};
+                        tbuf dref = {0};
+                        tb_be32(&dref, 0);
+                        tb_be32(&dref, 1);
+                        {
+                            tbuf url = {0};
+                            tb_be32(&url, 1);
+                            tb_box(&dref, "url ", &url);
+                            free(url.d);
+                        }
+                        tb_box(&dinf, "dref", &dref);
+                        free(dref.d);
+                        tb_box(&minf, "dinf", &dinf);
+                        free(dinf.d);
+                    }
+                    {
+                        tbuf stbl = {0};
+                        {
+                            tbuf x = {0};
+                            tb_be32(&x, 0);
+                            tb_be32(&x, 0);
+                            tb_box(&stbl, "stsd", &x);
+                            free(x.d);
+                        }
+                        {
+                            tbuf x = {0};
+                            tb_be32(&x, 0);
+                            tb_be32(&x, 0);
+                            tb_box(&stbl, "stts", &x);
+                            free(x.d);
+                        }
+                        {
+                            tbuf x = {0};
+                            tb_be32(&x, 0);
+                            tb_be32(&x, 0);
+                            tb_box(&stbl, "stsc", &x);
+                            free(x.d);
+                        }
+                        {
+                            tbuf x = {0};
+                            tb_be32(&x, 0);
+                            tb_be32(&x, 0);
+                            tb_be32(&x, 1);
+                            tb_be32(&x, 64);
+                            tb_box(&stbl, "stsz", &x);
+                            free(x.d);
+                        }
+                        {
+                            tbuf x = {0};
+                            tb_be32(&x, 0);
+                            tb_be32(&x, 1);
+                            tb_be32(&x, 0); /* offset: se rellena luego */
+                            tb_box(&stbl, "stco", &x);
+                            free(x.d);
+                        }
+                        tb_box(&minf, "stbl", &stbl);
+                        free(stbl.d);
+                    }
+                    tb_box(&mdia, "minf", &minf);
+                    free(minf.d);
+                }
+                tb_box(&trak, "mdia", &mdia);
+                free(mdia.d);
+            }
+            tb_box(&body, "trak", &trak);
+            free(trak.d);
+        }
+        {
+            tbuf udta = {0};
+            tbuf meta = {0};
+            tb_zero(&meta, 4); /* full box */
+            {
+                tbuf x = {0};
+                mp4_hdlr_body(&x);
+                tb_box(&meta, "hdlr", &x);
+                free(x.d);
+            }
+            {
+                tbuf ilst = {0};
+                tb_box(&meta, "ilst", &ilst); /* vacio */
+            }
+            tb_box(&udta, "meta", &meta);
+            free(meta.d);
+            tb_box(&body, "udta", &udta);
+            free(udta.d);
+        }
+        tb_box(&moov, "moov", &body);
+        free(body.d);
+    }
+
+    tbuf file = {0};
+    tb_put(&file, ftyp.d, ftyp.n);
+    free(ftyp.d);
+    tb_put(&file, moov.d, moov.n);
+    free(moov.d);
+
+    uint32_t payload_off = (uint32_t)(file.n + 8);
+    long s = find_bytes(file.d, file.n, "stco", 4);
+    if (s >= 0) {
+        unsigned char v[4] = {(unsigned char)(payload_off >> 24),
+                              (unsigned char)(payload_off >> 16),
+                              (unsigned char)(payload_off >> 8),
+                              (unsigned char)payload_off};
+        memcpy(file.d + s + 12, v, 4);
+    }
+
+    {
+        tbuf data = {0};
+        tb_zero(&data, 64);
+        tbuf mdat = {0};
+        tb_box(&mdat, "mdat", &data);
+        free(data.d);
+        tb_put(&file, mdat.d, mdat.n);
+        free(mdat.d);
+    }
+
+    FILE* f = fopen(path, "wb");
+    if (!f) { free(file.d); return -1; }
+    fwrite(file.d, 1, file.n, f);
+    fclose(f);
+    free(file.d);
+    return 0;
+}
+
+/* El primer offset de stco debe apuntar al inicio del payload de mdat. */
+static int mp4_offsets_ok(const char* path) {
+    size_t n = 0;
+    unsigned char* d = read_whole(path, &n);
+    if (!d) return 0;
+    long s = find_bytes(d, n, "stco", 4);
+    long m = find_bytes(d, n, "mdat", 4);
+    int ok = 0;
+    if (s >= 0 && m >= 0) {
+        uint32_t entry = rd_be32(d + s + 12);
+        uint32_t payload = (uint32_t)(m + 4); /* 'mdat' esta a +4 del box */
+        ok = (entry == payload);
+    }
+    free(d);
+    return ok;
+}
+
+static int write_aiff(const char* path) {
+    tbuf file = {0};
+    tb_put(&file, "FORM", 4);
+    tb_be32(&file, 0);
+    tb_put(&file, "AIFF", 4);
+    {
+        tbuf comm = {0};
+        tb_zero(&comm, 18);
+        tb_box(&file, "COMM", &comm);
+        free(comm.d);
+    }
+    {
+        tbuf ssnd = {0};
+        tb_zero(&ssnd, 8 + 32);
+        tb_box(&file, "SSND", &ssnd);
+        free(ssnd.d);
+    }
+    uint32_t form_size = (uint32_t)(file.n - 8);
+    unsigned char sz[4] = {(unsigned char)(form_size >> 24), (unsigned char)(form_size >> 16),
+                           (unsigned char)(form_size >> 8), (unsigned char)form_size};
+    memcpy(file.d + 4, sz, 4);
+
+    FILE* f = fopen(path, "wb");
+    if (!f) { free(file.d); return -1; }
+    fwrite(file.d, 1, file.n, f);
+    fclose(f);
+    free(file.d);
+    return 0;
+}
+
+static int aiff_form_size_ok(const char* path) {
+    size_t n = 0;
+    unsigned char* d = read_whole(path, &n);
+    if (!d) return 0;
+    int ok = 0;
+    if (n >= 12 && memcmp(d, "FORM", 4) == 0) {
+        uint32_t declared = rd_be32(d + 4);
+        ok = (declared == (uint32_t)(n - 8));
+    }
+    free(d);
+    return ok;
+}
+
+static int write_aac(const char* path) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return -1;
+    for (int i = 0; i < 200; i++) fputc(0, f);
+    fclose(f);
+    return 0;
+}
+
 int main(void) {
     char tmp[256];
     snprintf(tmp, sizeof tmp, "/tmp/cyberhex_test_XXXXXX");
@@ -131,6 +453,54 @@ int main(void) {
     check(ch_tags_mp3_set(mp3_path, NULL, "x") == -1, "tags_mp3_set NULL key");
     check(ch_tags_mp3_set("test.txt", "TITLE", "x") == -1, "tags_mp3_set not mp3");
 
+    /* MP4 / M4A: escribe, verifica offsets y borra */
+    char m4a_path[256];
+    snprintf(m4a_path, sizeof m4a_path, "%s.m4a", tmp);
+    check(write_mp4(m4a_path) == 0, "m4a generado");
+    check(mp4_offsets_ok(m4a_path), "m4a stco inicial coherente");
+    check(ch_tags_mp4_set(m4a_path, "TITLE", "M4A Title") == 0, "tags_mp4_set TITLE");
+    check(ch_tags_mp4_set(m4a_path, "ARTIST", "M4A Artist") == 0, "tags_mp4_set ARTIST");
+    check(ch_tags_mp4_set(m4a_path, "TRACK", "3/12") == 0, "tags_mp4_set TRACK");
+    check(file_contains(m4a_path, "M4A Title", 9), "m4a guarda el titulo");
+    check(file_contains(m4a_path, "M4A Artist", 10), "m4a guarda el artista");
+    check(mp4_offsets_ok(m4a_path), "m4a corrige stco al crecer moov");
+    check(ch_tags_mp4_set(m4a_path, "TITLE", NULL) == 0, "tags_mp4_set borra TITLE");
+    check(!file_contains(m4a_path, "M4A Title", 9), "m4a borra el titulo");
+    check(file_contains(m4a_path, "M4A Artist", 10), "m4a conserva otros campos");
+    check(mp4_offsets_ok(m4a_path), "m4a corrige stco al encoger moov");
+    check(ch_tags_mp4_set(NULL, "TITLE", "x") == -1, "tags_mp4_set NULL path");
+    check(ch_tags_mp4_set(m4a_path, NULL, "x") == -1, "tags_mp4_set NULL key");
+    check(ch_tags_mp4_set("/nonexistent.m4a", "TITLE", "x") == -1, "tags_mp4_set noexist");
+    check(ch_tags_mp4_set("test.txt", "TITLE", "x") == -1, "tags_mp4_set not m4a");
+
+    /* AIFF: chunk ID3 dentro de FORM */
+    char aiff_path[256];
+    snprintf(aiff_path, sizeof aiff_path, "%s.aiff", tmp);
+    check(write_aiff(aiff_path) == 0, "aiff generado");
+    check(ch_tags_aiff_set(aiff_path, "TITLE", "AIFF Title") == 0, "tags_aiff_set TITLE");
+    check(ch_tags_aiff_set(aiff_path, "ARTIST", "AIFF Artist") == 0, "tags_aiff_set ARTIST");
+    check(file_contains(aiff_path, "ID3 ", 4), "aiff crea chunk ID3");
+    check(file_contains(aiff_path, "TIT2", 4), "aiff usa marcos ID3");
+    check(file_contains(aiff_path, "AIFF Title", 10), "aiff guarda el titulo");
+    check(file_contains(aiff_path, "AIFF Artist", 11), "aiff guarda el artista");
+    check(aiff_form_size_ok(aiff_path), "aiff ajusta el tamano de FORM");
+    check(ch_tags_aiff_set(NULL, "TITLE", "x") == -1, "tags_aiff_set NULL path");
+    check(ch_tags_aiff_set(aiff_path, NULL, "x") == -1, "tags_aiff_set NULL key");
+    check(ch_tags_aiff_set("/nonexistent.aiff", "TITLE", "x") == -1, "tags_aiff_set noexist");
+    check(ch_tags_aiff_set("test.txt", "TITLE", "x") == -1, "tags_aiff_set not aiff");
+
+    /* AAC crudo: ID3v2 al principio */
+    char aac_path[256];
+    snprintf(aac_path, sizeof aac_path, "%s.aac", tmp);
+    check(write_aac(aac_path) == 0, "aac generado");
+    check(ch_tags_aac_set(aac_path, "TITLE", "AAC Title") == 0, "tags_aac_set TITLE");
+    check(file_contains(aac_path, "ID3", 3), "aac antepone ID3");
+    check(file_contains(aac_path, "AAC Title", 9), "aac guarda el titulo");
+    check(ch_tags_aac_set(NULL, "TITLE", "x") == -1, "tags_aac_set NULL path");
+
+    unlink(m4a_path);
+    unlink(aiff_path);
+    unlink(aac_path);
     unlink(flac_path);
     unlink(mp3_path);
 

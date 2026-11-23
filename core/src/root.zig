@@ -86,6 +86,9 @@ extern fn ch_file_free(data: [*c]u8) void;
 extern fn ch_file_write_atomic(path: [*c]const u8, data: [*c]const u8, size: u64) i32;
 extern fn ch_tags_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 extern fn ch_tags_mp3_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_tags_aac_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_tags_mp4_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
+extern fn ch_tags_aiff_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 extern fn ch_tags_ogg_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 extern fn ch_tags_opus_set(path: [*c]const u8, key: [*c]const u8, value: [*c]const u8) i32;
 const SetFn = *const fn ([*c]const u8, [*c]const u8, [*c]const u8) callconv(.c) i32;
@@ -4063,8 +4066,31 @@ export fn ch_engine_stats(self: ?*Engine, play_count: ?*u64, listen_seconds: ?*f
     return 0;
 }
 
-/// Escribe una etiqueta (key/value) en el archivo de la pista actual. Solo
-/// FLAC por ahora. `value` NULL borra el campo. Devuelve 0 si ok.
+/// Elige el escritor de etiquetas segun la extension del archivo.
+fn tagWriterFor(span: []const u8) ?SetFn {
+    if (std.mem.endsWith(u8, span, ".flac")) return ch_tags_set;
+    if (std.mem.endsWith(u8, span, ".mp3")) return ch_tags_mp3_set;
+    if (std.mem.endsWith(u8, span, ".aac")) return ch_tags_aac_set;
+    if (std.mem.endsWith(u8, span, ".opus")) return ch_tags_opus_set;
+    if (std.mem.endsWith(u8, span, ".ogg") or std.mem.endsWith(u8, span, ".oga")) {
+        return ch_tags_ogg_set;
+    }
+    if (std.mem.endsWith(u8, span, ".m4a") or std.mem.endsWith(u8, span, ".m4b") or
+        std.mem.endsWith(u8, span, ".m4p") or std.mem.endsWith(u8, span, ".m4v") or
+        std.mem.endsWith(u8, span, ".mp4") or std.mem.endsWith(u8, span, ".alac"))
+    {
+        return ch_tags_mp4_set;
+    }
+    if (std.mem.endsWith(u8, span, ".aiff") or std.mem.endsWith(u8, span, ".aif") or
+        std.mem.endsWith(u8, span, ".aifc"))
+    {
+        return ch_tags_aiff_set;
+    }
+    return null;
+}
+
+/// Escribe una etiqueta (key/value) en el archivo de la pista actual.
+/// `value` NULL borra el campo. Devuelve 0 si ok.
 export fn ch_engine_set_tag(self: ?*Engine, key: [*c]const u8, value: [*c]const u8) i32 {
     const e = self orelse return -1;
     if (key == null) return -1;
@@ -4073,21 +4099,9 @@ export fn ch_engine_set_tag(self: ?*Engine, key: [*c]const u8, value: [*c]const 
     const path: ?[:0]u8 = if (idx < e.playlist.items.len) e.playlist.items[idx] else null;
     e.list_mutex.unlock();
     const p = path orelse return -2;
-    // Elegir el escritor segun la extension.
     const span: []const u8 = p;
-    if (std.mem.endsWith(u8, span, ".flac")) {
-        return ch_tags_set(p.ptr, key, value orelse @ptrCast(""));
-    }
-    if (std.mem.endsWith(u8, span, ".mp3")) {
-        return ch_tags_mp3_set(p.ptr, key, value orelse @ptrCast(""));
-    }
-    if (std.mem.endsWith(u8, span, ".opus")) {
-        return ch_tags_opus_set(p.ptr, key, value orelse @ptrCast(""));
-    }
-    if (std.mem.endsWith(u8, span, ".ogg") or std.mem.endsWith(u8, span, ".oga")) {
-        return ch_tags_ogg_set(p.ptr, key, value orelse @ptrCast(""));
-    }
-    return -3;
+    const w = tagWriterFor(span) orelse return -3;
+    return w(p.ptr, key, value orelse @ptrCast(""));
 }
 
 /// Guarda la letra de la pista actual en un .lrc (0 si ok).
@@ -4277,17 +4291,8 @@ export fn ch_engine_write_bpm(self: ?*Engine, path: [*c]const u8) i32 {
     var buf: [32]u8 = undefined;
     const s = std.fmt.bufPrintSentinel(&buf, "{d:.0}", .{bpm}, 0) catch return -3;
     const path_span = std.mem.span(path);
-    const SetFn2 = *const fn ([*c]const u8, [*c]const u8, [*c]const u8) callconv(.c) i32;
-    var w: SetFn2 = ch_tags_set;
-    if (std.mem.endsWith(u8, path_span, ".mp3")) {
-        w = ch_tags_mp3_set;
-    } else if (std.mem.endsWith(u8, path_span, ".opus")) {
-        w = ch_tags_opus_set;
-    } else if (std.mem.endsWith(u8, path_span, ".ogg") or std.mem.endsWith(u8, path_span, ".oga")) {
-        w = ch_tags_ogg_set;
-    } else if (!std.mem.endsWith(u8, path_span, ".flac")) {
-        return e.fail("BPM solo soporta FLAC, MP3, Ogg y Opus", -4);
-    }
+    const w = tagWriterFor(path_span) orelse
+        return e.fail("BPM solo soporta FLAC, MP3, M4A, AAC, AIFF, Ogg y Opus", -4);
     return w(path, "BPM", s.ptr);
 }
 
@@ -4716,19 +4721,8 @@ export fn ch_engine_write_replaygain(self: ?*Engine, path: [*c]const u8) i32 {
     const ps = std.fmt.bufPrintSentinel(&pbuf, "{d:.6}", .{peak}, 0) catch return -3;
     const span = std.mem.span(path);
 
-    var writer: ?SetFn = null;
-    if (std.mem.endsWith(u8, span, ".flac")) {
-        writer = ch_tags_set;
-    } else if (std.mem.endsWith(u8, span, ".mp3")) {
-        writer = ch_tags_mp3_set;
-    } else if (std.mem.endsWith(u8, span, ".opus")) {
-        writer = ch_tags_opus_set;
-    } else if (std.mem.endsWith(u8, span, ".ogg") or std.mem.endsWith(u8, span, ".oga")) {
-        writer = ch_tags_ogg_set;
-    } else {
-        return e.fail("ReplayGain solo soporta FLAC, MP3, Ogg y Opus", -4);
-    }
-    const w = writer.?;
+    const w = tagWriterFor(span) orelse
+        return e.fail("ReplayGain solo soporta FLAC, MP3, M4A, AAC, AIFF, Ogg y Opus", -4);
     const ok = w(path, "REPLAYGAIN_TRACK_GAIN", gs.ptr) == 0 and
         w(path, "REPLAYGAIN_TRACK_PEAK", ps.ptr) == 0;
     if (!ok) return e.fail("no se pudieron escribir las etiquetas", -4);
@@ -5213,7 +5207,7 @@ export fn ch_engine_copy_tags(src: [*c]const u8, dst: [*c]const u8) i32 {
     const dst_span = std.mem.span(dst);
     const dst_z = e_dupZ(dst_span) orelse return -2;
     defer std.heap.c_allocator.free(dst_z);
-    const is_mp3 = std.mem.endsWith(u8, dst_span, ".mp3");
+    const w = tagWriterFor(dst_span) orelse ch_tags_set;
 
     const keys = [_][]const u8{ "TITLE", "ARTIST", "ALBUM", "ALBUMARTIST", "GENRE", "DATE", "TRACK", "DISC", "COMPOSER", "REPLAYGAIN_TRACK_GAIN", "REPLAYGAIN_TRACK_PEAK" };
     var copied: i32 = 0;
@@ -5226,14 +5220,6 @@ export fn ch_engine_copy_tags(src: [*c]const u8, dst: [*c]const u8) i32 {
         if (text.len == 0) continue;
         const text_z = e_dupZ(text) orelse continue;
         defer std.heap.c_allocator.free(text_z);
-        var w: SetFn = ch_tags_set;
-        if (is_mp3) {
-            w = ch_tags_mp3_set;
-        } else if (std.mem.endsWith(u8, dst_span, ".opus")) {
-            w = ch_tags_opus_set;
-        } else if (std.mem.endsWith(u8, dst_span, ".ogg") or std.mem.endsWith(u8, dst_span, ".oga")) {
-            w = ch_tags_ogg_set;
-        }
         const rc = w(dst_z.ptr, z.ptr, text_z.ptr);
         if (rc == 0) copied += 1;
     }
