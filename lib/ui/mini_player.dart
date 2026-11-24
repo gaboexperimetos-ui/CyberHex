@@ -117,12 +117,18 @@ class MiniPlayer extends StatelessWidget {
                               busy: snapshot.busy,
                               onPressed: snapshot.busy
                                   ? null
-                                  : controller.toggle,
+                                  : () {
+                                      chHaptic();
+                                      controller.toggle();
+                                    },
                               size: 38,
                             ),
                             IconButton(
                               tooltip: 'Siguiente',
-                              onPressed: controller.next,
+                              onPressed: () {
+                                chHaptic();
+                                controller.next();
+                              },
                               iconSize: 22,
                               visualDensity: VisualDensity.compact,
                               icon: Icon(

@@ -3,10 +3,20 @@ import 'dart:typed_data';
 import 'dart:ui' show FontFeature, ImageFilter;
 
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:material_ui/material_ui.dart';
 
 import '../../theme.dart';
 import '../hex_cover.dart';
+
+/// Respuesta háptica de la casa: un clic suave al tocar un control vivo.
+///
+/// Se nota en el móvil (el Redmi vibra al cambiar de pista o pestaña) y en el
+/// escritorio no hace nada. Nunca lanza: si la plataforma no la soporta, se
+/// ignora.
+void chHaptic() {
+  HapticFeedback.selectionClick();
+}
 
 /// Sistema visual de CyberHex.
 ///

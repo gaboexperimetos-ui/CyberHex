@@ -104,6 +104,8 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _select(int index) {
+    if (index == _index) return;
+    chHaptic();
     _tabs.setTab(index);
   }
 

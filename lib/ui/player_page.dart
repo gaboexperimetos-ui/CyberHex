@@ -245,7 +245,28 @@ class _PlayerPageState extends State<PlayerPage>
     if (snapshot.busy || !snapshot.hasTrack) {
       return;
     }
+    chHaptic();
     _controller.toggle();
+  }
+
+  void _previous() {
+    chHaptic();
+    _controller.previous();
+  }
+
+  void _next() {
+    chHaptic();
+    _controller.next();
+  }
+
+  void _shuffle() {
+    chHaptic();
+    _controller.toggleShuffle();
+  }
+
+  void _repeat() {
+    chHaptic();
+    _controller.cycleRepeat();
   }
 
   @override
@@ -542,10 +563,10 @@ class _PlayerPageState extends State<PlayerPage>
         _Transport(
           snapshot: snapshot,
           onToggle: _toggle,
-          onPrevious: _controller.previous,
-          onNext: _controller.next,
-          onShuffle: _controller.toggleShuffle,
-          onRepeat: _controller.cycleRepeat,
+          onPrevious: _previous,
+          onNext: _next,
+          onShuffle: _shuffle,
+          onRepeat: _repeat,
         ),
         const SizedBox(height: 2),
         _VolumeRow(
@@ -665,8 +686,10 @@ class _PlayerPageState extends State<PlayerPage>
     final velocity = details.primaryVelocity ?? 0;
     if (velocity.abs() < 250) return;
     if (velocity < 0) {
+      chHaptic();
       _controller.next();
     } else {
+      chHaptic();
       _controller.previous();
     }
   }
