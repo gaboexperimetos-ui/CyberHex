@@ -264,42 +264,52 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: <Widget>[
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            RichText(
-              text: TextSpan(
-                style: TextStyle(
-                  fontFamily: 'Righteous',
-                  fontSize: 22,
-                  letterSpacing: 3.2,
-                  color: palette.foreground,
-                ),
-                children: <InlineSpan>[
-                  const TextSpan(text: 'CYBER'),
-                  TextSpan(
-                    text: 'HEX',
+        // La marca manda, pero cede: en un móvil estrecho se encoge en vez de
+        // empujar la insignia y la lupa fuera de la pantalla.
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: RichText(
+                  text: TextSpan(
                     style: TextStyle(
-                      color: palette.accent,
-                      shadows: <Shadow>[
-                        Shadow(
-                          color: palette.accent.withValues(alpha: 0.55),
-                          blurRadius: 14,
-                        ),
-                      ],
+                      fontFamily: 'Righteous',
+                      fontSize: 22,
+                      letterSpacing: 3.2,
+                      color: palette.foreground,
                     ),
+                    children: <InlineSpan>[
+                      const TextSpan(text: 'CYBER'),
+                      TextSpan(
+                        text: 'HEX',
+                        style: TextStyle(
+                          color: palette.accent,
+                          shadows: <Shadow>[
+                            Shadow(
+                              color: palette.accent.withValues(alpha: 0.55),
+                              blurRadius: 14,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              'Tu música, tu máquina',
-              style: TextStyle(fontSize: 11, color: palette.muted),
-            ),
-          ],
+              const SizedBox(height: 2),
+              Text(
+                'Tu música, tu máquina',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: palette.muted),
+              ),
+            ],
+          ),
         ),
-        const Spacer(),
+        const SizedBox(width: ChSpace.sm),
         const _StatusPill(),
         if (onSearch != null) ...<Widget>[
           const SizedBox(width: 4),
@@ -388,6 +398,7 @@ class _ContinueCard extends StatelessWidget {
       elevated: true,
       padding: const EdgeInsets.all(ChSpace.lg),
       onTap: onOpenLibrary,
+      gradient: ChGradient.accentCard(palette),
       child: Row(
         children: <Widget>[
           ChHexBadge(
@@ -767,6 +778,7 @@ class _ActivityCard extends StatelessWidget {
       radius: ChRadius.lg,
       padding: EdgeInsets.zero,
       onTap: onOpen,
+      gradient: ChGradient.accentCard(palette, strength: 0.16),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: empty

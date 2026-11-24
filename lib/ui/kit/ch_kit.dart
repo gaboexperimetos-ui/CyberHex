@@ -31,6 +31,26 @@ abstract final class ChRadius {
   static const double pill = 999;
 }
 
+/// Degradados de la casa.
+///
+/// El acento entra por una esquina y se disuelve en la superficie. Es lo que
+/// separa una tarjeta con carácter de un panel gris.
+abstract final class ChGradient {
+  static LinearGradient accentCard(
+    CyberHexPalette palette, {
+    double strength = 0.26,
+  }) => LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: <Color>[
+      Color.lerp(palette.surfaceHigh, palette.accent, strength)!,
+      palette.surface,
+      Color.lerp(palette.surface, palette.secondary, 0.16)!,
+    ],
+    stops: const <double>[0, 0.52, 1],
+  );
+}
+
 /// Etiqueta pequeña de sección o de estado.
 TextStyle chEyebrow(
   CyberHexPalette palette, {
@@ -178,29 +198,45 @@ class ChPressable extends StatefulWidget {
 
 class _ChPressableState extends State<ChPressable> {
   bool _pressed = false;
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final enabled = widget.onTap != null || widget.onLongPress != null;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final scale = _pressed ? 0.97 : (_hovered && enabled ? 1.012 : 1.0);
     return Semantics(
       button: enabled,
       label: widget.semanticLabel,
-      child: AnimatedScale(
-        scale: _pressed ? 0.97 : 1,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-        child: Material(
-          type: MaterialType.transparency,
-          child: InkWell(
-            onTap: widget.onTap,
-            onLongPress: widget.onLongPress,
-            onHighlightChanged: enabled
-                ? (value) {
-                    if (mounted) setState(() => _pressed = value);
-                  }
-                : null,
-            borderRadius: BorderRadius.circular(widget.radius),
-            child: widget.child,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+        onEnter: (_) {
+          if (enabled && !reduceMotion && mounted) {
+            setState(() => _hovered = true);
+          }
+        },
+        onExit: (_) {
+          if (_hovered && mounted) setState(() => _hovered = false);
+        },
+        child: AnimatedScale(
+          scale: scale,
+          duration: reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              onTap: widget.onTap,
+              onLongPress: widget.onLongPress,
+              onHighlightChanged: enabled
+                  ? (value) {
+                      if (mounted) setState(() => _pressed = value);
+                    }
+                  : null,
+              borderRadius: BorderRadius.circular(widget.radius),
+              child: widget.child,
+            ),
           ),
         ),
       ),
