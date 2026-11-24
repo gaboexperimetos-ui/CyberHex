@@ -6,6 +6,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/player_controller.dart';
 import '../platform/connections.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 class ConnectionSheet extends StatefulWidget {
   const ConnectionSheet({
@@ -169,24 +170,7 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
         _success = true;
         _message = '$title en Study Platform.';
       });
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(title),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SingleChildScrollView(
-              child: SelectableText(_formatResult(result)),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cerrar'),
-            ),
-          ],
-        ),
-      );
+      await _showResult(title, result);
     } on Exception catch (error) {
       if (!mounted) return;
       setState(() {
@@ -201,6 +185,70 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
   String _formatResult(Object? value) {
     if (value is String) return value;
     return const JsonEncoder.withIndent('  ').convert(value);
+  }
+
+  /// Resultado de una herramienta de notas: tarjeta y tipografía de la casa en
+  /// vez del JSON crudo sobre un diálogo genérico.
+  Future<void> _showResult(String title, Object? result) {
+    final palette = paletteOf(context);
+    return showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: palette.surface,
+        insetPadding: const EdgeInsets.all(ChSpace.lg),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ChRadius.xl),
+          side: BorderSide(color: palette.border.withValues(alpha: 0.6)),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460, maxHeight: 560),
+          child: Padding(
+            padding: const EdgeInsets.all(ChSpace.lg),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    ChHexBadge(
+                      icon: Icons.sticky_note_2_rounded,
+                      palette: palette,
+                      size: 34,
+                    ),
+                    const SizedBox(width: ChSpace.sm + 2),
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: chTitle(palette, size: 15.5),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: ChSpace.md),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: SelectableText(
+                      _formatResult(result),
+                      style: chMono(palette, size: 11.5),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: ChSpace.md),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Cerrar'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -227,15 +275,9 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                 'Enlace local y autenticado entre el reproductor y Study Platform.',
                 style: TextStyle(color: palette.muted, height: 1.5),
               ),
-              const SizedBox(height: 20),
-              Text(
-                'API de CyberHex',
-                style: chDisplay.copyWith(
-                  fontSize: 16,
-                  color: palette.foreground,
-                ),
-              ),
-              const SizedBox(height: 6),
+              const SizedBox(height: ChSpace.lg),
+              ChSectionHeader('API de CyberHex', palette: palette),
+              const SizedBox(height: ChSpace.sm),
               Text(
                 connections.localApiError ??
                     'Solo escucha en este equipo: ${connections.localApiUrl ?? 'iniciando…'}',
@@ -268,15 +310,9 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                   label: const Text('Copiar clave'),
                 ),
               ),
-              const Divider(height: 28),
-              Text(
-                'Study Platform',
-                style: chDisplay.copyWith(
-                  fontSize: 16,
-                  color: palette.foreground,
-                ),
-              ),
-              const SizedBox(height: 6),
+              const Divider(height: ChSpace.xl),
+              ChSectionHeader('Study Platform', palette: palette),
+              const SizedBox(height: ChSpace.sm),
               Text(
                 'Introduce su endpoint MCP y la CUSTOM_MCP_API_KEY configurada en el servidor.',
                 style: TextStyle(
@@ -348,35 +384,86 @@ class _ConnectionSheetState extends State<ConnectionSheet> {
                 ),
               ),
               if (connections.studyConfigured) ...[
-                const Divider(height: 32),
+                const SizedBox(height: ChSpace.xl),
+                ChSectionHeader('Notas', palette: palette),
+                const SizedBox(height: ChSpace.sm + 2),
                 Text(
-                  'Notas',
-                  style: chDisplay.copyWith(
-                    fontSize: 16,
-                    color: palette.foreground,
+                  'Busca en tus notas o guarda la pista que suena con un toque.',
+                  style: TextStyle(
+                    color: palette.muted,
+                    fontSize: 12,
+                    height: 1.5,
                   ),
                 ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _noteQuery,
-                  decoration: const InputDecoration(
-                    labelText: 'Buscar en tus notas',
-                    prefixIcon: Icon(Icons.search_rounded),
-                  ),
-                  onSubmitted: (_) => _searchNotes(),
+                const SizedBox(height: ChSpace.md),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _noteQuery,
+                        textInputAction: TextInputAction.search,
+                        onSubmitted: (_) => _searchNotes(),
+                        decoration: const InputDecoration(
+                          hintText: 'Buscar en tus notas',
+                          prefixIcon: Icon(Icons.search_rounded, size: 19),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: ChSpace.sm),
+                    FilledButton(
+                      onPressed: _busy ? null : _searchNotes,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: ChSpace.lg,
+                        ),
+                      ),
+                      child: const Text('Buscar'),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _busy ? null : _searchNotes,
-                  icon: const Icon(Icons.search_rounded),
-                  label: const Text('Buscar notas'),
-                ),
-                FilledButton.icon(
-                  onPressed: _busy || !widget.controller.snapshot.hasTrack
+                const SizedBox(height: ChSpace.md),
+                ChSurface(
+                  radius: ChRadius.lg,
+                  padding: const EdgeInsets.all(ChSpace.md),
+                  onTap: _busy || !widget.controller.snapshot.hasTrack
                       ? null
                       : _saveCurrentTrack,
-                  icon: const Icon(Icons.note_add_outlined),
-                  label: const Text('Guardar pista actual como nota'),
+                  child: Row(
+                    children: [
+                      ChHexBadge(
+                        icon: Icons.note_add_outlined,
+                        palette: palette,
+                        size: 38,
+                      ),
+                      const SizedBox(width: ChSpace.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Guardar pista actual',
+                              style: chTitle(palette, size: 13.5),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              widget.controller.snapshot.hasTrack
+                                  ? (widget.controller.snapshot.title.isEmpty
+                                        ? 'Pista que suena'
+                                        : widget.controller.snapshot.title)
+                                  : 'Pon algo a sonar para guardarlo',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: palette.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded, color: palette.muted),
+                    ],
+                  ),
                 ),
               ],
             ],
