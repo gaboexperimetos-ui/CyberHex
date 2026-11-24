@@ -18,55 +18,9 @@ const TextStyle chDisplay = TextStyle(
   letterSpacing: 1.5,
 );
 
-ThemeData buildCyberHexTheme() {
-  const scheme = ColorScheme.dark(
-    primary: chAccent,
-    onPrimary: chOnAccent,
-    secondary: chSecondary,
-    onSecondary: Colors.white,
-    surface: chSurface,
-    onSurface: chForeground,
-    error: chError,
-    outline: chBorder,
-  );
-
-  final base = ThemeData(
-    useMaterial3: true,
-    brightness: Brightness.dark,
-    colorScheme: scheme,
-    scaffoldBackgroundColor: chBackground,
-    fontFamily: 'Poppins',
-  );
-
-  return base.copyWith(
-    textTheme: base.textTheme.apply(
-      bodyColor: chForeground,
-      displayColor: chForeground,
-    ),
-    sliderTheme: base.sliderTheme.copyWith(
-      activeTrackColor: chAccent,
-      inactiveTrackColor: chSurfaceHigh,
-      thumbColor: chAccent,
-      overlayColor: chAccent.withValues(alpha: 0.16),
-      trackHeight: 3,
-    ),
-    iconButtonTheme: IconButtonThemeData(
-      style: IconButton.styleFrom(foregroundColor: chForeground),
-    ),
-    snackBarTheme: const SnackBarThemeData(
-      backgroundColor: chSurfaceHigh,
-      contentTextStyle: TextStyle(color: chForeground),
-      behavior: SnackBarBehavior.floating,
-    ),
-    bottomSheetTheme: const BottomSheetThemeData(
-      backgroundColor: chSurface,
-      surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-    ),
-  );
-}
+/// Tema neón de siempre. Se conserva el nombre para no romper llamadas
+/// existentes; ahora comparte tipografía y controles con el resto de temas.
+ThemeData buildCyberHexTheme() => buildCyberHexThemed(CyberHexPalette.neon);
 
 // ---------------------------------------------------------------------------
 // Temas (fase 6): cuatro paletas y estilos de carátula
@@ -329,13 +283,17 @@ CyberHexPalette paletteOf(BuildContext context) =>
     Theme.of(context).extension<CyberHexPalette>() ?? CyberHexPalette.neon;
 
 /// Tema de Material construido a partir de una paleta.
+///
+/// Aquí vive la tipografía y el acabado común de los controles; el color de
+/// cada pantalla sale de `paletteOf(context)`. Una pantalla nueva que use
+/// `Text`/`FilledButton`/`TextField` ya se ve de la casa sin estilos propios.
 ThemeData buildCyberHexThemed(CyberHexPalette palette) {
   final scheme = ColorScheme(
     brightness: palette.brightness,
     primary: palette.accent,
     onPrimary: palette.onAccent,
     secondary: palette.secondary,
-    onSecondary: palette.isDark ? Colors.white : Colors.white,
+    onSecondary: Colors.white,
     surface: palette.surface,
     onSurface: palette.foreground,
     error: palette.error,
@@ -351,37 +309,216 @@ ThemeData buildCyberHexThemed(CyberHexPalette palette) {
     fontFamily: 'Poppins',
   );
 
+  final radius = BorderRadius.circular(12);
+  final text = base.textTheme
+      .copyWith(
+        displayLarge: const TextStyle(
+          fontFamily: 'Righteous',
+          fontSize: 40,
+          letterSpacing: 1.2,
+          height: 1.05,
+        ),
+        displayMedium: const TextStyle(
+          fontFamily: 'Righteous',
+          fontSize: 30,
+          letterSpacing: 0.8,
+          height: 1.1,
+        ),
+        displaySmall: const TextStyle(
+          fontFamily: 'Righteous',
+          fontSize: 24,
+          letterSpacing: 0.4,
+          height: 1.15,
+        ),
+        headlineMedium: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.4,
+          height: 1.15,
+        ),
+        headlineSmall: const TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.3,
+          height: 1.18,
+        ),
+        titleLarge: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.2,
+        ),
+        titleMedium: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          letterSpacing: -0.1,
+        ),
+        titleSmall: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        bodyLarge: const TextStyle(fontSize: 14, height: 1.45),
+        bodyMedium: const TextStyle(fontSize: 13, height: 1.45),
+        bodySmall: const TextStyle(fontSize: 11.5, height: 1.45),
+        labelLarge: const TextStyle(
+          fontSize: 12.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.2,
+        ),
+        labelMedium: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          letterSpacing: 0.3,
+        ),
+        labelSmall: const TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 1.1,
+        ),
+      )
+      .apply(bodyColor: palette.foreground, displayColor: palette.foreground);
+
   return base.copyWith(
     extensions: <ThemeExtension<dynamic>>[palette],
-    textTheme: base.textTheme.apply(
-      bodyColor: palette.foreground,
-      displayColor: palette.foreground,
-    ),
+    textTheme: text,
     appBarTheme: AppBarTheme(
       backgroundColor: palette.background,
       surfaceTintColor: Colors.transparent,
       foregroundColor: palette.foreground,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      titleTextStyle: TextStyle(
+        fontFamily: 'Righteous',
+        fontSize: 17,
+        letterSpacing: 2,
+        color: palette.foreground,
+      ),
+    ),
+    tabBarTheme: TabBarThemeData(
+      labelColor: palette.accent,
+      unselectedLabelColor: palette.muted,
+      indicatorColor: palette.accent,
+      indicatorSize: TabBarIndicatorSize.label,
+      dividerColor: palette.border.withValues(alpha: 0.35),
+      labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+      unselectedLabelStyle: const TextStyle(
+        fontSize: 12.5,
+        fontWeight: FontWeight.w500,
+      ),
+    ),
+    inputDecorationTheme: InputDecorationThemeData(
+      filled: true,
+      fillColor: palette.surfaceHigh.withValues(alpha: 0.55),
+      hintStyle: TextStyle(fontSize: 12, color: palette.muted),
+      prefixIconColor: palette.muted,
+      suffixIconColor: palette.muted,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(color: palette.border.withValues(alpha: 0.45)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: radius,
+        borderSide: BorderSide(
+          color: palette.accent.withValues(alpha: 0.7),
+          width: 1.2,
+        ),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: palette.surfaceHigh.withValues(alpha: 0.6),
+      selectedColor: palette.accent.withValues(alpha: 0.16),
+      checkmarkColor: palette.accent,
+      side: BorderSide(color: palette.border.withValues(alpha: 0.5)),
+      shape: const StadiumBorder(),
+      labelStyle: TextStyle(fontSize: 11.5, color: palette.foreground),
+      secondaryLabelStyle: TextStyle(fontSize: 11.5, color: palette.accent),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    ),
+    dividerTheme: DividerThemeData(
+      color: palette.border.withValues(alpha: 0.35),
+      thickness: 1,
+      space: 1,
     ),
     sliderTheme: base.sliderTheme.copyWith(
       activeTrackColor: palette.accent,
       inactiveTrackColor: palette.surfaceHigh,
       thumbColor: palette.accent,
-      overlayColor: palette.accent.withValues(alpha: 0.16),
-      trackHeight: 3,
+      overlayColor: palette.accent.withValues(alpha: 0.14),
+      trackHeight: 4,
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+      overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+      valueIndicatorColor: palette.surfaceHigh,
+      valueIndicatorTextStyle: TextStyle(
+        color: palette.foreground,
+        fontSize: 11,
+      ),
+    ),
+    progressIndicatorTheme: ProgressIndicatorThemeData(
+      color: palette.accent,
+      linearTrackColor: palette.surfaceHigh,
+      circularTrackColor: palette.surfaceHigh,
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        backgroundColor: palette.accent,
+        foregroundColor: palette.onAccent,
+        disabledBackgroundColor: palette.surfaceHigh,
+        disabledForegroundColor: palette.muted,
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+        textStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          letterSpacing: 0.2,
+        ),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: palette.foreground,
+        side: BorderSide(color: palette.border.withValues(alpha: 0.7)),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        shape: RoundedRectangleBorder(borderRadius: radius),
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        foregroundColor: palette.foreground,
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+      ),
+    ),
+    listTileTheme: ListTileThemeData(
+      textColor: palette.foreground,
+      iconColor: palette.muted,
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(foregroundColor: palette.foreground),
     ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: palette.surfaceHigh,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: palette.border.withValues(alpha: 0.7)),
+      ),
+      textStyle: TextStyle(fontSize: 11, color: palette.foreground),
+      waitDuration: const Duration(milliseconds: 450),
+    ),
     snackBarTheme: SnackBarThemeData(
       backgroundColor: palette.surfaceHigh,
-      contentTextStyle: TextStyle(color: palette.foreground),
+      contentTextStyle: TextStyle(fontSize: 12.5, color: palette.foreground),
       behavior: SnackBarBehavior.floating,
+      elevation: 6,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     ),
     bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: palette.surface,
       surfaceTintColor: Colors.transparent,
+      dragHandleColor: palette.border,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
     ),
   );

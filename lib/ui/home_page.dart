@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -11,16 +10,16 @@ import '../core/player_controller.dart';
 import '../core/stats_store.dart';
 import '../core/theme_controller.dart';
 import '../theme.dart';
-import 'hex_cover.dart';
 import 'hex_grid.dart';
+import 'kit/ch_kit.dart';
 import 'search_sheet.dart';
 
-/// Pestaña de inicio: el punto de entrada de la app.
+/// Pestaña de inicio: la portada de la app.
 ///
-/// Muestra qué está sonando (o invita a escanear una carpeta), cuatro accesos
-/// directos al resto de la app y un resumen de la actividad guardada por
-/// [StatsStore]. No reproduce nada por su cuenta: delega en el controlador y en
-/// las páginas que ya existen.
+/// La jerarquía es deliberada: primero lo que está sonando, después lo que
+/// estabas escuchando, luego tu biblioteca y por último las herramientas. Nada
+/// reproduce por su cuenta: todo delega en el controlador y en las páginas que
+/// ya existen.
 class HomePage extends StatelessWidget {
   const HomePage({
     super.key,
@@ -88,100 +87,117 @@ class HomePage extends StatelessWidget {
             autofocus: true,
             child: Scaffold(
               backgroundColor: palette.background,
-              body: Container(
+              body: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: <Color>[
-                      Color.lerp(palette.background, palette.primary, 0.38)!,
+                      Color.lerp(palette.background, palette.primary, 0.34)!,
                       palette.background,
                     ],
-                    stops: const <double>[0, 0.45],
+                    stops: const <double>[0, 0.38],
                   ),
                 ),
                 child: Stack(
-                  children: [
+                  children: <Widget>[
                     // Patrón hexagonal sutil detrás del contenido.
                     HexGridBackground(palette: palette),
                     SafeArea(
                       bottom: false,
-                      child: ListView(
-                        padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
-                        children: [
-                          _Header(palette: palette, onSearch: openSearch),
-                          const SizedBox(height: 20),
-                          _ContinueCard(
-                            snapshot: snapshot,
-                            position: controller.position,
-                            palette: palette,
-                            onOpen: onOpenPlayer,
-                            onToggle: controller.toggle,
-                            onOpenLibrary: onOpenLibrary,
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 1040),
+                          child: ListView(
+                            padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+                            children: <Widget>[
+                              _Header(palette: palette, onSearch: openSearch),
+                              const SizedBox(height: ChSpace.xl - 4),
+                              _ContinueCard(
+                                snapshot: snapshot,
+                                position: controller.position,
+                                palette: palette,
+                                onOpen: onOpenPlayer,
+                                onToggle: controller.toggle,
+                                onOpenLibrary: onOpenLibrary,
+                              ),
+                              if (recents.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: ChSpace.xl),
+                                ChSectionHeader(
+                                  'Sigue escuchando',
+                                  palette: palette,
+                                  count: recents.length,
+                                  onAction: onOpenStats,
+                                ),
+                                const SizedBox(height: ChSpace.sm + 2),
+                                _RecentRail(
+                                  entries: recents,
+                                  palette: palette,
+                                  onPlay: (path) => unawaited(
+                                    _play(context, controller, path),
+                                  ),
+                                ),
+                              ],
+                              if (albums.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: ChSpace.xl),
+                                ChSectionHeader(
+                                  'Álbumes',
+                                  palette: palette,
+                                  count: albums.length,
+                                  onAction: onOpenLibrary,
+                                ),
+                                const SizedBox(height: ChSpace.sm + 2),
+                                _AlbumRail(
+                                  albums: albums
+                                      .take(12)
+                                      .toList(growable: false),
+                                  palette: palette,
+                                  onOpen: (album) => onOpenAlbum!(album.name),
+                                ),
+                              ],
+                              const SizedBox(height: ChSpace.xl),
+                              ChSectionHeader('Explorar', palette: palette),
+                              const SizedBox(height: ChSpace.sm + 2),
+                              _Shortcuts(
+                                palette: palette,
+                                onLibrary: onOpenLibrary,
+                                onPlaylists: onOpenPlaylists,
+                                onRadio: onOpenRadio,
+                                onStats: onOpenStats,
+                              ),
+                              if (top.isNotEmpty) ...<Widget>[
+                                const SizedBox(height: ChSpace.xl),
+                                ChSectionHeader(
+                                  'Lo que más suena',
+                                  palette: palette,
+                                  onAction: onOpenStats,
+                                ),
+                                const SizedBox(height: ChSpace.sm + 2),
+                                _TopTracks(
+                                  tracks: top,
+                                  palette: palette,
+                                  playingPath: currentPath,
+                                  onPlay: (path) => unawaited(
+                                    _play(context, controller, path),
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: ChSpace.xl),
+                              ChSectionHeader(
+                                'Tu actividad',
+                                palette: palette,
+                                actionLabel: 'Detalle',
+                                onAction: onOpenStats,
+                              ),
+                              const SizedBox(height: ChSpace.sm + 2),
+                              _ActivityCard(
+                                stats: stats,
+                                palette: palette,
+                                onOpen: onOpenStats,
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 26),
-                          if (recents.isNotEmpty) ...[
-                            _SectionHeader(
-                              'Sigue escuchando',
-                              palette: palette,
-                              onSeeAll: onOpenStats,
-                            ),
-                            const SizedBox(height: 10),
-                            _RecentRail(
-                              entries: recents,
-                              palette: palette,
-                              onPlay: (path) =>
-                                  unawaited(_play(context, controller, path)),
-                            ),
-                            const SizedBox(height: 26),
-                          ],
-                          if (albums.isNotEmpty) ...[
-                            _SectionHeader(
-                              'Álbumes',
-                              palette: palette,
-                              onSeeAll: onOpenLibrary,
-                            ),
-                            const SizedBox(height: 10),
-                            _AlbumRail(
-                              albums: albums.take(12).toList(growable: false),
-                              palette: palette,
-                              onOpen: (album) => onOpenAlbum!(album.name),
-                            ),
-                            const SizedBox(height: 26),
-                          ],
-                          _SectionTitle('Explorar', palette: palette),
-                          const SizedBox(height: 12),
-                          _Shortcuts(
-                            palette: palette,
-                            onLibrary: onOpenLibrary,
-                            onPlaylists: onOpenPlaylists,
-                            onRadio: onOpenRadio,
-                            onStats: onOpenStats,
-                          ),
-                          if (top.isNotEmpty) ...[
-                            const SizedBox(height: 26),
-                            _SectionHeader(
-                              'Lo que más suena',
-                              palette: palette,
-                              onSeeAll: onOpenStats,
-                            ),
-                            const SizedBox(height: 10),
-                            _TopTracks(
-                              tracks: top,
-                              palette: palette,
-                              onPlay: (path) =>
-                                  unawaited(_play(context, controller, path)),
-                            ),
-                          ],
-                          const SizedBox(height: 26),
-                          _SectionTitle('Tu actividad', palette: palette),
-                          const SizedBox(height: 12),
-                          _ActivityCard(
-                            stats: stats,
-                            palette: palette,
-                            onOpen: onOpenStats,
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
@@ -247,25 +263,25 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [
+      children: <Widget>[
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          children: <Widget>[
             RichText(
               text: TextSpan(
                 style: TextStyle(
                   fontFamily: 'Righteous',
-                  fontSize: 26,
-                  letterSpacing: 4,
+                  fontSize: 22,
+                  letterSpacing: 3.2,
                   color: palette.foreground,
                 ),
-                children: [
+                children: <InlineSpan>[
                   const TextSpan(text: 'CYBER'),
                   TextSpan(
                     text: 'HEX',
                     style: TextStyle(
                       color: palette.accent,
-                      shadows: [
+                      shadows: <Shadow>[
                         Shadow(
                           color: palette.accent.withValues(alpha: 0.55),
                           blurRadius: 14,
@@ -279,120 +295,71 @@ class _Header extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               'Tu música, tu máquina',
-              style: TextStyle(fontSize: 12, color: palette.muted),
+              style: TextStyle(fontSize: 11, color: palette.muted),
             ),
           ],
         ),
         const Spacer(),
-        if (onSearch != null) ...[
+        const _StatusPill(),
+        if (onSearch != null) ...<Widget>[
+          const SizedBox(width: 4),
           IconButton(
             tooltip: 'Buscar (Ctrl+F)',
             onPressed: onSearch,
             icon: Icon(Icons.search_rounded, color: palette.foreground),
           ),
-          const SizedBox(width: 4),
         ],
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: palette.accent.withValues(alpha: 0.14),
-            border: Border.all(color: palette.accent.withValues(alpha: 0.35)),
-          ),
-          child: Icon(
-            Icons.graphic_eq_rounded,
-            color: palette.accent,
-            size: 22,
-          ),
-        ),
       ],
     );
   }
 }
 
-/// Carrusel horizontal de álbumes de la biblioteca escaneada.
-class _AlbumRail extends StatelessWidget {
-  const _AlbumRail({
-    required this.albums,
-    required this.palette,
-    required this.onOpen,
-  });
-
-  final List<LibraryAlbum> albums;
-  final CyberHexPalette palette;
-  final ValueChanged<LibraryAlbum> onOpen;
+/// Insignia técnica de la cabecera: recuerda que el motor es propio.
+class _StatusPill extends StatelessWidget {
+  const _StatusPill();
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 178,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.zero,
-        itemCount: albums.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 12),
-        itemBuilder: (context, index) {
-          final album = albums[index];
-          return SizedBox(
-            width: 108,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () => onOpen(album),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  HexCover(seed: album.seed, palette: palette, size: 108),
-                  const SizedBox(height: 8),
-                  Text(
-                    album.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: palette.foreground,
-                    ),
-                  ),
-                  Text(
-                    album.artist.isEmpty
-                        ? '${album.count} pistas'
-                        : '${album.artist} · ${album.count}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: palette.muted),
+    final palette = paletteOf(context);
+    return Tooltip(
+      message: 'Motor nativo CyberHex · 48 kHz',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: palette.surfaceHigh.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(ChRadius.pill),
+          border: Border.all(color: palette.border.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(
+                color: palette.accent,
+                shape: BoxShape.circle,
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: palette.accent.withValues(alpha: 0.6),
+                    blurRadius: 6,
                   ),
                 ],
               ),
             ),
-          );
-        },
+            const SizedBox(width: 6),
+            Text(
+              '48 kHz',
+              style: chMono(palette, size: 9.5, color: palette.muted),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text, {required this.palette});
-
-  final String text;
-  final CyberHexPalette palette;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: TextStyle(
-        fontSize: 15,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.2,
-        color: palette.foreground,
-      ),
-    );
-  }
-}
-
-/// Tarjeta «continuar»: la pista actual o una invitación a abrir la biblioteca.
+/// Tarjeta principal: lo que suena, o la puerta de entrada a la biblioteca.
 class _ContinueCard extends StatelessWidget {
   const _ContinueCard({
     required this.snapshot,
@@ -412,162 +379,286 @@ class _ContinueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasTrack = snapshot.hasTrack;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: hasTrack ? onOpen : onOpenLibrary,
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: palette.border.withValues(alpha: 0.6)),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: <Color>[
-                palette.surfaceHigh,
-                Color.lerp(palette.surface, palette.primary, 0.22)!,
+    return snapshot.hasTrack ? _nowPlaying() : _onboarding();
+  }
+
+  Widget _onboarding() {
+    return ChSurface(
+      radius: ChRadius.xl,
+      elevated: true,
+      padding: const EdgeInsets.all(ChSpace.lg),
+      onTap: onOpenLibrary,
+      child: Row(
+        children: <Widget>[
+          ChHexBadge(
+            icon: Icons.graphic_eq_rounded,
+            palette: palette,
+            size: 62,
+          ),
+          const SizedBox(width: ChSpace.md + 2),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'SIN PISTA',
+                  style: chEyebrow(palette, size: 9.5, color: palette.accent),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Tu biblioteca empieza aquí',
+                  style: chTitle(palette, size: 17),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Elige una carpeta: CyberHex la recorre en tu equipo, sin subir nada.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.4,
+                    color: palette.muted,
+                  ),
+                ),
               ],
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    _Cover(cover: snapshot.cover, palette: palette),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            hasTrack
-                                ? (snapshot.title.isEmpty
-                                      ? 'Sin título'
-                                      : snapshot.title)
-                                : 'Aún no hay nada sonando',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: palette.foreground,
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            hasTrack
-                                ? (snapshot.artist.isEmpty
-                                      ? 'Desconocido'
-                                      : snapshot.artist)
-                                : 'Escanea una carpeta o abre un archivo',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: palette.muted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (hasTrack)
-                      IconButton.filled(
-                        tooltip: snapshot.playing ? 'Pausa' : 'Reproducir',
-                        onPressed: snapshot.busy ? null : onToggle,
-                        style: IconButton.styleFrom(
-                          backgroundColor: palette.accent,
-                          foregroundColor: palette.onAccent,
-                          minimumSize: const Size(46, 46),
-                        ),
-                        icon: Icon(
-                          snapshot.playing
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          size: 26,
-                        ),
-                      )
-                    else
-                      IconButton.filledTonal(
-                        tooltip: 'Abrir biblioteca',
-                        onPressed: onOpenLibrary,
-                        icon: const Icon(Icons.library_music_rounded),
-                      ),
-                  ],
+          const SizedBox(width: ChSpace.sm),
+          FilledButton(
+            onPressed: onOpenLibrary,
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            ),
+            child: const Text('Escanear'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _nowPlaying() {
+    final title = snapshot.title.isEmpty ? 'Sin título' : snapshot.title;
+    final subtitle = <String>[
+      if (snapshot.artist.isNotEmpty) snapshot.artist,
+      if (snapshot.album.isNotEmpty) snapshot.album,
+    ].join(' · ');
+    return ChSurface(
+      radius: ChRadius.xl,
+      elevated: true,
+      padding: EdgeInsets.zero,
+      onTap: onOpen,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(ChRadius.xl),
+        child: Stack(
+          children: <Widget>[
+            if (snapshot.cover != null)
+              Positioned.fill(
+                child: ChBlurredCover(
+                  cover: snapshot.cover!,
+                  sigma: 34,
+                  opacity: 0.55,
                 ),
-                if (hasTrack) ...[
-                  const SizedBox(height: 12),
+              ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: <Color>[
+                      palette.surfaceHigh.withValues(alpha: 0.72),
+                      palette.surface.withValues(alpha: 0.94),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(ChSpace.lg - 2),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      ChCoverThumb(
+                        seed: title,
+                        palette: palette,
+                        cover: snapshot.cover,
+                        size: 72,
+                        radius: 16,
+                        hex: snapshot.cover == null,
+                        glow: snapshot.playing,
+                      ),
+                      const SizedBox(width: ChSpace.md + 2),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                if (snapshot.playing)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: ChPlayingBars(
+                                      color: palette.accent,
+                                      size: 12,
+                                    ),
+                                  ),
+                                Text(
+                                  snapshot.playing
+                                      ? 'EN REPRODUCCIÓN'
+                                      : 'EN PAUSA',
+                                  style: chEyebrow(
+                                    palette,
+                                    size: 9,
+                                    color: palette.accent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: chTitle(palette, size: 17),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              subtitle.isEmpty ? 'Desconocido' : subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: palette.muted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: ChSpace.sm),
+                      ChPlayButton(
+                        playing: snapshot.playing,
+                        busy: snapshot.busy,
+                        onPressed: snapshot.busy ? null : onToggle,
+                        size: 50,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: ChSpace.md),
                   ValueListenableBuilder<double>(
                     valueListenable: position,
                     builder: (context, value, _) {
-                      final progress = snapshot.duration > 0
-                          ? (value / snapshot.duration)
-                                .clamp(0.0, 1.0)
-                                .toDouble()
+                      final duration = snapshot.duration;
+                      final progress = duration > 0
+                          ? (value / duration).clamp(0.0, 1.0).toDouble()
                           : 0.0;
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          minHeight: 3,
-                          backgroundColor: palette.surface,
-                          color: palette.accent,
-                        ),
+                      return Column(
+                        children: <Widget>[
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(ChRadius.pill),
+                            child: LinearProgressIndicator(
+                              value: progress,
+                              minHeight: 3,
+                              backgroundColor: palette.surfaceHigh,
+                              color: palette.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: <Widget>[
+                              Text(
+                                _clock(value),
+                                style: chMono(palette, size: 9.5),
+                              ),
+                              Text(
+                                duration > 0 ? _clock(duration) : '--:--',
+                                style: chMono(palette, size: 9.5),
+                              ),
+                            ],
+                          ),
+                        ],
                       );
                     },
                   ),
                 ],
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
+
+  static String _clock(double seconds) {
+    final total = seconds.isFinite && seconds > 0 ? seconds.floor() : 0;
+    return '${total ~/ 60}:${(total % 60).toString().padLeft(2, '0')}';
+  }
 }
 
-class _Cover extends StatelessWidget {
-  const _Cover({required this.cover, required this.palette});
+class _AlbumRail extends StatelessWidget {
+  const _AlbumRail({
+    required this.albums,
+    required this.palette,
+    required this.onOpen,
+  });
 
-  final Uint8List? cover;
+  final List<LibraryAlbum> albums;
   final CyberHexPalette palette;
+  final ValueChanged<LibraryAlbum> onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final image = cover;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: SizedBox(
-        width: 64,
-        height: 64,
-        child: image == null
-            ? ColoredBox(
-                color: palette.surface,
-                child: Icon(
-                  Icons.album_rounded,
-                  color: palette.accent,
-                  size: 30,
-                ),
-              )
-            : Image.memory(
-                image,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                cacheWidth: 160,
-                errorBuilder: (_, __, ___) => ColoredBox(
-                  color: palette.surface,
-                  child: Icon(
-                    Icons.album_rounded,
-                    color: palette.accent,
-                    size: 30,
+    return SizedBox(
+      height: 196,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: EdgeInsets.zero,
+        clipBehavior: Clip.none,
+        itemCount: albums.length,
+        separatorBuilder: (_, _) => const SizedBox(width: ChSpace.md),
+        itemBuilder: (context, index) {
+          final album = albums[index];
+          return SizedBox(
+            width: 136,
+            child: ChPressable(
+              onTap: () => onOpen(album),
+              radius: ChRadius.md,
+              semanticLabel: 'Álbum ${album.name}',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  ChCoverThumb(
+                    seed: album.name,
+                    palette: palette,
+                    size: 136,
+                    hex: true,
                   ),
-                ),
+                  const SizedBox(height: ChSpace.sm),
+                  Text(
+                    album.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: palette.foreground,
+                    ),
+                  ),
+                  Text(
+                    album.artist.isEmpty
+                        ? '${album.count} pistas'
+                        : '${album.artist} · ${album.count}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 10.5, color: palette.muted),
+                  ),
+                ],
               ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -590,121 +681,68 @@ class _Shortcuts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final items =
-        <({IconData icon, String label, String hint, VoidCallback onTap})>[
-          (
-            icon: Icons.library_music_rounded,
-            label: 'Biblioteca',
-            hint: 'Escanea y ordena',
-            onTap: onLibrary,
-          ),
-          (
-            icon: Icons.queue_music_rounded,
-            label: 'Listas',
-            hint: 'Tus colecciones',
-            onTap: onPlaylists,
-          ),
-          (
-            icon: Icons.radio_rounded,
-            label: 'Radio',
-            hint: 'Emisoras online',
-            onTap: onRadio,
-          ),
-          (
-            icon: Icons.insights_rounded,
-            label: 'Estadísticas',
-            hint: 'Lo que escuchas',
-            onTap: onStats,
-          ),
-        ];
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 10,
-      crossAxisSpacing: 10,
-      childAspectRatio: 2.05,
-      children: [
-        for (final item in items)
-          _ShortcutCard(
-            icon: item.icon,
-            label: item.label,
-            hint: item.hint,
-            palette: palette,
-            onTap: item.onTap,
-          ),
-      ],
+    final items = <({IconData icon, String label, VoidCallback onTap})>[
+      (
+        icon: Icons.library_music_rounded,
+        label: 'Biblioteca',
+        onTap: onLibrary,
+      ),
+      (icon: Icons.queue_music_rounded, label: 'Listas', onTap: onPlaylists),
+      (icon: Icons.radio_rounded, label: 'Radio', onTap: onRadio),
+      (icon: Icons.insights_rounded, label: 'Estadísticas', onTap: onStats),
+    ];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: EdgeInsets.zero,
+      clipBehavior: Clip.none,
+      child: Row(
+        children: <Widget>[
+          for (var i = 0; i < items.length; i++) ...<Widget>[
+            if (i > 0) const SizedBox(width: ChSpace.sm),
+            _Shortcut(item: items[i], palette: palette),
+          ],
+        ],
+      ),
     );
   }
 }
 
-class _ShortcutCard extends StatelessWidget {
-  const _ShortcutCard({
-    required this.icon,
-    required this.label,
-    required this.hint,
-    required this.palette,
-    required this.onTap,
-  });
+class _Shortcut extends StatelessWidget {
+  const _Shortcut({required this.item, required this.palette});
 
-  final IconData icon;
-  final String label;
-  final String hint;
+  final ({IconData icon, String label, VoidCallback onTap}) item;
   final CyberHexPalette palette;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: palette.surface,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: palette.border.withValues(alpha: 0.5)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: palette.accent.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: palette.accent, size: 20),
+    return ChPressable(
+      onTap: item.onTap,
+      radius: ChRadius.pill,
+      semanticLabel: item.label,
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: ChSpace.lg,
+          vertical: 9,
+        ),
+        decoration: BoxDecoration(
+          color: palette.surfaceHigh.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(ChRadius.pill),
+          border: Border.all(color: palette.border.withValues(alpha: 0.5)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(item.icon, size: 17, color: palette.accent),
+            const SizedBox(width: ChSpace.sm),
+            Text(
+              item.label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: palette.foreground,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: palette.foreground,
-                      ),
-                    ),
-                    Text(
-                      hint,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 10.5, color: palette.muted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -725,59 +763,52 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final empty = stats.totalPlays == 0;
-    return Material(
-      color: palette.surface,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        onTap: onOpen,
-        borderRadius: BorderRadius.circular(20),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: palette.border.withValues(alpha: 0.5)),
-          ),
-          child: empty
-              ? Row(
-                  children: [
-                    Icon(Icons.history_rounded, color: palette.muted, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Aún no hay reproducciones registradas.',
-                        style: TextStyle(fontSize: 12, color: palette.muted),
-                      ),
+    return ChSurface(
+      radius: ChRadius.lg,
+      padding: EdgeInsets.zero,
+      onTap: onOpen,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: empty
+            ? Row(
+                children: <Widget>[
+                  Icon(Icons.history_rounded, color: palette.muted, size: 18),
+                  const SizedBox(width: ChSpace.sm + 2),
+                  Expanded(
+                    child: Text(
+                      'Aún no hay reproducciones registradas.',
+                      style: TextStyle(fontSize: 12, color: palette.muted),
                     ),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Expanded(
-                      child: _Metric(
-                        value: '${stats.tracks.length}',
-                        label: 'pistas',
-                        palette: palette,
-                      ),
+                  ),
+                ],
+              )
+            : Row(
+                children: <Widget>[
+                  Expanded(
+                    child: _Metric(
+                      value: '${stats.tracks.length}',
+                      label: 'PISTAS',
+                      palette: palette,
                     ),
-                    _Divider(palette: palette),
-                    Expanded(
-                      child: _Metric(
-                        value: '${stats.totalPlays}',
-                        label: 'reproducciones',
-                        palette: palette,
-                      ),
+                  ),
+                  _Divider(palette: palette),
+                  Expanded(
+                    child: _Metric(
+                      value: '${stats.totalPlays}',
+                      label: 'REPRODUCCIONES',
+                      palette: palette,
                     ),
-                    _Divider(palette: palette),
-                    Expanded(
-                      child: _Metric(
-                        value: _minutes(stats.totalMinutes),
-                        label: 'minutos',
-                        palette: palette,
-                      ),
+                  ),
+                  _Divider(palette: palette),
+                  Expanded(
+                    child: _Metric(
+                      value: _minutes(stats.totalMinutes),
+                      label: 'MINUTOS',
+                      palette: palette,
                     ),
-                  ],
-                ),
-        ),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -803,17 +834,15 @@ class _Metric extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
-      children: [
+      children: <Widget>[
+        Text(value, style: chTitle(palette, size: 19, letterSpacing: 0)),
+        const SizedBox(height: 3),
         Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            color: palette.accent,
-          ),
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: chMono(palette, size: 8, letterSpacing: 0.8),
         ),
-        const SizedBox(height: 2),
-        Text(label, style: TextStyle(fontSize: 10.5, color: palette.muted)),
       ],
     );
   }
@@ -828,46 +857,12 @@ class _Divider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: 1,
-      height: 30,
-      color: palette.border.withValues(alpha: 0.5),
+      height: 28,
+      color: palette.border.withValues(alpha: 0.45),
     );
   }
 }
 
-/// Título de sección con un acceso opcional «Ver todo» a la derecha.
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.text, {required this.palette, this.onSeeAll});
-
-  final String text;
-  final CyberHexPalette palette;
-  final VoidCallback? onSeeAll;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(child: _SectionTitle(text, palette: palette)),
-        if (onSeeAll != null)
-          TextButton(
-            onPressed: onSeeAll,
-            style: TextButton.styleFrom(
-              foregroundColor: palette.accent,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              minimumSize: const Size(0, 28),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              textStyle: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            child: const Text('Ver todo'),
-          ),
-      ],
-    );
-  }
-}
-
-/// Carrusel horizontal de lo último escuchado.
 class _RecentRail extends StatelessWidget {
   const _RecentRail({
     required this.entries,
@@ -882,12 +877,12 @@ class _RecentRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 166,
+      height: 186,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         clipBehavior: Clip.none,
         itemCount: entries.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        separatorBuilder: (_, _) => const SizedBox(width: ChSpace.md),
         itemBuilder: (context, index) {
           final entry = entries[index];
           return _RecentCard(
@@ -916,15 +911,21 @@ class _RecentCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final artist = entry.artist.trim();
     return SizedBox(
-      width: 112,
-      child: InkWell(
+      width: 132,
+      child: ChPressable(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        radius: ChRadius.md,
+        semanticLabel: 'Reproducir ${entry.label}',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            HexCover(seed: entry.label, palette: palette),
-            const SizedBox(height: 8),
+          children: <Widget>[
+            ChCoverThumb(
+              seed: entry.label,
+              palette: palette,
+              size: 132,
+              hex: true,
+            ),
+            const SizedBox(height: ChSpace.sm),
             Text(
               entry.label,
               maxLines: 1,
@@ -940,7 +941,7 @@ class _RecentCard extends StatelessWidget {
               artist.isEmpty ? 'Desconocido' : artist,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: palette.muted),
+              style: TextStyle(fontSize: 10.5, color: palette.muted),
             ),
           ],
         ),
@@ -949,47 +950,37 @@ class _RecentCard extends StatelessWidget {
   }
 }
 
-/// Lista compacta de las pistas más reproducidas.
 class _TopTracks extends StatelessWidget {
   const _TopTracks({
     required this.tracks,
     required this.palette,
+    required this.playingPath,
     required this.onPlay,
   });
 
   final List<TrackStat> tracks;
   final CyberHexPalette palette;
+  final String? playingPath;
   final ValueChanged<String> onPlay;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: palette.surface,
-      borderRadius: BorderRadius.circular(20),
-      clipBehavior: Clip.antiAlias,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: palette.border.withValues(alpha: 0.5)),
-        ),
-        child: Column(
-          children: [
-            for (var i = 0; i < tracks.length; i++) ...[
-              if (i > 0)
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: palette.border.withValues(alpha: 0.35),
-                ),
-              _TopTrackRow(
-                rank: i + 1,
-                stat: tracks[i],
-                palette: palette,
-                onTap: () => onPlay(tracks[i].path),
-              ),
-            ],
+    return ChSurface(
+      radius: ChRadius.lg,
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: <Widget>[
+          for (var i = 0; i < tracks.length; i++) ...<Widget>[
+            if (i > 0) ChHairline(palette: palette, indent: 64),
+            _TopTrackRow(
+              rank: i + 1,
+              stat: tracks[i],
+              palette: palette,
+              playing: tracks[i].path == playingPath,
+              onTap: () => onPlay(tracks[i].path),
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1000,12 +991,14 @@ class _TopTrackRow extends StatelessWidget {
     required this.rank,
     required this.stat,
     required this.palette,
+    required this.playing,
     required this.onTap,
   });
 
   final int rank;
   final TrackStat stat;
   final CyberHexPalette palette;
+  final bool playing;
   final VoidCallback onTap;
 
   @override
@@ -1013,26 +1006,35 @@ class _TopTrackRow extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
         child: Row(
-          children: [
+          children: <Widget>[
             SizedBox(
-              width: 24,
+              width: 22,
               child: Text(
                 rank.toString().padLeft(2, '0'),
-                style: TextStyle(
-                  fontFamily: 'Righteous',
-                  fontSize: 13,
+                style: chMono(
+                  palette,
+                  size: 10.5,
+                  weight: FontWeight.w600,
                   color: palette.accent,
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: ChSpace.sm),
+            ChCoverThumb(
+              seed: stat.label,
+              palette: palette,
+              size: 40,
+              radius: ChRadius.sm,
+              hex: true,
+            ),
+            const SizedBox(width: ChSpace.md),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
-                children: [
+                children: <Widget>[
                   Text(
                     stat.label,
                     maxLines: 1,
@@ -1047,16 +1049,16 @@ class _TopTrackRow extends StatelessWidget {
                     stat.artist.trim().isEmpty ? 'Desconocido' : stat.artist,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: palette.muted),
+                    style: TextStyle(fontSize: 10.5, color: palette.muted),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 8),
-            Text(
-              '${stat.plays}×',
-              style: TextStyle(fontSize: 11.5, color: palette.muted),
-            ),
+            if (playing) ...<Widget>[
+              ChPlayingBars(color: palette.accent, size: 12),
+              const SizedBox(width: ChSpace.sm),
+            ],
+            Text('${stat.plays}×', style: chMono(palette, size: 11)),
           ],
         ),
       ),

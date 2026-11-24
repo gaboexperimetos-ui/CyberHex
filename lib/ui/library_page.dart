@@ -14,7 +14,7 @@ import '../core/text_search.dart';
 import '../theme.dart';
 import 'audio_export_sheet.dart';
 import 'downloader_page.dart';
-import 'hex_cover.dart';
+import 'kit/ch_kit.dart';
 import 'network_page.dart';
 import 'radio_page.dart';
 import 'mini_player.dart';
@@ -525,16 +525,13 @@ class _LibraryPageState extends State<LibraryPage>
               ),
             ],
           ),
-          IconButton(
-            onPressed: _pickFolder,
-            tooltip: 'Elegir carpeta',
-            icon: const Icon(Icons.folder_open_rounded),
-          ),
           PopupMenuButton<String>(
             tooltip: 'Más',
             icon: const Icon(Icons.more_vert_rounded),
             onSelected: (value) {
               switch (value) {
+                case 'folder':
+                  _pickFolder();
                 case 'playlists':
                   _openPlaylists();
                 case 'stats':
@@ -550,6 +547,7 @@ class _LibraryPageState extends State<LibraryPage>
               }
             },
             itemBuilder: (context) => const <PopupMenuEntry<String>>[
+              PopupMenuItem(value: 'folder', child: Text('Elegir carpeta')),
               PopupMenuItem(value: 'playlists', child: Text('Listas y colas')),
               PopupMenuItem(value: 'stats', child: Text('Estadísticas')),
               PopupMenuItem(value: 'downloads', child: Text('Descargas')),
@@ -601,64 +599,66 @@ class _LibraryPageState extends State<LibraryPage>
       return const Center(child: CircularProgressIndicator());
     }
     if (_root == null) return _welcome();
+    final palette = paletteOf(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-          child: TextField(
-            controller: _search,
-            textInputAction: TextInputAction.search,
-            onChanged: (value) => setState(() => _query = value),
-            decoration: InputDecoration(
-              isDense: true,
-              hintText: 'Buscar título, artista, álbum o carpeta',
-              prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Limpiar',
-                      icon: const Icon(Icons.close_rounded, size: 18),
-                      onPressed: () {
-                        _search.clear();
-                        setState(() => _query = '');
-                      },
-                    ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
           child: Row(
             children: [
-              FilterChip(
-                label: const Text(
-                  'Ocultar < 30 s',
-                  style: TextStyle(fontSize: 12),
+              Expanded(
+                child: TextField(
+                  controller: _search,
+                  textInputAction: TextInputAction.search,
+                  onChanged: (value) => setState(() => _query = value),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: 'Buscar en la biblioteca',
+                    prefixIcon: const Icon(Icons.search_rounded, size: 19),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Limpiar',
+                            icon: const Icon(Icons.close_rounded, size: 17),
+                            onPressed: () {
+                              _search.clear();
+                              setState(() => _query = '');
+                            },
+                          ),
+                  ),
                 ),
+              ),
+              const SizedBox(width: ChSpace.sm),
+              FilterChip(
+                label: const Text('Ocultar < 30 s'),
                 selected: _hideShort,
                 onSelected: (value) => setState(() => _hideShort = value),
               ),
-              const SizedBox(width: 8),
-              Expanded(
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+          child: Row(
+            children: [
+              Text(
+                '${_visible.length} de ${_entries.length}',
+                style: chMono(palette, size: 10),
+              ),
+              const Spacer(),
+              Flexible(
                 child: Text(
-                  '${_visible.length} de ${_entries.length} · $_rootLabel',
+                  _rootLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.right,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: paletteOf(context).muted,
-                  ),
+                  style: chMono(palette, size: 9.5),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 4),
         Expanded(child: _list()),
       ],
     );
@@ -676,24 +676,28 @@ class _LibraryPageState extends State<LibraryPage>
   Widget _list() {
     final visible = _visible;
     if (visible.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Text(
-            _entries.isEmpty
-                ? 'No hay audio en esta carpeta'
-                : 'Nada que mostrar con estos filtros',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: paletteOf(context).muted),
-          ),
-        ),
+      final palette = paletteOf(context);
+      return ChEmptyState(
+        icon: _entries.isEmpty
+            ? Icons.library_music_rounded
+            : Icons.filter_alt_off_rounded,
+        palette: palette,
+        title: _entries.isEmpty ? 'Sin audio aquí' : 'Sin resultados',
+        message: _entries.isEmpty
+            ? 'No hay archivos compatibles en esta carpeta.'
+            : 'Nada que mostrar con estos filtros',
       );
     }
     switch (_tab) {
       case LibraryTab.songs:
       case LibraryTab.favorites:
-        return ListView.builder(
+        return ListView.separated(
+          padding: const EdgeInsets.only(bottom: 8),
           itemCount: visible.length,
+          separatorBuilder: (_, _) => Padding(
+            padding: const EdgeInsets.only(left: 68),
+            child: ChHairline(palette: paletteOf(context), opacity: 0.28),
+          ),
           itemBuilder: (context, index) => _trackTile(visible[index]),
         );
       case LibraryTab.albums:
@@ -713,15 +717,46 @@ class _LibraryPageState extends State<LibraryPage>
       itemBuilder: (context, index) {
         final key = keys[index];
         final items = groups[key]!;
-        return ExpansionTile(
-          key: PageStorageKey<String>('group-$key'),
-          leading: HexCover(seed: key, palette: palette, size: 38),
-          title: Text(key, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text(
-            items.length == 1 ? '1 pista' : '${items.length} pistas',
-            style: TextStyle(fontSize: 11, color: palette.muted),
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(ChRadius.md),
+            child: Material(
+              color: palette.surface.withValues(alpha: 0.62),
+              child: ExpansionTile(
+                key: PageStorageKey<String>('group-$key'),
+                shape: const Border(),
+                collapsedShape: const Border(),
+                tilePadding: const EdgeInsets.symmetric(horizontal: 10),
+                childrenPadding: const EdgeInsets.only(bottom: 4),
+                leading: ChCoverThumb(
+                  seed: key,
+                  palette: palette,
+                  size: 46,
+                  radius: ChRadius.sm,
+                  hex: true,
+                ),
+                title: Text(
+                  key,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                subtitle: Text(
+                  items.length == 1 ? '1 pista' : '${items.length} pistas',
+                  style: TextStyle(fontSize: 11, color: palette.muted),
+                ),
+                iconColor: palette.accent,
+                collapsedIconColor: palette.muted,
+                children: <Widget>[
+                  for (final entry in items) _trackTile(entry, inner: true),
+                ],
+              ),
+            ),
           ),
-          children: [for (final entry in items) _trackTile(entry, inner: true)],
         );
       },
     );
@@ -738,17 +773,49 @@ class _LibraryPageState extends State<LibraryPage>
     ].join(' · ');
     return ListTile(
       dense: inner,
-      contentPadding: EdgeInsets.only(left: inner ? 40 : 16, right: 4),
+      contentPadding: EdgeInsets.only(left: inner ? 44 : 14, right: 2),
       onTap: () => _playNow(entry),
-      leading: Icon(
-        favorite ? Icons.favorite_rounded : Icons.music_note_rounded,
-        size: 20,
-        color: favorite ? palette.accent : palette.muted,
+      leading: SizedBox(
+        width: 44,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            ChCoverThumb(
+              seed: entry.track.title,
+              palette: palette,
+              size: 42,
+              radius: ChRadius.sm,
+              hex: true,
+            ),
+            if (favorite)
+              Positioned(
+                right: -2,
+                bottom: -2,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: palette.surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: palette.border.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.favorite_rounded,
+                    size: 9,
+                    color: palette.accent,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
       title: Text(
         entry.track.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
       ),
       subtitle: Text(
         subtitle,
@@ -761,7 +828,7 @@ class _LibraryPageState extends State<LibraryPage>
         children: [
           Text(
             duration > 0 ? _mmss(duration) : '—',
-            style: TextStyle(fontSize: 11, color: palette.muted),
+            style: chMono(palette, size: 10),
           ),
           PopupMenuButton<_TrackAction>(
             tooltip: 'Opciones',
@@ -799,41 +866,33 @@ class _LibraryPageState extends State<LibraryPage>
 
   Widget _welcome() {
     final palette = paletteOf(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(28),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.library_music_rounded, size: 54, color: palette.muted),
-            const SizedBox(height: 14),
-            const Text(
-              'Tu biblioteca',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Elige una carpeta y CyberHex la recorrerá en busca de FLAC, '
-              'MP3, WAV, OGG, OPUS, M4A, AAC y ALAC.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: palette.muted),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
+    return ChEmptyState(
+      icon: Icons.library_music_rounded,
+      palette: palette,
+      title: 'Tu biblioteca',
+      message:
+          'Elige una carpeta y CyberHex la recorrerá en busca de FLAC, '
+          'MP3, WAV, OGG, OPUS, M4A, AAC y ALAC.',
+      action: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton.icon(
+            onPressed: _pickFolder,
+            icon: const Icon(Icons.folder_open_rounded, size: 18),
+            label: const Text('Elegir carpeta'),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: ChSpace.md),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(
                 _error!,
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: palette.error),
+                style: TextStyle(fontSize: 11.5, color: palette.error),
               ),
-            ],
-            const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: _pickFolder,
-              icon: const Icon(Icons.folder_open_rounded),
-              label: const Text('Elegir carpeta'),
             ),
           ],
-        ),
+        ],
       ),
     );
   }

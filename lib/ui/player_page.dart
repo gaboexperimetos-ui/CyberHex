@@ -26,6 +26,7 @@ import 'eq_sheet.dart';
 import 'share_card_sheet.dart';
 import 'tag_editor_sheet.dart';
 import 'visualizer_widget.dart';
+import 'kit/ch_kit.dart';
 
 class PlayerPage extends StatefulWidget {
   const PlayerPage({
@@ -288,7 +289,7 @@ class _PlayerPageState extends State<PlayerPage>
             ),
           },
           child: Actions(
-            actions: {
+            actions: <Type, Action<Intent>>{
               _PlayerIntent: CallbackAction<_PlayerIntent>(
                 onInvoke: (intent) {
                   _runCommand(intent.command);
@@ -301,8 +302,9 @@ class _PlayerPageState extends State<PlayerPage>
             child: Focus(
               autofocus: true,
               child: Scaffold(
+                backgroundColor: Colors.transparent,
                 body: Stack(
-                  children: [
+                  children: <Widget>[
                     Positioned.fill(child: _background(snapshot, palette)),
                     SafeArea(
                       child: GestureDetector(
@@ -313,26 +315,28 @@ class _PlayerPageState extends State<PlayerPage>
                             _handleDoubleTap(context, snapshot, palette),
                         child: Center(
                           child: SingleChildScrollView(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 20,
+                            padding: EdgeInsets.fromLTRB(
+                              wide ? 34 : 22,
+                              wide ? 14 : 4,
+                              wide ? 34 : 22,
+                              wide ? 26 : 14,
                             ),
                             child: ConstrainedBox(
                               constraints: BoxConstraints(
-                                maxWidth: wide ? 980 : 460,
+                                maxWidth: wide ? 1060 : 480,
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
+                                children: <Widget>[
                                   _Header(
-                                    onOpen: _openFile,
+                                    palette: palette,
                                     onQueue: _openQueue,
                                     onLibrary: _openLibrary,
                                     onSettings: _openSettings,
                                     onPocket: _enterPocket,
-                                    palette: palette,
+                                    onOpen: _openFile,
                                   ),
-                                  const SizedBox(height: 20),
+                                  SizedBox(height: wide ? 12 : 4),
                                   if (wide)
                                     Row(
                                       key: const ValueKey<String>(
@@ -340,12 +344,12 @@ class _PlayerPageState extends State<PlayerPage>
                                       ),
                                       crossAxisAlignment:
                                           CrossAxisAlignment.start,
-                                      children: [
+                                      children: <Widget>[
                                         Expanded(
                                           flex: 5,
                                           child: _coverArea(snapshot, palette),
                                         ),
-                                        const SizedBox(width: 28),
+                                        const SizedBox(width: 44),
                                         Expanded(
                                           flex: 6,
                                           child: _controls(
@@ -354,10 +358,10 @@ class _PlayerPageState extends State<PlayerPage>
                                             palette,
                                           ),
                                         ),
-                                        if (_showQueue) ...[
-                                          const SizedBox(width: 20),
+                                        if (_showQueue) ...<Widget>[
+                                          const SizedBox(width: 18),
                                           Expanded(
-                                            flex: 3,
+                                            flex: 4,
                                             child: QueueSheet(
                                               controller: _controller,
                                               queues: _queues,
@@ -370,9 +374,9 @@ class _PlayerPageState extends State<PlayerPage>
                                         ],
                                       ],
                                     )
-                                  else ...[
+                                  else ...<Widget>[
                                     _coverArea(snapshot, palette),
-                                    const SizedBox(height: 24),
+                                    const SizedBox(height: 14),
                                     _controls(context, snapshot, palette),
                                   ],
                                 ],
@@ -402,20 +406,26 @@ class _PlayerPageState extends State<PlayerPage>
   Widget _background(PlayerSnapshot snapshot, CyberHexPalette palette) {
     final cover = snapshot.cover;
     final bleed = _theme.coverStyle == CoverStyle.fullBleed && cover != null;
-    final top = Color.lerp(palette.background, palette.primary, 0.35)!;
+    final top = Color.lerp(palette.background, palette.primary, 0.42)!;
     final bottom = palette.isDark
-        ? Color.lerp(palette.background, Colors.black, 0.28)!
+        ? Color.lerp(palette.background, Colors.black, 0.30)!
         : palette.background;
     return Stack(
       fit: StackFit.expand,
-      children: [
+      children: <Widget>[
+        // La carátula tiñe el fondo incluso sin el estilo «a sangre»: es el
+        // color de la sesión, no un adorno.
+        if (cover != null && !bleed)
+          Positioned.fill(
+            child: ChBlurredCover(cover: cover, sigma: 42, opacity: 0.55),
+          ),
         if (bleed)
           Image.memory(
             cover,
             fit: BoxFit.cover,
             gaplessPlayback: true,
             cacheWidth: 720,
-            errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
           ),
         DecoratedBox(
           decoration: BoxDecoration(
@@ -423,11 +433,11 @@ class _PlayerPageState extends State<PlayerPage>
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: <Color>[
-                top.withValues(alpha: bleed ? 0.55 : 1),
-                palette.background.withValues(alpha: bleed ? 0.82 : 1),
+                top.withValues(alpha: bleed ? 0.62 : 1),
+                palette.background.withValues(alpha: bleed ? 0.86 : 1),
                 bottom,
               ],
-              stops: const <double>[0, 0.45, 1],
+              stops: const <double>[0, 0.42, 1],
             ),
           ),
         ),
@@ -437,35 +447,56 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// Carátula según el estilo elegido, con los gestos de deslizamiento.
   Widget _coverArea(PlayerSnapshot snapshot, CyberHexPalette palette) {
+    if (!snapshot.hasTrack) return const SizedBox(height: 108);
     final child = switch (_theme.coverStyle) {
       CoverStyle.spinningDisc => _Disc(spin: _spin, snapshot: snapshot),
-      CoverStyle.square => _CoverFrame(snapshot: snapshot, radius: 12),
-      CoverStyle.rounded => _CoverFrame(snapshot: snapshot, radius: 44),
-      CoverStyle.fullBleed => _CoverFrame(
-        snapshot: snapshot,
-        radius: 0,
-        size: 300,
-      ),
+      CoverStyle.square => _CoverFrame(snapshot: snapshot, radius: 14),
+      CoverStyle.rounded => _CoverFrame(snapshot: snapshot, radius: 34),
+      CoverStyle.fullBleed => _CoverFrame(snapshot: snapshot, radius: 0),
     };
     return GestureDetector(
       key: const ValueKey<String>('player-cover'),
+      behavior: HitTestBehavior.opaque,
       onHorizontalDragEnd: _handleHorizontalDrag,
       onVerticalDragUpdate: _handleVerticalDrag,
-      child: RepaintBoundary(child: child),
+      onVerticalDragEnd: _handleCoverDragEnd,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : 320.0;
+          final height = constraints.maxHeight.isFinite
+              ? constraints.maxHeight
+              : width;
+          final side = math.min(width, height * 0.94).clamp(150.0, 360.0);
+          return Center(
+            child: SizedBox(
+              width: side,
+              height: side,
+              child: RepaintBoundary(child: child),
+            ),
+          );
+        },
+      ),
     );
   }
 
-  /// Todo lo que va debajo de la carátula: título, barra, controles y accesos.
+  /// Todo lo que va debajo de la carátula: título, barra, transporte y
+  /// herramientas. Una sola columna, sin tarjetas anidadas.
   Widget _controls(
     BuildContext context,
     PlayerSnapshot snapshot,
     CyberHexPalette palette,
   ) {
+    if (!snapshot.hasTrack) {
+      return _EmptyPlayer(palette: palette, onOpen: _openFile);
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _TrackInfo(snapshot: snapshot, onOpen: _openFile),
-        const SizedBox(height: 20),
+      children: <Widget>[
+        _TrackInfo(snapshot: snapshot),
+        const SizedBox(height: 8),
+        // El arrastre vertical sobre la barra hace búsqueda fina: 20 px = 1 s.
         GestureDetector(
           behavior: HitTestBehavior.opaque,
           onVerticalDragUpdate: _handleFineSeek,
@@ -489,53 +520,51 @@ class _PlayerPageState extends State<PlayerPage>
         ),
         if (_fineSeek != null)
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.only(top: 1),
             child: Text(
-              'Búsqueda fina: ${_fineLabel(_fineSeek!)} (arrastra en vertical)',
+              'Búsqueda fina: ${_fineLabel(_fineSeek!)} · 1 px = 50 ms',
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 10, color: palette.accent),
             ),
           ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
+        // El espectro es la firma del motor: una franja fina, sin vúmetros.
         Padding(
-          padding: const EdgeInsets.only(top: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           child: VisualizerWidget(
             controller: _controller,
-            bands: 24,
-            height: 74,
+            bands: 28,
+            height: 38,
             showMeters: false,
           ),
         ),
         const SizedBox(height: 6),
-        _ModeRow(
+        _Transport(
           snapshot: snapshot,
-          onCycleRepeat: _controller.cycleRepeat,
-          onToggleShuffle: _controller.toggleShuffle,
-        ),
-        const SizedBox(height: 4),
-        _Controls(
-          snapshot: snapshot,
-          position: _controller.position,
           onToggle: _toggle,
-          onSeek: _controller.seek,
+          onPrevious: _controller.previous,
+          onNext: _controller.next,
+          onShuffle: _controller.toggleShuffle,
+          onRepeat: _controller.cycleRepeat,
         ),
-        const SizedBox(height: 24),
-        _QuickActions(
+        const SizedBox(height: 2),
+        _VolumeRow(
+          volume: snapshot.volume,
+          onVolume: _setVolume,
+          onMute: _toggleMute,
+        ),
+        const SizedBox(height: 12),
+        _ToolStrip(
           actions: _theme.actions,
-          onAction: _runAction,
-          hasTrack: snapshot.hasTrack,
           palette: palette,
-        ),
-        const SizedBox(height: 10),
-        _FooterRow(
-          snapshot: snapshot,
-          onVolume: _controller.setVolume,
+          hasTrack: snapshot.hasTrack,
+          onAction: _runAction,
           onEq: () => showModalBottomSheet<void>(
             context: context,
             isScrollControlled: true,
             showDragHandle: true,
             builder: (_) => EqualizerSheet(controller: _controller),
           ),
-          onLab: _openLab,
           soundscape: _controller.soundscape,
           onSoundscape: _controller.cycleSoundscape,
         ),
@@ -549,38 +578,48 @@ class _PlayerPageState extends State<PlayerPage>
       behavior: HitTestBehavior.opaque,
       onLongPress: _leavePocket,
       child: Container(
-        color: palette.background.withValues(alpha: 0.97),
+        color: palette.background.withValues(alpha: 0.98),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.lock_rounded, size: 54, color: palette.accent),
-              const SizedBox(height: 14),
-              Text(
-                'Modo bolsillo',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: palette.foreground,
+            children: <Widget>[
+              ChHexBadge(icon: Icons.lock_rounded, palette: palette, size: 76),
+              const SizedBox(height: ChSpace.lg),
+              Text('Modo bolsillo', style: chTitle(palette, size: 19)),
+              const SizedBox(height: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 300),
+                child: Text(
+                  'Pantalla bloqueada: los toques no hacen nada.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: palette.muted,
+                  ),
                 ),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Pantalla bloqueada: los toques no hacen nada.',
-                style: TextStyle(fontSize: 12, color: palette.muted),
-              ),
-              const SizedBox(height: 18),
+              const SizedBox(height: ChSpace.lg),
               Text(
                 'Mantén pulsado para salir',
-                style: TextStyle(fontSize: 13, color: palette.accent),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.3,
+                  color: palette.accent,
+                ),
               ),
-              if (snapshot.hasTrack) ...[
-                const SizedBox(height: 22),
-                Text(
-                  snapshot.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 13, color: palette.muted),
+              if (snapshot.hasTrack) ...<Widget>[
+                const SizedBox(height: ChSpace.xl),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 320),
+                  child: Text(
+                    snapshot.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: chMono(palette, size: 10.5),
+                  ),
                 ),
               ],
             ],
@@ -589,7 +628,6 @@ class _PlayerPageState extends State<PlayerPage>
       ),
     );
   }
-
   // -----------------------------------------------------------------------
   // Gestos
   // -----------------------------------------------------------------------
@@ -633,12 +671,21 @@ class _PlayerPageState extends State<PlayerPage>
     }
   }
 
+  /// Subir en la carátula da volumen; bajar no toca nada (el gesto de bajar
+  /// cierra la pantalla, como en Namida).
   void _handleVerticalDrag(DragUpdateDetails details) {
-    if (_pocket) return;
+    if (_pocket || details.delta.dy > 0) return;
     final volume = (_controller.snapshot.volume - details.delta.dy / 240)
         .clamp(0.0, 1.0)
         .toDouble();
     _controller.setVolume(volume);
+  }
+
+  /// Soltar hacia abajo con impulso cierra el reproductor.
+  void _handleCoverDragEnd(DragEndDetails details) {
+    if (_pocket) return;
+    if ((details.primaryVelocity ?? 0) < 320) return;
+    if (Navigator.of(context).canPop()) Navigator.of(context).maybePop();
   }
 
   void _handleFineSeek(DragUpdateDetails details) {
@@ -724,6 +771,17 @@ class _PlayerPageState extends State<PlayerPage>
 
   void _setVolume(double value) {
     _controller.setVolume(value.clamp(0.0, 1.0).toDouble());
+  }
+
+  /// Silencia y restaura el volumen previo (botón del altavoz).
+  void _toggleMute() {
+    final snapshot = _controller.snapshot;
+    if (snapshot.volume > 0.001) {
+      _volumeBeforeMute = snapshot.volume;
+      _setVolume(0);
+      return;
+    }
+    _setVolume(_volumeBeforeMute <= 0.001 ? 0.8 : _volumeBeforeMute);
   }
 
   // -----------------------------------------------------------------------
@@ -825,162 +883,236 @@ class _PlayerIntent extends Intent {
   final _PlayerCommand command;
 }
 
+/// Cabecera mínima: cerrar, palabra, bolsillo y un menú con lo demás.
 class _Header extends StatelessWidget {
   const _Header({
-    required this.onOpen,
+    required this.palette,
     required this.onQueue,
     required this.onLibrary,
     required this.onSettings,
     required this.onPocket,
-    required this.palette,
+    required this.onOpen,
   });
 
-  final VoidCallback onOpen;
+  final CyberHexPalette palette;
   final VoidCallback onQueue;
   final VoidCallback onLibrary;
   final VoidCallback onSettings;
   final VoidCallback onPocket;
-  final CyberHexPalette palette;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: [
+      children: <Widget>[
         if (Navigator.of(context).canPop())
           IconButton(
             onPressed: () => Navigator.of(context).maybePop(),
             tooltip: 'Cerrar reproductor',
             icon: Icon(Icons.keyboard_arrow_down_rounded, color: palette.muted),
           ),
-        Flexible(
-          child: Text(
-            'CYBERHEX',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontFamily: 'Righteous',
-              fontSize: 22,
-              letterSpacing: 3,
-              color: palette.foreground,
-            ),
+        Text(
+          'CYBERHEX',
+          style: TextStyle(
+            fontFamily: 'Righteous',
+            fontSize: 13,
+            letterSpacing: 2.8,
+            color: palette.foreground.withValues(alpha: 0.92),
           ),
         ),
         const Spacer(),
         IconButton(
           onPressed: onPocket,
           tooltip: 'Modo bolsillo',
-          icon: Icon(Icons.lock_outline_rounded, color: palette.muted),
+          icon: Icon(
+            Icons.lock_outline_rounded,
+            size: 20,
+            color: palette.muted,
+          ),
         ),
-        IconButton(
-          onPressed: onSettings,
-          tooltip: 'Ajustes',
-          icon: Icon(Icons.palette_outlined, color: palette.muted),
-        ),
-        IconButton(
-          onPressed: onLibrary,
-          tooltip: 'Biblioteca',
-          icon: const Icon(Icons.library_music_rounded),
-        ),
-        IconButton(
-          onPressed: onQueue,
-          tooltip: 'Cola de reproducción',
-          icon: const Icon(Icons.queue_music_rounded),
-        ),
-        IconButton(
-          onPressed: onOpen,
-          tooltip: 'Abrir audio',
-          icon: const Icon(Icons.folder_open_rounded),
+        PopupMenuButton<_PlayerMenu>(
+          tooltip: 'Más',
+          icon: Icon(Icons.more_horiz_rounded, color: palette.muted),
+          onSelected: (value) => switch (value) {
+            _PlayerMenu.queue => onQueue(),
+            _PlayerMenu.library => onLibrary(),
+            _PlayerMenu.settings => onSettings(),
+            _PlayerMenu.open => onOpen(),
+          },
+          itemBuilder: (context) => <PopupMenuEntry<_PlayerMenu>>[
+            const PopupMenuItem<_PlayerMenu>(
+              value: _PlayerMenu.queue,
+              child: Text('Cola de reproducción'),
+            ),
+            const PopupMenuItem<_PlayerMenu>(
+              value: _PlayerMenu.library,
+              child: Text('Biblioteca'),
+            ),
+            const PopupMenuItem<_PlayerMenu>(
+              value: _PlayerMenu.settings,
+              child: Text('Ajustes'),
+            ),
+            const PopupMenuDivider(),
+            const PopupMenuItem<_PlayerMenu>(
+              value: _PlayerMenu.open,
+              child: Text('Abrir audio'),
+            ),
+          ],
         ),
       ],
     );
   }
 }
 
-/// Carátula en los estilos que no giran: cuadrada, redondeada y a sangre.
-class _CoverFrame extends StatelessWidget {
-  const _CoverFrame({
-    required this.snapshot,
-    required this.radius,
-    this.size = 260,
-  });
+/// Opciones del menú de la cabecera.
+enum _PlayerMenu { queue, library, settings, open }
 
-  final PlayerSnapshot snapshot;
-  final double radius;
-  final double size;
+/// Pantalla sin pista: la bienvenida y la puerta de entrada.
+class _EmptyPlayer extends StatelessWidget {
+  const _EmptyPlayer({required this.palette, required this.onOpen});
+
+  final CyberHexPalette palette;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final image = snapshot.cover;
-    final palette = paletteOf(context);
-    return Center(
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(radius),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: <Color>[
-                    palette.secondary.withValues(alpha: 0.55),
-                    palette.surfaceHigh,
-                  ],
-                ),
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: palette.accent.withValues(
-                      alpha: snapshot.playing ? 0.26 : 0.10,
-                    ),
-                    blurRadius: snapshot.playing ? 60 : 34,
-                    spreadRadius: snapshot.playing ? 8 : 2,
-                  ),
-                ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 26),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: <Widget>[
+          ChHexBadge(
+            icon: Icons.graphic_eq_rounded,
+            palette: palette,
+            size: 92,
+          ),
+          const SizedBox(height: ChSpace.lg),
+          Text(
+            'Tu música, en tu máquina',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontFamily: 'Righteous',
+              fontSize: 21,
+              letterSpacing: 0.4,
+            ),
+          ),
+          const SizedBox(height: ChSpace.sm),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Text(
+              'Abre un archivo y CyberHex lo decodifica con su propio motor en '
+              'Zig y C23. Nada sale de tu equipo.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.55,
+                color: palette.muted,
               ),
             ),
-            if (image != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(radius),
-                child: Image.memory(
-                  image,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  cacheWidth: 520,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              )
-            else
-              Center(
-                child: Icon(
-                  Icons.album_rounded,
-                  size: size * 0.34,
-                  color: palette.foreground.withValues(alpha: 0.6),
-                ),
-              ),
-            if (snapshot.busy)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(radius),
-                child: ColoredBox(
-                  color: palette.background.withValues(alpha: 0.55),
-                  child: const Center(
-                    child: SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: CircularProgressIndicator(strokeWidth: 3),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+          ),
+          const SizedBox(height: ChSpace.lg),
+          FilledButton.icon(
+            onPressed: onOpen,
+            icon: const Icon(Icons.folder_open_rounded, size: 18),
+            label: const Text('Abrir audio'),
+          ),
+        ],
       ),
     );
   }
 }
 
+/// Carátula en los estilos que no giran: cuadrada, redondeada y a sangre.
+class _CoverFrame extends StatelessWidget {
+  const _CoverFrame({required this.snapshot, required this.radius});
+
+  final PlayerSnapshot snapshot;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final image = snapshot.cover;
+    final palette = paletteOf(context);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side = constraints.biggest.shortestSide;
+        return SizedBox(
+          width: side,
+          height: side,
+          child: Stack(
+            fit: StackFit.expand,
+            children: <Widget>[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(radius),
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: <Color>[
+                      Color.lerp(palette.surfaceHigh, palette.accent, 0.22)!,
+                      palette.surface,
+                    ],
+                  ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: palette.accent.withValues(
+                        alpha: snapshot.playing ? 0.30 : 0.14,
+                      ),
+                      blurRadius: snapshot.playing ? 64 : 30,
+                      spreadRadius: snapshot.playing ? 6 : 1,
+                    ),
+                  ],
+                ),
+              ),
+              if (image != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(radius),
+                  child: Image.memory(
+                    image,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    cacheWidth: 640,
+                    errorBuilder: (_, _, _) => _fallback(side, palette),
+                  ),
+                )
+              else
+                _fallback(side, palette),
+              if (snapshot.busy)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(radius),
+                  child: ColoredBox(
+                    color: palette.background.withValues(alpha: 0.55),
+                    child: Center(
+                      child: SizedBox(
+                        width: 30,
+                        height: 30,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.6,
+                          color: palette.accent,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _fallback(double side, CyberHexPalette palette) {
+    return Center(
+      child: Icon(
+        Icons.album_rounded,
+        size: side * 0.32,
+        color: palette.foreground.withValues(alpha: 0.55),
+      ),
+    );
+  }
+}
+
+/// Disco de vinilo: gira mientras suena y no hay carátula.
 class _Disc extends StatelessWidget {
   const _Disc({required this.spin, required this.snapshot});
 
@@ -992,97 +1124,113 @@ class _Disc extends StatelessWidget {
     final palette = paletteOf(context);
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final image = snapshot.cover;
-    return Center(
-      child: SizedBox(
-        width: 260,
-        height: 260,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: palette.accent.withValues(
-                      alpha: snapshot.playing ? 0.28 : 0.10,
-                    ),
-                    blurRadius: snapshot.playing ? 70 : 40,
-                    spreadRadius: snapshot.playing ? 12 : 4,
-                  ),
-                ],
-              ),
-            ),
-            if (image != null)
-              ClipOval(
-                child: Image.memory(
-                  image,
-                  width: 236,
-                  height: 236,
-                  fit: BoxFit.cover,
-                  gaplessPlayback: true,
-                  cacheWidth: 472,
-                  errorBuilder: (_, _, _) => _vinyl(reduceMotion, palette),
-                ),
-              )
-            else
-              _vinyl(reduceMotion, palette),
-            if (snapshot.busy)
-              Container(
-                width: 236,
-                height: 236,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final side = constraints.biggest.shortestSide;
+        final label = side * 0.30;
+        return SizedBox(
+          width: side,
+          height: side,
+          child: Stack(
+            alignment: Alignment.center,
+            children: <Widget>[
+              DecoratedBox(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: palette.background.withValues(alpha: 0.66),
-                ),
-                child: const Center(
-                  child: SizedBox(
-                    width: 34,
-                    height: 34,
-                    child: CircularProgressIndicator(strokeWidth: 3),
-                  ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: palette.accent.withValues(
+                        alpha: snapshot.playing ? 0.26 : 0.12,
+                      ),
+                      blurRadius: snapshot.playing ? 68 : 34,
+                      spreadRadius: snapshot.playing ? 10 : 2,
+                    ),
+                  ],
                 ),
               ),
-          ],
-        ),
-      ),
+              if (image != null)
+                ClipOval(
+                  child: Image.memory(
+                    image,
+                    width: side,
+                    height: side,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    cacheWidth: 640,
+                    errorBuilder: (_, _, _) =>
+                        _vinyl(side, label, reduceMotion, palette),
+                  ),
+                )
+              else
+                _vinyl(side, label, reduceMotion, palette),
+              if (snapshot.busy)
+                Container(
+                  width: side,
+                  height: side,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: palette.background.withValues(alpha: 0.62),
+                  ),
+                  child: Center(
+                    child: SizedBox(
+                      width: 30,
+                      height: 30,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.6,
+                        color: palette.accent,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
-  Widget _vinyl(bool reduceMotion, CyberHexPalette palette) {
+  Widget _vinyl(
+    double side,
+    double label,
+    bool reduceMotion,
+    CyberHexPalette palette,
+  ) {
     return RotationTransition(
-      turns: reduceMotion ? const AlwaysStoppedAnimation(0.1) : spin,
+      turns: reduceMotion ? const AlwaysStoppedAnimation(0.08) : spin,
       child: Container(
-        width: 236,
-        height: 236,
+        width: side,
+        height: side,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: const SweepGradient(
-            colors: [
-              Color(0xFF312E81),
-              Color(0xFF0F0F23),
-              Color(0xFF22C55E),
-              Color(0xFF0F0F23),
-              Color(0xFF312E81),
+          gradient: SweepGradient(
+            colors: <Color>[
+              palette.surfaceHigh,
+              palette.surface,
+              Color.lerp(palette.surface, palette.accent, 0.30)!,
+              palette.surface,
+              palette.surfaceHigh,
             ],
-            stops: [0, 0.3, 0.5, 0.7, 1],
+            stops: const <double>[0, 0.28, 0.5, 0.74, 1],
           ),
-          border: Border.all(color: palette.border, width: 1),
+          border: Border.all(
+            color: palette.border.withValues(alpha: 0.8),
+            width: 1,
+          ),
         ),
         child: Center(
           child: Container(
-            width: 78,
-            height: 78,
+            width: label,
+            height: label,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: palette.background,
-              border: Border.all(color: palette.border),
+              border: Border.all(color: palette.border.withValues(alpha: 0.7)),
             ),
             child: Icon(
               snapshot.hasTrack
                   ? Icons.graphic_eq_rounded
                   : Icons.music_note_rounded,
-              size: 34,
+              size: label * 0.46,
               color: snapshot.hasTrack ? palette.accent : palette.muted,
             ),
           ),
@@ -1092,85 +1240,49 @@ class _Disc extends StatelessWidget {
   }
 }
 
+/// Título, artista y sello técnico: la única cabecera de texto de la pantalla.
 class _TrackInfo extends StatelessWidget {
-  const _TrackInfo({required this.snapshot, required this.onOpen});
+  const _TrackInfo({required this.snapshot});
 
   final PlayerSnapshot snapshot;
-  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
-    if (!snapshot.hasTrack) {
-      return Column(
-        children: [
-          const Text(
-            'Tu música, en tu máquina',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontFamily: 'Righteous',
-              fontSize: 20,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Abre un archivo de audio y CyberHex lo decodifica con su propio motor en Zig y C23. Nada sale de tu equipo.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: palette.muted, height: 1.5),
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: onOpen,
-            icon: const Icon(Icons.play_arrow_rounded),
-            label: const Text('Abrir audio'),
-            style: FilledButton.styleFrom(
-              backgroundColor: palette.accent,
-              foregroundColor: palette.onAccent,
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-            ),
-          ),
-        ],
-      );
-    }
-
-    final subtitle = [
+    final subtitle = <String>[
       snapshot.artist,
       snapshot.album,
     ].where((part) => part.isNotEmpty).join(' · ');
     return Column(
-      children: [
+      children: <Widget>[
         Text(
           snapshot.title,
           textAlign: TextAlign.center,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          style: chTitle(palette, size: 21),
         ),
-        if (subtitle.isNotEmpty) ...[
-          const SizedBox(height: 4),
+        if (subtitle.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 3),
           Text(
             subtitle,
             textAlign: TextAlign.center,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: palette.foreground, fontSize: 13),
+            style: TextStyle(fontSize: 12.5, color: palette.muted),
           ),
         ],
-        const SizedBox(height: 6),
+        const SizedBox(height: 5),
         Text(
           '${_clock(snapshot.duration)} · motor nativo 48 kHz',
-          style: TextStyle(
-            color: palette.muted,
-            fontSize: 12,
-            letterSpacing: 0.4,
-          ),
+          style: chMono(palette, size: 10),
         ),
       ],
     );
   }
 }
 
+/// Barra de posición con los tiempos en monoespaciada.
 class _SeekBar extends StatelessWidget {
   const _SeekBar({
     required this.position,
@@ -1200,11 +1312,12 @@ class _SeekBar extends StatelessWidget {
       builder: (context, value, _) {
         final current = (dragging ? dragPosition : value).clamp(0.0, duration);
         return Column(
-          children: [
+          children: <Widget>[
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
+                trackHeight: 4,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
               ),
               child: Slider(
                 value: current.toDouble(),
@@ -1215,17 +1328,21 @@ class _SeekBar extends StatelessWidget {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
+                children: <Widget>[
                   Text(
                     _clock(current.toDouble()),
-                    style: TextStyle(fontSize: 11, color: palette.muted),
+                    style: chMono(
+                      palette,
+                      size: 10,
+                      color: dragging ? palette.accent : palette.muted,
+                    ),
                   ),
                   Text(
                     snapshot.hasTrack ? _clock(snapshot.duration) : '--:--',
-                    style: TextStyle(fontSize: 11, color: palette.muted),
+                    style: chMono(palette, size: 10),
                   ),
                 ],
               ),
@@ -1237,362 +1354,251 @@ class _SeekBar extends StatelessWidget {
   }
 }
 
-/// Aleatorio y repetición, con el estado escrito para que no haya dudas:
-/// "Aleatorio: sí / no" y "Repetir: no / todo / una".
-class _ModeRow extends StatelessWidget {
-  const _ModeRow({
+/// Transporte estándar: aleatorio · anterior · play · siguiente · repetir.
+class _Transport extends StatelessWidget {
+  const _Transport({
     required this.snapshot,
-    required this.onCycleRepeat,
-    required this.onToggleShuffle,
-  });
-
-  final PlayerSnapshot snapshot;
-  final VoidCallback onCycleRepeat;
-  final VoidCallback onToggleShuffle;
-
-  @override
-  Widget build(BuildContext context) {
-    final shuffle = snapshot.shuffle;
-    final repeat = snapshot.repeatMode;
-    final repeatLabel = switch (repeat) {
-      1 => 'Repetir: todo',
-      2 => 'Repetir: una',
-      _ => 'Repetir: no',
-    };
-    // `Wrap` y no `Row`: con etiquetas largas (o fuentes grandes) los dos
-    // botones no caben en una línea y un `Row` desborda.
-    return Wrap(
-      alignment: WrapAlignment.center,
-      spacing: 10,
-      runSpacing: 6,
-      children: [
-        _ModeButton(
-          icon: Icons.shuffle_rounded,
-          label: shuffle ? 'Aleatorio: sí' : 'Aleatorio: no',
-          active: shuffle,
-          tooltip: shuffle
-              ? 'Aleatorio activado (toca para desactivar)'
-              : 'Aleatorio desactivado (toca para activar)',
-          onPressed: onToggleShuffle,
-        ),
-        _ModeButton(
-          icon: repeat == 2 ? Icons.repeat_one_rounded : Icons.repeat_rounded,
-          label: repeatLabel,
-          active: repeat != 0,
-          tooltip: switch (repeat) {
-            1 => 'Repetir todo (toca para repetir una sola)',
-            2 => 'Repetir una (toca para apagar)',
-            _ => 'Repetición apagada (toca para repetir todo)',
-          },
-          onPressed: onCycleRepeat,
-        ),
-      ],
-    );
-  }
-}
-
-class _ModeButton extends StatelessWidget {
-  const _ModeButton({
-    required this.icon,
-    required this.label,
-    required this.active,
-    required this.tooltip,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool active;
-  final String tooltip;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = paletteOf(context);
-    final color = active ? palette.accent : palette.muted;
-    return Tooltip(
-      message: tooltip,
-      child: TextButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18, color: color),
-        label: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontSize: 12,
-            fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-          ),
-        ),
-        style: TextButton.styleFrom(
-          backgroundColor: active
-              ? palette.accent.withValues(alpha: 0.14)
-              : Colors.transparent,
-          foregroundColor: color,
-          shape: const StadiumBorder(),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          side: BorderSide(color: active ? palette.accent : palette.border),
-        ),
-      ),
-    );
-  }
-}
-
-class _Controls extends StatelessWidget {
-  const _Controls({
-    required this.snapshot,
-    required this.position,
     required this.onToggle,
-    required this.onSeek,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onShuffle,
+    required this.onRepeat,
   });
 
   final PlayerSnapshot snapshot;
-  final ValueListenable<double> position;
   final VoidCallback onToggle;
-  final ValueChanged<double> onSeek;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onShuffle;
+  final VoidCallback onRepeat;
 
   @override
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
     final enabled = snapshot.hasTrack && !snapshot.busy;
+    final repeat = snapshot.repeatMode;
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        IconButton(
-          onPressed: enabled
-              ? () => onSeek(math.max(position.value - 10, 0))
-              : null,
-          tooltip: 'Retroceder 10 s',
-          iconSize: 30,
-          icon: const Icon(Icons.replay_10_rounded),
+      children: <Widget>[
+        ChToggleIcon(
+          icon: Icons.shuffle_rounded,
+          active: snapshot.shuffle,
+          tooltip: snapshot.shuffle
+              ? 'Aleatorio activado · quitar'
+              : 'Aleatorio desactivado · activar',
+          onPressed: onShuffle,
         ),
-        const SizedBox(width: 18),
-        SizedBox(
-          width: 78,
-          height: 78,
-          child: FilledButton(
-            onPressed: enabled ? onToggle : null,
-            style: FilledButton.styleFrom(
-              shape: const CircleBorder(),
-              backgroundColor: palette.accent,
-              foregroundColor: palette.onAccent,
-              disabledBackgroundColor: palette.surfaceHigh,
-              padding: EdgeInsets.zero,
-            ),
-            child: Icon(
-              snapshot.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              size: 42,
-            ),
-          ),
-        ),
-        const SizedBox(width: 18),
+        const SizedBox(width: 2),
         IconButton(
-          onPressed: enabled
-              ? () => onSeek(math.min(position.value + 10, snapshot.duration))
-              : null,
-          tooltip: 'Avanzar 10 s',
-          iconSize: 30,
-          icon: const Icon(Icons.forward_10_rounded),
+          onPressed: enabled ? onPrevious : null,
+          tooltip: 'Anterior',
+          iconSize: 27,
+          icon: Icon(Icons.skip_previous_rounded, color: palette.foreground),
+        ),
+        const SizedBox(width: 4),
+        ChPlayButton(
+          playing: snapshot.playing,
+          busy: snapshot.busy,
+          onPressed: enabled ? onToggle : null,
+          size: 68,
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          onPressed: enabled ? onNext : null,
+          tooltip: 'Siguiente',
+          iconSize: 27,
+          icon: Icon(Icons.skip_next_rounded, color: palette.foreground),
+        ),
+        const SizedBox(width: 2),
+        ChToggleIcon(
+          icon: repeat == 2 ? Icons.repeat_one_rounded : Icons.repeat_rounded,
+          active: repeat != 0,
+          tooltip: switch (repeat) {
+            1 => 'Repetir todo · una sola',
+            2 => 'Repetir una · apagar',
+            _ => 'Repetición apagada · repetir todo',
+          },
+          onPressed: onRepeat,
         ),
       ],
     );
   }
 }
 
-/// Accesos rápidos configurables (letras, etiquetas, compartir y laboratorio).
-class _QuickActions extends StatelessWidget {
-  const _QuickActions({
-    required this.actions,
-    required this.onAction,
-    required this.hasTrack,
-    required this.palette,
-  });
-
-  final Set<PlayerAction> actions;
-  final void Function(PlayerAction action) onAction;
-  final bool hasTrack;
-  final CyberHexPalette palette;
-
-  @override
-  Widget build(BuildContext context) {
-    final visible = <PlayerAction>[
-      for (final action in PlayerAction.values)
-        if (actions.contains(action)) action,
-    ];
-    if (visible.isEmpty) return const SizedBox.shrink();
-    return Row(
-      children: [
-        for (var i = 0; i < visible.length; i++) ...[
-          if (i > 0) const SizedBox(width: 8),
-          Expanded(
-            child: _Action(
-              action: visible[i],
-              palette: palette,
-              onTap: _enabled(visible[i]) ? () => onAction(visible[i]) : null,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  bool _enabled(PlayerAction action) {
-    if (action == PlayerAction.share) return true;
-    return hasTrack;
-  }
-}
-
-class _Action extends StatelessWidget {
-  const _Action({
-    required this.action,
-    required this.palette,
-    required this.onTap,
-  });
-
-  final PlayerAction action;
-  final CyberHexPalette palette;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          color: palette.surface.withValues(alpha: enabled ? 0.85 : 0.45),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: palette.border.withValues(alpha: 0.6)),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              action.icon,
-              size: 20,
-              color: enabled ? palette.accent : palette.muted,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              action.label,
-              style: TextStyle(
-                fontSize: 11,
-                color: enabled ? palette.foreground : palette.muted,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _FooterRow extends StatelessWidget {
-  const _FooterRow({
-    required this.snapshot,
+/// Volumen en una línea: icono de silencio, deslizador y porcentaje.
+class _VolumeRow extends StatelessWidget {
+  const _VolumeRow({
+    required this.volume,
     required this.onVolume,
+    required this.onMute,
+  });
+
+  final double volume;
+  final ValueChanged<double> onVolume;
+  final VoidCallback onMute;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = paletteOf(context);
+    final muted = volume <= 0.001;
+    return Row(
+      children: <Widget>[
+        IconButton(
+          onPressed: onMute,
+          tooltip: muted ? 'Activar sonido' : 'Silenciar',
+          icon: Icon(
+            muted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+            size: 20,
+            color: muted ? palette.accent : palette.muted,
+          ),
+        ),
+        Expanded(
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              trackHeight: 3,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+            ),
+            child: Slider(
+              value: volume.clamp(0.0, 1.0).toDouble(),
+              onChanged: onVolume,
+            ),
+          ),
+        ),
+        SizedBox(
+          width: 36,
+          child: Text(
+            '${(volume * 100).round()}%',
+            textAlign: TextAlign.end,
+            style: chMono(palette, size: 9.5),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Herramientas secundarias: ecualizador, acciones configurables y ambiente.
+class _ToolStrip extends StatelessWidget {
+  const _ToolStrip({
+    required this.actions,
+    required this.palette,
+    required this.hasTrack,
+    required this.onAction,
     required this.onEq,
-    required this.onLab,
     required this.soundscape,
     required this.onSoundscape,
   });
 
-  final PlayerSnapshot snapshot;
-  final ValueChanged<double> onVolume;
+  final Set<PlayerAction> actions;
+  final CyberHexPalette palette;
+  final bool hasTrack;
+  final void Function(PlayerAction action) onAction;
   final VoidCallback onEq;
-  final VoidCallback onLab;
   final SoundscapePreset soundscape;
   final VoidCallback onSoundscape;
 
   @override
   Widget build(BuildContext context) {
-    final palette = paletteOf(context);
-    final volume = snapshot.volume;
-    return Column(
-      children: [
-        Row(
-          children: [
-            Icon(
-              volume == 0 ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-              size: 20,
-              color: palette.muted,
-            ),
-            Expanded(
-              child: Slider(value: volume, onChanged: onVolume),
-            ),
+    final soundOn = soundscape != SoundscapePreset.off;
+    final tools = <_Tool>[
+      _Tool(
+        icon: Icons.equalizer_rounded,
+        label: 'Ecualizador',
+        onTap: onEq,
+        enabled: true,
+        active: false,
+      ),
+      for (final action in PlayerAction.values)
+        if (actions.contains(action))
+          _Tool(
+            icon: action.icon,
+            label: action.label,
+            onTap: () => onAction(action),
+            enabled: hasTrack || action == PlayerAction.share,
+            active: false,
+          ),
+      _Tool(
+        icon: soundOn ? Icons.water_drop_rounded : Icons.nights_stay_outlined,
+        label: switch (soundscape) {
+          SoundscapePreset.off => 'Ambiente',
+          SoundscapePreset.rain => 'Lluvia',
+          SoundscapePreset.brown => 'Marrón',
+          SoundscapePreset.vinyl => 'Vinilo',
+        },
+        onTap: onSoundscape,
+        enabled: true,
+        active: soundOn,
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth / tools.length;
+        return Row(
+          children: <Widget>[
+            for (var i = 0; i < tools.length; i++)
+              SizedBox(
+                width: width,
+                child: _ToolButton(tool: tools[i], palette: palette),
+              ),
           ],
-        ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onEq,
-                icon: const Icon(Icons.equalizer_rounded, size: 18),
-                label: const Text('Ecualizador'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: palette.foreground,
-                  side: BorderSide(color: palette.border),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
+        );
+      },
+    );
+  }
+}
+
+class _Tool {
+  const _Tool({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    required this.enabled,
+    required this.active,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool enabled;
+  final bool active;
+}
+
+class _ToolButton extends StatelessWidget {
+  const _ToolButton({required this.tool, required this.palette});
+
+  final _Tool tool;
+  final CyberHexPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = !tool.enabled
+        ? palette.muted.withValues(alpha: 0.55)
+        : tool.active
+        ? palette.accent
+        : palette.foreground.withValues(alpha: 0.86);
+    return Tooltip(
+      message: tool.label,
+      child: InkWell(
+        onTap: tool.enabled ? tool.onTap : null,
+        borderRadius: BorderRadius.circular(ChRadius.md),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 7),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(tool.icon, size: 19, color: color),
+              const SizedBox(height: 3),
+              Text(
+                tool.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 8.5, color: color, height: 1.2),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: onLab,
-                icon: const Icon(Icons.tune_rounded, size: 18),
-                label: const Text('Laboratorio'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: palette.foreground,
-                  side: BorderSide(color: palette.border),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Tooltip(
-          message: 'Paisaje sonoro (lluvia, ruido marrón, vinilo)',
-          child: OutlinedButton.icon(
-            onPressed: onSoundscape,
-            icon: Icon(
-              soundscape == SoundscapePreset.off
-                  ? Icons.nights_stay_outlined
-                  : Icons.water_drop_rounded,
-              size: 18,
-              color: soundscape == SoundscapePreset.off
-                  ? palette.muted
-                  : palette.accent,
-            ),
-            label: Text(
-              switch (soundscape) {
-                SoundscapePreset.off => 'Paisaje: no',
-                SoundscapePreset.rain => 'Paisaje: lluvia',
-                SoundscapePreset.brown => 'Paisaje: marrón',
-                SoundscapePreset.vinyl => 'Paisaje: vinilo',
-              },
-              style: TextStyle(
-                fontSize: 12,
-                color: soundscape == SoundscapePreset.off
-                    ? palette.muted
-                    : palette.accent,
-              ),
-            ),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(
-                color: soundscape == SoundscapePreset.off
-                    ? palette.border
-                    : palette.accent,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            ),
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }

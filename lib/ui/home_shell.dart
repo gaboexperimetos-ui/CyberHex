@@ -14,6 +14,7 @@ import '../platform/connections.dart';
 import '../platform/desktop_channel.dart';
 import '../theme.dart';
 import 'home_page.dart';
+import 'kit/ch_kit.dart';
 import 'library_page.dart';
 import 'mini_player.dart';
 import 'now_playing_route.dart';
@@ -271,25 +272,22 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: _select,
         labelType: NavigationRailLabelType.all,
         leading: Padding(
-          padding: const EdgeInsets.fromLTRB(0, 18, 0, 12),
+          padding: const EdgeInsets.fromLTRB(0, 18, 0, 10),
           child: Column(
-            children: [
-              Icon(Icons.hexagon_rounded, color: palette.accent, size: 30),
-              const SizedBox(height: 6),
-              Text(
-                'CYBER',
-                style: chDisplay.copyWith(
-                  fontSize: 11,
-                  color: palette.foreground,
-                  letterSpacing: 1.2,
-                ),
+            children: <Widget>[
+              ChHexBadge(
+                icon: Icons.graphic_eq_rounded,
+                palette: palette,
+                size: 42,
               ),
+              const SizedBox(height: ChSpace.sm),
               Text(
-                'HEX',
-                style: chDisplay.copyWith(
-                  fontSize: 11,
-                  color: palette.accent,
-                  letterSpacing: 1.2,
+                'CYBERHEX',
+                style: TextStyle(
+                  fontFamily: 'Righteous',
+                  fontSize: 9.5,
+                  letterSpacing: 1.6,
+                  color: palette.foreground.withValues(alpha: 0.9),
                 ),
               ),
             ],
