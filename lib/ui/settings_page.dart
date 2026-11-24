@@ -65,8 +65,9 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late final Scrobbler? _scrobbler = widget.scrobbler ?? ScrobblerHost.current;
-  late final bool _ownsScrobbler =
-      widget.scrobbler == null && _scrobbler != null;
+  // La página nunca crea el Scrobbler: o lo inyecta quien la usa o es el de la
+  // app ([ScrobblerHost]), que se destruye con la app. Por eso no lo libera
+  // aquí; hacerlo dejaba al resto de la interfaz con un notifier muerto.
   late final BackupService _backup = widget.backup ?? BackupService();
   String? _backupStatus;
 
@@ -164,7 +165,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _lastFmSecret.dispose();
     _lastFmSession.dispose();
     _lastFmUser.dispose();
-    if (_ownsScrobbler) _scrobbler?.dispose();
     super.dispose();
   }
 

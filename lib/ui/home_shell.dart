@@ -195,20 +195,23 @@ class _HomeShellState extends State<HomeShell> {
         MiniPlayer(controller: widget.controller, onOpen: _openPlayer),
       ],
     );
-    final Scaffold scaffold;
-    if (!wide) {
-      scaffold = Scaffold(body: content, bottomNavigationBar: navigationBar);
-    } else {
-      scaffold = Scaffold(
-        body: Row(
-          children: [
-            _navigationRail(palette),
-            const VerticalDivider(width: 1, thickness: 0),
-            Expanded(child: content),
-          ],
-        ),
-      );
-    }
+    // Una sola forma de árbol: el contenido vive siempre en el tercer hueco de
+    // la fila. Al cruzar el umbral solo se sustituyen los dos primeros huecos
+    // (barra lateral ↔ hueco vacío), así que las páginas no se recrean ni
+    // pierden su estado al cambiar el tamaño de la ventana.
+    final scaffold = Scaffold(
+      body: Row(
+        children: [
+          if (wide) _navigationRail(palette) else const SizedBox.shrink(),
+          if (wide)
+            const VerticalDivider(width: 1, thickness: 0)
+          else
+            const SizedBox.shrink(),
+          Expanded(child: content),
+        ],
+      ),
+      bottomNavigationBar: wide ? null : navigationBar,
+    );
     // Atajos de escritorio: Ctrl/⌘ + 1..4 salta de pestaña sin soltar el
     // teclado. Los dígitos solos se dejan libres para los campos de búsqueda.
     return CallbackShortcuts(
