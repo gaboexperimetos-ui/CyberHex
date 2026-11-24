@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/player_controller.dart';
 import '../core/radio_store.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 import 'mini_player.dart';
 
 /// Emisoras por Internet.
@@ -162,7 +163,9 @@ class _RadioPageState extends State<RadioPage> {
         url: url,
         genre: genreController.text,
       );
-      _say('Añadida ${nameController.text.trim().isEmpty ? url : nameController.text.trim()}.');
+      _say(
+        'Añadida ${nameController.text.trim().isEmpty ? url : nameController.text.trim()}.',
+      );
     }
     nameController.dispose();
     urlController.dispose();
@@ -178,9 +181,11 @@ class _RadioPageState extends State<RadioPage> {
     if (file == null || !mounted) return;
     try {
       final added = await _store.importPlaylist(File(file.path));
-      _say(added.isEmpty
-          ? 'La lista no traía emisoras nuevas.'
-          : 'Importadas ${added.length} emisora(s).');
+      _say(
+        added.isEmpty
+            ? 'La lista no traía emisoras nuevas.'
+            : 'Importadas ${added.length} emisora(s).',
+      );
     } catch (error) {
       _say('No se pudo leer la lista: $error');
     }
@@ -238,7 +243,9 @@ class _RadioPageState extends State<RadioPage> {
         children: [
           if (_busyId != null)
             LinearProgressIndicator(
-              value: _bytes == 0 ? null : (_bytes / RadioStore.maxBufferBytes).clamp(0.0, 1.0),
+              value: _bytes == 0
+                  ? null
+                  : (_bytes / RadioStore.maxBufferBytes).clamp(0.0, 1.0),
               minHeight: 3,
               color: palette.accent,
             ),
@@ -248,7 +255,10 @@ class _RadioPageState extends State<RadioPage> {
               children: [
                 if (_message != null)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 6,
+                    ),
                     child: Text(
                       _message!,
                       style: TextStyle(fontSize: 12, color: palette.accent),
@@ -257,11 +267,30 @@ class _RadioPageState extends State<RadioPage> {
                 const _SectionLabel('Mis emisoras'),
                 if (mine.isEmpty)
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                    child: Text(
-                      'Aún no hay emisoras. Añade una URL o importa una lista '
-                      '.m3u/.pls.',
-                      style: TextStyle(fontSize: 12, color: palette.muted),
+                    padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+                    child: ChSurface(
+                      radius: ChRadius.md,
+                      child: Row(
+                        children: <Widget>[
+                          ChHexBadge(
+                            icon: Icons.radio_rounded,
+                            palette: palette,
+                            size: 40,
+                          ),
+                          const SizedBox(width: ChSpace.md),
+                          Expanded(
+                            child: Text(
+                              'Aún no hay emisoras. Añade una URL o importa '
+                              'una lista .m3u/.pls.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: palette.muted,
+                                height: 1.4,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 for (final station in mine)
@@ -294,14 +323,19 @@ class _RadioPageState extends State<RadioPage> {
                   'temporal (ventana de ${RadioStore.defaultWindow.inSeconds} s o '
                   '${RadioStore.maxBufferBytes >> 20} MB) y suena desde ahí. Es '
                   'radio con búfer, no directo continuo.',
-                  style: TextStyle(fontSize: 11, color: palette.muted, height: 1.5),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: palette.muted,
+                    height: 1.5,
+                  ),
                 ),
               ],
             ),
           ),
           MiniPlayer(
             controller: widget.controller,
-            onOpen: widget.onOpenPlayer ??
+            onOpen:
+                widget.onOpenPlayer ??
                 () => Navigator.of(context).popUntil((route) => route.isFirst),
           ),
         ],
@@ -368,11 +402,19 @@ class _StationTile extends StatelessWidget {
     ].join(' · ');
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 6),
-      leading: Icon(
-        station.isPlaylist ? Icons.queue_music_rounded : Icons.radio_rounded,
-        color: palette.accent,
+      leading: ChHexBadge(
+        icon: station.isPlaylist
+            ? Icons.queue_music_rounded
+            : Icons.radio_rounded,
+        palette: palette,
+        size: 44,
       ),
-      title: Text(station.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      title: Text(
+        station.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: chTitle(palette, size: 14.5, letterSpacing: -0.1),
+      ),
       subtitle: Text(
         subtitle,
         maxLines: 1,
@@ -434,16 +476,8 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 6),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          letterSpacing: 1.6,
-          fontWeight: FontWeight.w600,
-          color: paletteOf(context).muted,
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
+      child: ChSectionHeader(text, palette: paletteOf(context)),
     );
   }
 }

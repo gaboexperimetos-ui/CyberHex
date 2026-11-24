@@ -7,6 +7,7 @@ import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../core/stats_store.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 import 'mini_player.dart';
 
 /// Playlists: las del usuario y las tres inteligentes.
@@ -262,11 +263,30 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
         const _SectionLabel('Tus listas'),
         if (mine.isEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Text(
-              'Crea una lista con el botón + o importa un .m3u de otro '
-              'reproductor.',
-              style: TextStyle(fontSize: 12, color: palette.muted, height: 1.4),
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+            child: ChSurface(
+              radius: ChRadius.md,
+              child: Row(
+                children: <Widget>[
+                  ChHexBadge(
+                    icon: Icons.queue_music_rounded,
+                    palette: palette,
+                    size: 40,
+                  ),
+                  const SizedBox(width: ChSpace.md),
+                  Expanded(
+                    child: Text(
+                      'Crea una lista con el botón + o importa un .m3u de '
+                      'otro reproductor.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: palette.muted,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         for (final playlist in mine)
@@ -332,16 +352,8 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 6),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          letterSpacing: 1.6,
-          color: paletteOf(context).muted,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
+      child: ChSectionHeader(text, palette: paletteOf(context)),
     );
   }
 }
@@ -369,65 +381,76 @@ class _PlaylistTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
     final editable = onRename != null;
-    return Card(
-      color: palette.surface,
-      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: palette.border.withValues(alpha: 0.5)),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        leading: CircleAvatar(
-          backgroundColor: (playlist.smart ? palette.secondary : palette.accent)
-              .withValues(alpha: 0.18),
-          child: Icon(
-            playlist.smart
-                ? Icons.auto_awesome_rounded
-                : Icons.queue_music_rounded,
-            size: 18,
-            color: playlist.smart ? palette.foreground : palette.accent,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Material(
+        color: palette.surface,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ChRadius.md),
+          side: BorderSide(color: palette.border.withValues(alpha: 0.42)),
+        ),
+        child: ListTile(
+          onTap: onTap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(ChRadius.md),
           ),
-        ),
-        title: Text(
-          playlist.name,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-        ),
-        subtitle: Text(
-          playlist.summary,
-          style: TextStyle(fontSize: 11, color: palette.muted),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: 'Reproducir',
-              onPressed: onPlay,
-              icon: const Icon(Icons.play_arrow_rounded),
-            ),
-            if (editable)
-              PopupMenuButton<String>(
-                tooltip: 'Opciones',
-                onSelected: (value) {
-                  switch (value) {
-                    case 'export':
-                      onExport?.call();
-                    case 'rename':
-                      onRename?.call();
-                    case 'duplicate':
-                      onDuplicate?.call();
-                    case 'delete':
-                      onDelete?.call();
-                  }
-                },
-                itemBuilder: (context) => const <PopupMenuEntry<String>>[
-                  PopupMenuItem(value: 'export', child: Text('Exportar .m3u8')),
-                  PopupMenuItem(value: 'rename', child: Text('Renombrar')),
-                  PopupMenuItem(value: 'duplicate', child: Text('Duplicar')),
-                  PopupMenuItem(value: 'delete', child: Text('Borrar')),
-                ],
+          leading: playlist.smart
+              ? ChHexBadge(
+                  icon: Icons.auto_awesome_rounded,
+                  palette: palette,
+                  size: 44,
+                  color: palette.secondary,
+                )
+              : ChCoverThumb(
+                  seed: playlist.name,
+                  palette: palette,
+                  size: 44,
+                  hex: true,
+                ),
+          title: Text(
+            playlist.name,
+            style: chTitle(palette, size: 14.5, letterSpacing: -0.1),
+          ),
+          subtitle: Text(
+            playlist.summary,
+            style: TextStyle(fontSize: 11, color: palette.muted),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Reproducir',
+                onPressed: onPlay,
+                icon: const Icon(Icons.play_arrow_rounded),
               ),
-          ],
+              if (editable)
+                PopupMenuButton<String>(
+                  tooltip: 'Opciones',
+                  onSelected: (value) {
+                    switch (value) {
+                      case 'export':
+                        onExport?.call();
+                      case 'rename':
+                        onRename?.call();
+                      case 'duplicate':
+                        onDuplicate?.call();
+                      case 'delete':
+                        onDelete?.call();
+                    }
+                  },
+                  itemBuilder: (context) => const <PopupMenuEntry<String>>[
+                    PopupMenuItem(
+                      value: 'export',
+                      child: Text('Exportar .m3u8'),
+                    ),
+                    PopupMenuItem(value: 'rename', child: Text('Renombrar')),
+                    PopupMenuItem(value: 'duplicate', child: Text('Duplicar')),
+                    PopupMenuItem(value: 'delete', child: Text('Borrar')),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -501,33 +524,28 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         ],
       ),
       body: playlist.isEmpty
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Text(
-                  'Esta lista está vacía.\nAñade pistas desde la biblioteca '
-                  '(menú de cada pista → «Añadir a lista»).',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: palette.muted,
-                    height: 1.5,
-                  ),
-                ),
-              ),
+          ? ChEmptyState(
+              icon: Icons.queue_music_rounded,
+              title: 'Lista vacía',
+              message:
+                  'Añade pistas desde la biblioteca (menú de cada pista → '
+                  '«Añadir a lista»).',
+              palette: palette,
             )
           : ListView.separated(
+              padding: const EdgeInsets.only(top: 4, bottom: 16),
               itemCount: playlist.paths.length,
               separatorBuilder: (_, _) =>
-                  Divider(height: 1, color: palette.border),
+                  ChHairline(palette: palette, indent: 66, opacity: 0.28),
               itemBuilder: (context, index) {
                 final path = playlist.paths[index];
                 final name = path.split(RegExp(r'[/\\]')).last;
                 return ListTile(
-                  dense: true,
-                  leading: Text(
-                    '${index + 1}',
-                    style: TextStyle(fontSize: 12, color: palette.muted),
+                  leading: ChCoverThumb(
+                    seed: name,
+                    palette: palette,
+                    size: 40,
+                    hex: true,
                   ),
                   title: Text(
                     name,
@@ -536,10 +554,10 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     style: const TextStyle(fontSize: 13),
                   ),
                   subtitle: Text(
-                    path,
+                    '${index + 1} · $path',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 10, color: palette.muted),
+                    style: chMono(palette, size: 10),
                   ),
                   onTap: () => _play(playlist, index),
                   trailing: Row(

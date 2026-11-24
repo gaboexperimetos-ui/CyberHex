@@ -19,11 +19,18 @@ Future<void> openNowPlaying(
   DesktopChannel? desktop,
   CyberHexConnections? connections,
 }) {
+  // Sin animaciones si el sistema las desactiva: la ruta sigue siendo la
+  // misma, pero aparece de golpe en vez de deslizarse.
+  final reduceMotion = MediaQuery.disableAnimationsOf(context);
+  final enter = reduceMotion
+      ? Duration.zero
+      : const Duration(milliseconds: 320);
+  final exit = reduceMotion ? Duration.zero : const Duration(milliseconds: 260);
   return Navigator.of(context).push(
     PageRouteBuilder<void>(
       opaque: true,
-      transitionDuration: const Duration(milliseconds: 320),
-      reverseTransitionDuration: const Duration(milliseconds: 260),
+      transitionDuration: enter,
+      reverseTransitionDuration: exit,
       pageBuilder: (_, __, ___) => PlayerPage(
         controller: controller,
         theme: theme,
@@ -41,7 +48,7 @@ Future<void> openNowPlaying(
             begin: const Offset(0, 1),
             end: Offset.zero,
           ).animate(curved),
-          child: child,
+          child: FadeTransition(opacity: curved, child: child),
         );
       },
     ),

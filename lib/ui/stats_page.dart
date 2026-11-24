@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/stats_store.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Estadísticas de escucha: totales, top de pistas y artistas, franja horaria e
 /// historial.
@@ -76,19 +77,13 @@ class _StatsPageState extends State<StatsPage> {
         ],
       ),
       body: stats.totalPlays == 0
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Text(
-                  'Todavía no hay nada que contar.\nDale al play y vuelve por aquí.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: palette.muted,
-                    height: 1.5,
-                  ),
-                ),
-              ),
+          ? ChEmptyState(
+              icon: Icons.insights_rounded,
+              title: 'Aún no hay datos',
+              message:
+                  'Todavía no hay nada que contar.\nDale al play y vuelve por '
+                  'aquí.',
+              palette: palette,
             )
           : ListView(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
@@ -175,9 +170,18 @@ class _StatsPageState extends State<StatsPage> {
                     ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      leading: Text(
-                        entry.clock,
-                        style: TextStyle(fontSize: 11, color: palette.muted),
+                      leading: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          ChCoverThumb(
+                            seed: entry.label,
+                            palette: palette,
+                            size: 36,
+                            hex: true,
+                          ),
+                          const SizedBox(width: ChSpace.sm + 2),
+                          Text(entry.clock, style: chMono(palette, size: 10.5)),
+                        ],
                       ),
                       title: Text(
                         entry.label,
@@ -217,16 +221,8 @@ class _Title extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 18, 0, 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          letterSpacing: 1.6,
-          fontWeight: FontWeight.w600,
-          color: paletteOf(context).muted,
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(0, 20, 0, 8),
+      child: ChSectionHeader(text, palette: paletteOf(context)),
     );
   }
 }
@@ -241,35 +237,31 @@ class _Figure extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: palette.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: palette.border.withValues(alpha: 0.6)),
+    return ChSurface(
+      padding: const EdgeInsets.symmetric(
+        horizontal: ChSpace.md,
+        vertical: ChSpace.md,
       ),
+      radius: ChRadius.md,
       child: Row(
-        children: [
+        children: <Widget>[
           Icon(icon, size: 20, color: palette.accent),
-          const SizedBox(width: 10),
+          const SizedBox(width: ChSpace.sm + 2),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+              children: <Widget>[
                 Text(
                   value,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: chTitle(palette, size: 19, weight: FontWeight.w700),
                 ),
                 Text(
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 10, color: palette.muted),
+                  style: chEyebrow(palette, size: 9.5),
                 ),
               ],
             ),
@@ -359,9 +351,11 @@ class _RankRow extends StatelessWidget {
             width: 22,
             child: Text(
               '$position',
-              style: TextStyle(fontSize: 12, color: palette.muted),
+              style: chMono(palette, size: 11, color: palette.accent),
             ),
           ),
+          ChCoverThumb(seed: title, palette: palette, size: 40, hex: true),
+          const SizedBox(width: ChSpace.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -13,6 +13,7 @@ import '../core/theme_controller.dart';
 import '../platform/connections.dart';
 import '../platform/desktop_channel.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 import 'audio_export_sheet.dart';
 import 'connection_sheet.dart';
 
@@ -52,7 +53,6 @@ class SettingsPage extends StatefulWidget {
   /// la sección de conexiones.
   final CyberHexConnections? connections;
 
-
   /// Estado del interruptor «siempre encima» (el runner no lo reporta).
   static final ValueNotifier<bool> alwaysOnTop = ValueNotifier<bool>(false);
 
@@ -81,10 +81,12 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     final scrobbler = _scrobbler;
     if (scrobbler == null) return;
-    unawaited(scrobbler.load().then((_) {
-      if (!mounted) return;
-      setState(() => _fillScrobbleFields(scrobbler.settings));
-    }));
+    unawaited(
+      scrobbler.load().then((_) {
+        if (!mounted) return;
+        setState(() => _fillScrobbleFields(scrobbler.settings));
+      }),
+    );
   }
 
   void _fillScrobbleFields(ScrobbleSettings settings) {
@@ -99,13 +101,15 @@ class _SettingsPageState extends State<SettingsPage> {
   void _applyScrobbleFields() {
     final scrobbler = _scrobbler;
     if (scrobbler == null) return;
-    scrobbler.updateSettings(scrobbler.settings.copyWith(
-      listenBrainzToken: _listenBrainz.text.trim(),
-      lastFmApiKey: _lastFmKey.text.trim(),
-      lastFmApiSecret: _lastFmSecret.text.trim(),
-      lastFmSessionKey: _lastFmSession.text.trim(),
-      lastFmUsername: _lastFmUser.text.trim(),
-    ));
+    scrobbler.updateSettings(
+      scrobbler.settings.copyWith(
+        listenBrainzToken: _listenBrainz.text.trim(),
+        lastFmApiKey: _lastFmKey.text.trim(),
+        lastFmApiSecret: _lastFmSecret.text.trim(),
+        lastFmSessionKey: _lastFmSession.text.trim(),
+        lastFmUsername: _lastFmUser.text.trim(),
+      ),
+    );
   }
 
   Future<void> _flushScrobbles() async {
@@ -191,12 +195,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   for (final id in CyberHexThemeId.values)
                     ChoiceChip(
-                      label: Text(id.label, style: const TextStyle(fontSize: 12)),
+                      label: Text(
+                        id.label,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       selected: widget.theme.themeId == id,
                       selectedColor: palette.accent.withValues(alpha: 0.24),
                       backgroundColor: palette.surfaceHigh,
                       side: BorderSide(
-                        color: widget.theme.themeId == id ? palette.accent : palette.border,
+                        color: widget.theme.themeId == id
+                            ? palette.accent
+                            : palette.border,
                       ),
                       onSelected: (_) => widget.theme.setTheme(id),
                     ),
@@ -226,12 +235,17 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   for (final style in CoverStyle.values)
                     ChoiceChip(
-                      label: Text(style.label, style: const TextStyle(fontSize: 12)),
+                      label: Text(
+                        style.label,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       selected: widget.theme.coverStyle == style,
                       selectedColor: palette.accent.withValues(alpha: 0.24),
                       backgroundColor: palette.surfaceHigh,
                       side: BorderSide(
-                        color: widget.theme.coverStyle == style ? palette.accent : palette.border,
+                        color: widget.theme.coverStyle == style
+                            ? palette.accent
+                            : palette.border,
                       ),
                       onSelected: (_) => widget.theme.setCoverStyle(style),
                     ),
@@ -243,7 +257,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 dense: true,
                 value: widget.theme.pocketMode,
                 onChanged: widget.theme.setPocketMode,
-                title: const Text('Modo bolsillo', style: TextStyle(fontSize: 14)),
+                title: const Text(
+                  'Modo bolsillo',
+                  style: TextStyle(fontSize: 14),
+                ),
                 subtitle: Text(
                   'Bloquea los toques del reproductor; se sale manteniendo pulsado.',
                   style: TextStyle(fontSize: 11, color: palette.muted),
@@ -256,7 +273,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   dense: true,
                   value: widget.theme.shows(action),
                   onChanged: (_) => widget.theme.toggleAction(action),
-                  title: Text(action.label, style: const TextStyle(fontSize: 14)),
+                  title: Text(
+                    action.label,
+                    style: const TextStyle(fontSize: 14),
+                  ),
                   secondary: Icon(action.icon, size: 20, color: palette.muted),
                   controlAffinity: ListTileControlAffinity.trailing,
                 ),
@@ -265,7 +285,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 widget.theme.actions.isEmpty
                     ? 'Con todo desmarcado, la barra rápida desaparece.'
                     : 'La barra rápida del reproductor muestra ${widget.theme.actions.length} '
-                        'de ${PlayerAction.values.length} botones.',
+                          'de ${PlayerAction.values.length} botones.',
                 style: TextStyle(fontSize: 11, color: palette.muted),
               ),
               const _Section('Salida de audio y escritorio'),
@@ -306,7 +326,8 @@ class _SettingsPageState extends State<SettingsPage> {
                                 ? palette.accent
                                 : palette.border,
                           ),
-                          onSelected: (_) => player.setOutputDevice(device.index),
+                          onSelected: (_) =>
+                              player.setOutputDevice(device.index),
                         ),
                     ],
                   ),
@@ -350,8 +371,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  leading: Icon(Icons.notifications_active_outlined,
-                      size: 20, color: palette.muted),
+                  leading: Icon(
+                    Icons.notifications_active_outlined,
+                    size: 20,
+                    color: palette.muted,
+                  ),
                   title: const Text(
                     'Notificar la pista nueva',
                     style: TextStyle(fontSize: 14),
@@ -387,12 +411,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  value: action == MediaAction.toggle ||
+                  value:
+                      action == MediaAction.toggle ||
                       widget.theme.mediaActions.contains(action),
                   onChanged: action == MediaAction.toggle
                       ? null
                       : (_) => widget.theme.toggleMediaAction(action),
-                  title: Text(action.label, style: const TextStyle(fontSize: 14)),
+                  title: Text(
+                    action.label,
+                    style: const TextStyle(fontSize: 14),
+                  ),
                   subtitle: action == MediaAction.toggle
                       ? Text(
                           'Siempre presente.',
@@ -405,7 +433,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 ListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
-                  leading: Icon(Icons.tune_rounded, size: 20, color: palette.muted),
+                  leading: Icon(
+                    Icons.tune_rounded,
+                    size: 20,
+                    color: palette.muted,
+                  ),
                   title: const Text(
                     'Exportar la pista actual',
                     style: TextStyle(fontSize: 14),
@@ -414,13 +446,18 @@ class _SettingsPageState extends State<SettingsPage> {
                     'Elige un rango y renderiza WAV con el DSP puesto.',
                     style: TextStyle(fontSize: 11, color: palette.muted),
                   ),
-                  onTap: () => unawaited(AudioExportSheet.show(context, player)),
+                  onTap: () =>
+                      unawaited(AudioExportSheet.show(context, player)),
                 ),
               const _Section('Copia de seguridad'),
               Text(
                 'Un solo .json con favoritos, listas, colas, estadísticas, '
                 'emisoras, tema, scrobbling y presets de EQ.',
-                style: TextStyle(fontSize: 11, color: palette.muted, height: 1.5),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: palette.muted,
+                  height: 1.5,
+                ),
               ),
               const SizedBox(height: 8),
               Wrap(
@@ -555,7 +592,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   subtitle: Text(
                     widget.connections!.localApiUrl == null
                         ? (widget.connections!.localApiError ??
-                            'Iniciando API local…')
+                              'Iniciando API local…')
                         : 'API local en ${widget.connections!.localApiUrl}',
                     style: TextStyle(fontSize: 11, color: palette.muted),
                   ),
@@ -570,10 +607,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
               ],
-              const _Section('Acerca de'),              Text(
+              const _Section('Acerca de'),
+              Text(
                 'CyberHex · motor propio (Zig + C23) · Flutter\n'
                 'Sin dependencias externas de audio, imagen ni red.',
-                style: TextStyle(fontSize: 12, color: palette.muted, height: 1.5),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: palette.muted,
+                  height: 1.5,
+                ),
               ),
             ],
           ),
@@ -581,7 +623,6 @@ class _SettingsPageState extends State<SettingsPage> {
       },
     );
   }
-
 }
 
 class _Section extends StatelessWidget {
@@ -592,16 +633,8 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 18, 0, 8),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          fontSize: 11,
-          letterSpacing: 1.6,
-          fontWeight: FontWeight.w600,
-          color: paletteOf(context).muted,
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(0, 20, 0, 8),
+      child: ChSectionHeader(text.toUpperCase(), palette: paletteOf(context)),
     );
   }
 }

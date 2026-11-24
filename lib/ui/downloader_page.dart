@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/audio_downloader.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Gestor de descargas: catálogo abierto (Internet Archive) o URL directa.
 ///
@@ -255,13 +256,18 @@ class _DownloaderPageState extends State<DownloaderPage> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  _selected?.identifier == item.identifier
-                      ? Icons.radio_button_checked_rounded
-                      : Icons.album_outlined,
-                  color: palette.accent,
-                  size: 20,
-                ),
+                leading: _selected?.identifier == item.identifier
+                    ? ChHexBadge(
+                        icon: Icons.radio_button_checked_rounded,
+                        palette: palette,
+                        size: 40,
+                      )
+                    : ChCoverThumb(
+                        seed: item.title,
+                        palette: palette,
+                        size: 40,
+                        hex: true,
+                      ),
                 title: Text(
                   item.title,
                   maxLines: 1,
@@ -288,9 +294,10 @@ class _DownloaderPageState extends State<DownloaderPage> {
               ListTile(
                 dense: true,
                 contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  Icons.audio_file_outlined,
-                  size: 20,
+                leading: ChHexBadge(
+                  icon: Icons.audio_file_outlined,
+                  palette: palette,
+                  size: 40,
                   color: palette.muted,
                 ),
                 title: Text(
@@ -332,15 +339,8 @@ class _Label extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(0, 18, 0, 4),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: paletteOf(context).muted,
-        ),
-      ),
+      padding: const EdgeInsets.fromLTRB(0, 20, 0, 6),
+      child: ChSectionHeader(text, palette: paletteOf(context)),
     );
   }
 }
