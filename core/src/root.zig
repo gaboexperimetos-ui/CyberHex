@@ -6275,6 +6275,53 @@ fn wavHeader(data_bytes: u64) [44]u8 {
     return h;
 }
 
+/// Cabecera RIFF/WAVE. `bits` = 16/24/32 y `is_float` selecciona PCM (1) o
+/// IEEE float (3). El contrato sigue siendo 48 kHz estereo entrelazado.
+fn wavHeaderBits(data_bytes: u64, bits: u16, is_float: bool) [44]u8 {
+    var h: [44]u8 = undefined;
+    const block_align: u16 = @intCast(CHANNELS * (bits / 8));
+    @memcpy(h[0..4], "RIFF");
+    std.mem.writeInt(u32, h[4..][0..4], @intCast(36 + data_bytes), .little);
+    @memcpy(h[8..12], "WAVE");
+    @memcpy(h[12..16], "fmt ");
+    std.mem.writeInt(u32, h[16..][0..4], 16, .little);
+    std.mem.writeInt(u16, h[20..][0..2], if (is_float) 3 else 1, .little);
+    std.mem.writeInt(u16, h[22..][0..2], @intCast(CHANNELS), .little);
+    std.mem.writeInt(u32, h[24..][0..4], SAMPLE_RATE, .little);
+    std.mem.writeInt(u32, h[28..][0..4], SAMPLE_RATE * @as(u32, block_align), .little);
+    std.mem.writeInt(u16, h[32..][0..2], block_align, .little);
+    std.mem.writeInt(u16, h[34..][0..2], bits, .little);
+    @memcpy(h[36..40], "data");
+    std.mem.writeInt(u32, h[40..][0..4], @intCast(data_bytes), .little);
+    return h;
+}
+
+/// Cabecera AIFF (big-endian) PCM 16 bits. 54 bytes antes del audio. La tasa de
+/// muestreo va en formato extendido de 80 bits; 48000 Hz es constante por
+/// contrato, asi que se escribe su representacion exacta (0x400EBB80...).
+fn aiffHeader(data_bytes: u64) [54]u8 {
+    var h: [54]u8 = undefined;
+    @memset(&h, 0);
+    const frames: u32 = @intCast(data_bytes / (CHANNELS * 2));
+    @memcpy(h[0..4], "FORM");
+    std.mem.writeInt(u32, h[4..][0..4], @intCast(46 + data_bytes), .big);
+    @memcpy(h[8..12], "AIFF");
+    @memcpy(h[12..16], "COMM");
+    std.mem.writeInt(u32, h[16..][0..4], 18, .big);
+    std.mem.writeInt(u16, h[20..][0..2], @intCast(CHANNELS), .big);
+    std.mem.writeInt(u32, h[22..][0..4], frames, .big);
+    std.mem.writeInt(u16, h[26..][0..2], 16, .big);
+    // 48000 Hz en extendido 80-bit: exponente 0x400E, mantisa 0xBB80...
+    h[36] = 0x40;
+    h[37] = 0x0E;
+    h[38] = 0xBB;
+    h[39] = 0x80;
+    @memcpy(h[40..44], "SSND");
+    std.mem.writeInt(u32, h[44..][0..4], @intCast(8 + data_bytes), .big);
+    // offset (48) y blockSize (50) quedan a 0.
+    return h;
+}
+
 /// Escribe todo el bloque o falla. `std.c` en vez de `std.fs`: en Zig 0.17 el
 /// sistema de ficheros pide un contexto `std.Io` y aqui no hay ninguno (esto se
 /// llama desde Dart por FFI).
@@ -6390,12 +6437,15 @@ fn framesToWrite(dec: *ch_decoder, start_frame: u64, limit: u64, seekable: *bool
     return counted;
 }
 
+const ExportFmt = enum { s16, s24, f32, aiff16 };
+
 fn renderWav(
     engine: ?*Engine,
     src: [*c]const u8,
     dst: [*c]const u8,
     start_sec: f64,
     end_sec: f64,
+    fmt: ExportFmt,
 ) i32 {
     if (src == null or src[0] == 0 or dst == null or dst[0] == 0) return -1;
     if (!std.math.isFinite(start_sec) or !std.math.isFinite(end_sec)) return -1;
@@ -6415,7 +6465,12 @@ fn renderWav(
     var seekable = true;
     const expected = framesToWrite(dec, start_frame, limit, &seekable);
     if (!seekable) return -2;
-    if (expected > (std.math.maxInt(u32) - 36) / (CHANNELS * 2)) return -5;
+    const bytes_per_sample: u64 = switch (fmt) {
+        .s16, .aiff16 => 2,
+        .s24 => 3,
+        .f32 => 4,
+    };
+    if (expected > (std.math.maxInt(u32) - 36) / (CHANNELS * bytes_per_sample)) return -5;
 
     var chain = ExportChain.init(engine);
     chain.gain = std.math.pow(f32, 10, replayGainDb(dec) / 20);
@@ -6424,10 +6479,18 @@ fn renderWav(
     const stream = std.c.fopen(path, "wb") orelse return -3;
     defer _ = std.c.fclose(stream);
 
-    if (!writeAll(stream, &wavHeader(expected * CHANNELS * 2))) return -4;
+    const data_bytes = expected * CHANNELS * bytes_per_sample;
+    switch (fmt) {
+        .s16 => if (!writeAll(stream, &wavHeader(data_bytes))) return -4,
+        .s24 => if (!writeAll(stream, &wavHeaderBits(data_bytes, 24, false))) return -4,
+        .f32 => if (!writeAll(stream, &wavHeaderBits(data_bytes, 32, true))) return -4,
+        .aiff16 => if (!writeAll(stream, &aiffHeader(data_bytes))) return -4,
+    }
 
     var buf: [EXPORT_CHUNK_FRAMES * CHANNELS]f32 = undefined;
     var s16: [EXPORT_CHUNK_FRAMES * CHANNELS]i16 = undefined;
+    // Buffer de bytes (máx 4 por muestra) para 24-bit / float / AIFF.
+    var raw: [EXPORT_CHUNK_FRAMES * CHANNELS * 4]u8 = undefined;
     var written: u64 = 0;
     while (written < expected) {
         const want: usize = @intCast(@min(@as(u64, EXPORT_CHUNK_FRAMES), expected - written));
@@ -6436,11 +6499,47 @@ fn renderWav(
         const frames: usize = @intCast(got);
         const samples = frames * CHANNELS;
         chain.process(buf[0..samples], frames);
-        var i: usize = 0;
-        while (i < samples) : (i += 1) {
-            s16[i] = ch_audio_quantize_s16(buf[i], &chain.dither[i % CHANNELS]);
+        switch (fmt) {
+            .s16 => {
+                var i: usize = 0;
+                while (i < samples) : (i += 1) {
+                    s16[i] = ch_audio_quantize_s16(buf[i], &chain.dither[i % CHANNELS]);
+                }
+                if (!writeAll(stream, std.mem.sliceAsBytes(s16[0..samples]))) return -4;
+            },
+            .s24 => {
+                var i: usize = 0;
+                while (i < samples) : (i += 1) {
+                    const v: i32 = @intFromFloat(std.math.clamp(buf[i], -1, 1) * 8388607.0);
+                    const u: u32 = @bitCast(v);
+                    raw[i * 3] = @truncate(u);
+                    raw[i * 3 + 1] = @truncate(u >> 8);
+                    raw[i * 3 + 2] = @truncate(u >> 16);
+                }
+                if (!writeAll(stream, raw[0 .. samples * 3])) return -4;
+            },
+            .f32 => {
+                var i: usize = 0;
+                while (i < samples) : (i += 1) {
+                    const bits: u32 = @bitCast(buf[i]);
+                    raw[i * 4] = @truncate(bits);
+                    raw[i * 4 + 1] = @truncate(bits >> 8);
+                    raw[i * 4 + 2] = @truncate(bits >> 16);
+                    raw[i * 4 + 3] = @truncate(bits >> 24);
+                }
+                if (!writeAll(stream, raw[0 .. samples * 4])) return -4;
+            },
+            .aiff16 => {
+                var i: usize = 0;
+                while (i < samples) : (i += 1) {
+                    const v: i16 = ch_audio_quantize_s16(buf[i], &chain.dither[i % CHANNELS]);
+                    const u: u16 = @bitCast(v);
+                    raw[i * 2] = @truncate(u >> 8); // big-endian
+                    raw[i * 2 + 1] = @truncate(u);
+                }
+                if (!writeAll(stream, raw[0 .. samples * 2])) return -4;
+            },
         }
-        if (!writeAll(stream, std.mem.sliceAsBytes(s16[0..samples]))) return -4;
         written += got;
     }
     return 0;
@@ -6452,7 +6551,7 @@ fn renderWav(
 /// recorte. Codigos: 0 bien, -1 argumentos, -2 origen (no abre o no busca),
 /// -3 destino, -4 escritura, -5 demasiado largo, -6 origen truncado.
 export fn ch_engine_render_wav(src: [*c]const u8, dst: [*c]const u8, start_sec: f64, end_sec: f64) i32 {
-    return renderWav(null, src, dst, start_sec, end_sec);
+    return renderWav(null, src, dst, start_sec, end_sec, .s16);
 }
 
 /// Lo mismo, pero con el DSP del motor: EQ de 36 bandas, 9D, ancho/punch,
@@ -6465,7 +6564,40 @@ export fn ch_engine_render_wav_ex(
     start_sec: f64,
     end_sec: f64,
 ) i32 {
-    return renderWav(self, src, dst, start_sec, end_sec);
+    return renderWav(self, src, dst, start_sec, end_sec, .s16);
+}
+
+/// Exporta a WAV PCM 24 bits (48 kHz estereo) con el DSP del motor.
+export fn ch_engine_render_wav24(
+    self: ?*Engine,
+    src: [*c]const u8,
+    dst: [*c]const u8,
+    start_sec: f64,
+    end_sec: f64,
+) i32 {
+    return renderWav(self, src, dst, start_sec, end_sec, .s24);
+}
+
+/// Exporta a WAV IEEE float 32 bits (48 kHz estereo) con el DSP del motor.
+export fn ch_engine_render_wav_f32(
+    self: ?*Engine,
+    src: [*c]const u8,
+    dst: [*c]const u8,
+    start_sec: f64,
+    end_sec: f64,
+) i32 {
+    return renderWav(self, src, dst, start_sec, end_sec, .f32);
+}
+
+/// Exporta a AIFF PCM 16 bits (48 kHz estereo) con el DSP del motor.
+export fn ch_engine_render_aiff(
+    self: ?*Engine,
+    src: [*c]const u8,
+    dst: [*c]const u8,
+    start_sec: f64,
+    end_sec: f64,
+) i32 {
+    return renderWav(self, src, dst, start_sec, end_sec, .aiff16);
 }
 
 test "paisaje: se enciende, se apaga y no rompe con punteros nulos" {
@@ -6606,6 +6738,72 @@ test "exportador: escribe un WAV coherente y respeta el recorte" {
     defer alloc.free(cut);
     try std.testing.expectEqual(@as(u32, 4800 * 4), std.mem.readInt(u32, cut[40..][0..4], .little));
     try std.testing.expectEqual(@as(usize, 44 + 4800 * 4), cut.len);
+}
+
+test "exportador: WAV 24-bit, WAV float32 y AIFF salen coherentes" {
+    const alloc = std.testing.allocator;
+    const src = tmpPath(alloc, "chx_fmt_src.wav") catch return error.SkipZigTest;
+    defer alloc.free(src);
+    const d24 = tmpPath(alloc, "chx_fmt_24.wav") catch return error.SkipZigTest;
+    defer alloc.free(d24);
+    const df32 = tmpPath(alloc, "chx_fmt_f32.wav") catch return error.SkipZigTest;
+    defer alloc.free(df32);
+    const daiff = tmpPath(alloc, "chx_fmt_aiff.aiff") catch return error.SkipZigTest;
+    defer alloc.free(daiff);
+    defer _ = std.c.unlink(src);
+    defer _ = std.c.unlink(d24);
+    defer _ = std.c.unlink(df32);
+    defer _ = std.c.unlink(daiff);
+
+    writeClickWav(src, 1.0, 0.25) catch return error.SkipZigTest;
+    if (ch_decode_open(src, SAMPLE_RATE, CHANNELS)) |d| ch_decode_close(d) else return error.SkipZigTest;
+
+    // --- WAV 24 bits: PCM (1), 24 bits, 3 bytes/muestra ---
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_wav24(null, src, d24, 0, 0));
+    const w24 = try readWhole(alloc, d24);
+    defer alloc.free(w24);
+    try std.testing.expectEqualStrings("RIFF", w24[0..4]);
+    try std.testing.expectEqual(@as(u16, 1), std.mem.readInt(u16, w24[20..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 24), std.mem.readInt(u16, w24[34..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 6), std.mem.readInt(u16, w24[32..][0..2], .little));
+    const data24 = std.mem.readInt(u32, w24[40..][0..4], .little);
+    try std.testing.expectEqual(@as(u32, SAMPLE_RATE * 6), data24);
+    try std.testing.expectEqual(@as(usize, 44 + @as(usize, data24)), w24.len);
+
+    // --- WAV float32: formato IEEE (3), 32 bits ---
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_wav_f32(null, src, df32, 0, 0));
+    const wf = try readWhole(alloc, df32);
+    defer alloc.free(wf);
+    try std.testing.expectEqualStrings("RIFF", wf[0..4]);
+    try std.testing.expectEqual(@as(u16, 3), std.mem.readInt(u16, wf[20..][0..2], .little));
+    try std.testing.expectEqual(@as(u16, 32), std.mem.readInt(u16, wf[34..][0..2], .little));
+    const dataf = std.mem.readInt(u32, wf[40..][0..4], .little);
+    try std.testing.expectEqual(@as(u32, SAMPLE_RATE * 8), dataf);
+    // El pico del click (0.8) debe existir como float finito en [-1,1].
+    var peakf: f32 = 0;
+    var kf: usize = 44;
+    while (kf + 3 < wf.len) : (kf += 4) {
+        const v = std.mem.readInt(u32, wf[kf..][0..4], .little);
+        const fv: f32 = @bitCast(v);
+        if (std.math.isFinite(fv)) peakf = @max(peakf, @abs(fv));
+    }
+    try std.testing.expect(peakf > 0.5);
+    try std.testing.expect(peakf <= 1.0);
+
+    // --- AIFF: FORM/AIFF big-endian, 16 bits, 54 bytes de cabecera ---
+    try std.testing.expectEqual(@as(i32, 0), ch_engine_render_aiff(null, src, daiff, 0, 0));
+    const wa = try readWhole(alloc, daiff);
+    defer alloc.free(wa);
+    try std.testing.expectEqualStrings("FORM", wa[0..4]);
+    try std.testing.expectEqualStrings("AIFF", wa[8..12]);
+    try std.testing.expectEqualStrings("COMM", wa[12..16]);
+    try std.testing.expectEqualStrings("SSND", wa[40..44]);
+    try std.testing.expectEqual(@as(u16, 16), std.mem.readInt(u16, wa[26..][0..2], .big));
+    // 48000 Hz en extendido 80-bit.
+    try std.testing.expectEqual(@as(u8, 0x40), wa[36]);
+    try std.testing.expectEqual(@as(u8, 0x0E), wa[37]);
+    // 1 s estereo S16 = SAMPLE_RATE*4 bytes de audio + 54 de cabecera.
+    try std.testing.expectEqual(@as(usize, 54 + SAMPLE_RATE * 4), wa.len);
 }
 
 test "exportador: argumentos invalidos devuelven error sin crear nada" {

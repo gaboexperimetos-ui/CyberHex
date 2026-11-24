@@ -441,6 +441,15 @@ int32_t ch_engine_render_wav(const char* utf8_src, const char* utf8_dst,
 int32_t ch_engine_render_wav_ex(ch_engine* engine, const char* utf8_src, const char* utf8_dst,
                                 double start_sec, double end_sec);
 
+/* Variantes de exportacion (48 kHz estereo, con el DSP del motor):
+ * WAV PCM 24 bits, WAV IEEE float 32 bits y AIFF PCM 16 bits. */
+int32_t ch_engine_render_wav24(ch_engine* engine, const char* utf8_src, const char* utf8_dst,
+                               double start_sec, double end_sec);
+int32_t ch_engine_render_wav_f32(ch_engine* engine, const char* utf8_src, const char* utf8_dst,
+                                 double start_sec, double end_sec);
+int32_t ch_engine_render_aiff(ch_engine* engine, const char* utf8_src, const char* utf8_dst,
+                              double start_sec, double end_sec);
+
 /* Biblioteca de audio: escaneo incremental de carpetas (handle opaco void*). */
 void*     ch_library_create(void);
 void      ch_library_destroy(void* lib);
