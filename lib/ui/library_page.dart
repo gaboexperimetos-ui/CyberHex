@@ -580,7 +580,7 @@ class _LibraryPageState extends State<LibraryPage>
       ),
       body: Column(
         children: [
-          Expanded(child: _body()),
+          Expanded(child: ChContent(maxWidth: 1080, child: _body())),
           if (widget.showMiniPlayer)
             MiniPlayer(
               controller: _controller,

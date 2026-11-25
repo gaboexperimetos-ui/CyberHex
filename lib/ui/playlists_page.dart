@@ -228,113 +228,117 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
     final palette = paletteOf(context);
     final smart = _smart;
     final mine = _store.playlists;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-      children: [
-        if (_message != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: Text(
-              _message!,
-              style: TextStyle(fontSize: 12, color: palette.accent),
-            ),
-          ),
-        const _SectionLabel('Inteligentes'),
-        for (final playlist in smart) ...[
-          _PlaylistTile(
-            playlist: playlist,
-            onTap: playlist.isEmpty ? null : () => _open(playlist),
-            onPlay: playlist.isEmpty ? null : () => _playAll(playlist),
-            onExport: null,
-            onRename: null,
-            onDuplicate: null,
-            onDelete: null,
-          ),
-          if (playlist.id == SmartList.top25.id && playlist.isEmpty)
+    return ChContent(
+      maxWidth: 920,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        children: [
+          if (_message != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
               child: Text(
-                'Aún no hay reproducciones: escucha algo y vuelve.',
-                style: TextStyle(fontSize: 11, color: palette.muted),
+                _message!,
+                style: TextStyle(fontSize: 12, color: palette.accent),
               ),
             ),
-        ],
-        const SizedBox(height: 8),
-        const _SectionLabel('Tus listas'),
-        if (mine.isEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
-            child: ChSurface(
-              radius: ChRadius.md,
-              child: Row(
-                children: <Widget>[
-                  ChHexBadge(
-                    icon: Icons.queue_music_rounded,
-                    palette: palette,
-                    size: 40,
-                  ),
-                  const SizedBox(width: ChSpace.md),
-                  Expanded(
-                    child: Text(
-                      'Crea una lista con el botón + o importa un .m3u de '
-                      'otro reproductor.',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: palette.muted,
-                        height: 1.4,
+          const _SectionLabel('Inteligentes'),
+          for (final playlist in smart) ...[
+            _PlaylistTile(
+              playlist: playlist,
+              onTap: playlist.isEmpty ? null : () => _open(playlist),
+              onPlay: playlist.isEmpty ? null : () => _playAll(playlist),
+              onExport: null,
+              onRename: null,
+              onDuplicate: null,
+              onDelete: null,
+            ),
+            if (playlist.id == SmartList.top25.id && playlist.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  'Aún no hay reproducciones: escucha algo y vuelve.',
+                  style: TextStyle(fontSize: 11, color: palette.muted),
+                ),
+              ),
+          ],
+          const SizedBox(height: 8),
+          const _SectionLabel('Tus listas'),
+          if (mine.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+              child: ChSurface(
+                radius: ChRadius.md,
+                child: Row(
+                  children: <Widget>[
+                    ChHexBadge(
+                      icon: Icons.queue_music_rounded,
+                      palette: palette,
+                      size: 40,
+                    ),
+                    const SizedBox(width: ChSpace.md),
+                    Expanded(
+                      child: Text(
+                        'Crea una lista con el botón + o importa un .m3u de '
+                        'otro reproductor.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: palette.muted,
+                          height: 1.4,
+                        ),
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        for (final playlist in mine)
-          _PlaylistTile(
-            playlist: playlist,
-            onTap: () => _open(playlist),
-            onPlay: () => _playAll(playlist),
-            onExport: () => _export(playlist),
-            onRename: () async {
-              final name = await _prompt(
-                'Renombrar',
-                'Nuevo nombre',
-                initial: playlist.name,
-              );
-              if (name != null) _store.rename(playlist.id, name);
-            },
-            onDuplicate: () {
-              final copy = _store.duplicate(playlist.id);
-              setState(
-                () =>
-                    _message = copy == null ? null : 'Duplicada «${copy.name}»',
-              );
-            },
-            onDelete: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: paletteOf(context).surface,
-                  title: const Text('¿Borrar la lista?'),
-                  content: Text(
-                    '«${playlist.name}» se quitará. Los archivos no.',
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(false),
-                      child: const Text('Cancelar'),
-                    ),
-                    FilledButton(
-                      onPressed: () => Navigator.of(context).pop(true),
-                      child: const Text('Borrar'),
                     ),
                   ],
                 ),
-              );
-              if (confirmed == true) _store.delete(playlist.id);
-            },
-          ),
-      ],
+              ),
+            ),
+          for (final playlist in mine)
+            _PlaylistTile(
+              playlist: playlist,
+              onTap: () => _open(playlist),
+              onPlay: () => _playAll(playlist),
+              onExport: () => _export(playlist),
+              onRename: () async {
+                final name = await _prompt(
+                  'Renombrar',
+                  'Nuevo nombre',
+                  initial: playlist.name,
+                );
+                if (name != null) _store.rename(playlist.id, name);
+              },
+              onDuplicate: () {
+                final copy = _store.duplicate(playlist.id);
+                setState(
+                  () => _message = copy == null
+                      ? null
+                      : 'Duplicada «${copy.name}»',
+                );
+              },
+              onDelete: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    backgroundColor: paletteOf(context).surface,
+                    title: const Text('¿Borrar la lista?'),
+                    content: Text(
+                      '«${playlist.name}» se quitará. Los archivos no.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(false),
+                        child: const Text('Cancelar'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.of(context).pop(true),
+                        child: const Text('Borrar'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed == true) _store.delete(playlist.id);
+              },
+            ),
+        ],
+      ),
     );
   }
 

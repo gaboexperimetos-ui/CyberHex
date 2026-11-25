@@ -659,7 +659,9 @@ class _AlbumRail extends StatelessWidget {
                   ),
                   Text(
                     album.artist.isEmpty
-                        ? '${album.count} pistas'
+                        ? (album.count == 1
+                              ? '1 pista'
+                              : '${album.count} pistas')
                         : '${album.artist} · ${album.count}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -702,18 +704,39 @@ class _Shortcuts extends StatelessWidget {
       (icon: Icons.radio_rounded, label: 'Radio', onTap: onRadio),
       (icon: Icons.insights_rounded, label: 'Estadísticas', onTap: onStats),
     ];
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: EdgeInsets.zero,
-      clipBehavior: Clip.none,
-      child: Row(
-        children: <Widget>[
-          for (var i = 0; i < items.length; i++) ...<Widget>[
-            if (i > 0) const SizedBox(width: ChSpace.sm),
-            _Shortcut(item: items[i], palette: palette),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 560) {
+          return Wrap(
+            spacing: ChSpace.sm,
+            runSpacing: ChSpace.sm,
+            children: <Widget>[
+              for (final item in items) _Shortcut(item: item, palette: palette),
+            ],
+          );
+        }
+        return Column(
+          children: <Widget>[
+            for (var i = 0; i < items.length; i += 2)
+              Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 0 : ChSpace.sm),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: _Shortcut(item: items[i], palette: palette),
+                    ),
+                    const SizedBox(width: ChSpace.sm),
+                    Expanded(
+                      child: i + 1 < items.length
+                          ? _Shortcut(item: items[i + 1], palette: palette)
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              ),
           ],
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -742,6 +765,7 @@ class _Shortcut extends StatelessWidget {
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Icon(item.icon, size: 17, color: palette.accent),
             const SizedBox(width: ChSpace.sm),
@@ -799,7 +823,7 @@ class _ActivityCard extends StatelessWidget {
                   Expanded(
                     child: _Metric(
                       value: '${stats.tracks.length}',
-                      label: 'PISTAS',
+                      label: stats.tracks.length == 1 ? 'PISTA' : 'PISTAS',
                       palette: palette,
                     ),
                   ),

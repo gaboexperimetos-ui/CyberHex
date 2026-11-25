@@ -48,11 +48,11 @@ class Playlist {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'id': id,
-        'name': name,
-        'paths': paths,
-        if (updated != null) 'updated': updated!.toIso8601String(),
-      };
+    'id': id,
+    'name': name,
+    'paths': paths,
+    if (updated != null) 'updated': updated!.toIso8601String(),
+  };
 
   static Playlist? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -75,9 +75,12 @@ class Playlist {
   }
 
   /// Resumen para la lista de la UI.
-  String get summary => smart
-      ? 'Inteligente · $length pistas'
-      : '$length pistas${updated == null ? '' : ' · ${_ago(updated!)}'}';
+  String get summary {
+    final count = length == 1 ? '1 pista' : '$length pistas';
+    return smart
+        ? 'Inteligente · $count'
+        : '$count${updated == null ? '' : ' · ${_ago(updated!)}'}';
+  }
 
   static String _ago(DateTime when) {
     final diff = DateTime.now().difference(when);
@@ -123,7 +126,7 @@ enum SmartList {
 /// directorio del archivo importado, que es como funcionan los `.m3u` de verdad.
 class PlaylistStore extends ChangeNotifier {
   PlaylistStore({File? file})
-      : file = file ?? File('${StorageDirectory.current.path}/playlists.json');
+    : file = file ?? File('${StorageDirectory.current.path}/playlists.json');
 
   PlaylistStore.memory() : file = null;
 
@@ -159,7 +162,9 @@ class PlaylistStore extends ChangeNotifier {
   // --- operaciones ---------------------------------------------------------
 
   Playlist create(String name, {List<String> paths = const <String>[]}) {
-    final clean = name.trim().isEmpty ? 'Lista ${_playlists.length + 1}' : name.trim();
+    final clean = name.trim().isEmpty
+        ? 'Lista ${_playlists.length + 1}'
+        : name.trim();
     final id = 'pl_${DateTime.now().microsecondsSinceEpoch}_${_sequence++}';
     final playlist = Playlist(
       id: id,
@@ -188,7 +193,9 @@ class PlaylistStore extends ChangeNotifier {
     if (source == null) return null;
     final copy = Playlist(
       id: 'pl_${DateTime.now().microsecondsSinceEpoch}_${_sequence++}',
-      name: name?.trim().isNotEmpty == true ? name!.trim() : '${source.name} (copia)',
+      name: name?.trim().isNotEmpty == true
+          ? name!.trim()
+          : '${source.name} (copia)',
       paths: List<String>.unmodifiable(source.paths),
       updated: DateTime.now(),
     );
@@ -280,9 +287,11 @@ class PlaylistStore extends ChangeNotifier {
     DateTime? now,
   }) {
     final today = now ?? DateTime.now();
-    final unique = <String>{...library, ..._seen.keys, ..._playlists.expand((p) => p.paths)}
-        .where((path) => path.isNotEmpty)
-        .toList();
+    final unique = <String>{
+      ...library,
+      ..._seen.keys,
+      ..._playlists.expand((p) => p.paths),
+    }.where((path) => path.isNotEmpty).toList();
 
     final ranked = <String>[
       for (final path in unique)
@@ -338,8 +347,10 @@ class PlaylistStore extends ChangeNotifier {
           : parseM3u(text, baseDir: base);
       if (paths.isEmpty) return null;
       final dot = file.path.lastIndexOf('.');
-      final name = file.path
-          .substring(file.path.lastIndexOf(Platform.pathSeparator) + 1, dot < 0 ? null : dot);
+      final name = file.path.substring(
+        file.path.lastIndexOf(Platform.pathSeparator) + 1,
+        dot < 0 ? null : dot,
+      );
       return create(name, paths: paths);
     } catch (_) {
       return null;
@@ -472,7 +483,8 @@ class PlaylistStore extends ChangeNotifier {
           for (final playlist in _playlists) playlist.toJson(),
         ],
         'seen': <String, String>{
-          for (final entry in _seen.entries) entry.key: entry.value.toIso8601String(),
+          for (final entry in _seen.entries)
+            entry.key: entry.value.toIso8601String(),
         },
       };
       final temp = File('${target.path}.tmp');
@@ -506,7 +518,11 @@ class PlaylistStore extends ChangeNotifier {
 
 /// Una de las cinco colas simultáneas.
 class QueueSlot {
-  const QueueSlot({this.name = '', this.paths = const <String>[], this.index = 0});
+  const QueueSlot({
+    this.name = '',
+    this.paths = const <String>[],
+    this.index = 0,
+  });
 
   final String name;
   final List<String> paths;
@@ -518,17 +534,18 @@ class QueueSlot {
 
   String get label => name.trim().isEmpty ? 'Cola' : name.trim();
 
-  QueueSlot copyWith({String? name, List<String>? paths, int? index}) => QueueSlot(
+  QueueSlot copyWith({String? name, List<String>? paths, int? index}) =>
+      QueueSlot(
         name: name ?? this.name,
         paths: paths ?? this.paths,
         index: index ?? this.index,
       );
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'name': name,
-        'paths': paths,
-        'index': index,
-      };
+    'name': name,
+    'paths': paths,
+    'index': index,
+  };
 
   static QueueSlot? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -551,7 +568,7 @@ class QueueSlot {
 /// saltar de una a otra sin perder el sitio.
 class MultiQueueStore extends ChangeNotifier {
   MultiQueueStore({File? file})
-      : file = file ?? File('${StorageDirectory.current.path}/queues.json');
+    : file = file ?? File('${StorageDirectory.current.path}/queues.json');
 
   MultiQueueStore.memory() : file = null;
 
@@ -595,7 +612,8 @@ class MultiQueueStore extends ChangeNotifier {
   bool capture(int slot, List<String> paths, int index) {
     if (slot < 0 || slot >= slotCount) return false;
     final current = _slots[slot];
-    if (listEquals(current.paths, paths) && current.index == index) return false;
+    if (listEquals(current.paths, paths) && current.index == index)
+      return false;
     _slots[slot] = current.copyWith(
       paths: List<String>.unmodifiable(paths),
       index: index,
@@ -652,7 +670,10 @@ class MultiQueueStore extends ChangeNotifier {
     // Antirrebote: arrastrar una cola dispara decenas de cambios y no hace
     // falta escribir el archivo en cada uno.
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 250), () => unawaited(save()));
+    _saveTimer = Timer(
+      const Duration(milliseconds: 250),
+      () => unawaited(save()),
+    );
   }
 
   Timer? _saveTimer;
@@ -671,7 +692,9 @@ class MultiQueueStore extends ChangeNotifier {
       final payload = <String, Object?>{
         'version': formatVersion,
         'active': _active,
-        'slots': <Map<String, Object?>>[for (final slot in _slots) slot.toJson()],
+        'slots': <Map<String, Object?>>[
+          for (final slot in _slots) slot.toJson(),
+        ],
       };
       // Nombre único: dos guardados seguidos compartían el `.tmp` y el segundo
       // `rename` podía encontrárselo ya movido.
@@ -705,7 +728,7 @@ class MultiQueueStore extends ChangeNotifier {
 /// guarda nada (no tiene sentido y llenaría el archivo).
 class LongTrackMemory extends ChangeNotifier {
   LongTrackMemory({File? file})
-      : file = file ?? File('${StorageDirectory.current.path}/long_tracks.json');
+    : file = file ?? File('${StorageDirectory.current.path}/long_tracks.json');
 
   LongTrackMemory.memory() : file = null;
 
@@ -723,7 +746,8 @@ class LongTrackMemory extends ChangeNotifier {
   Timer? _saveTimer;
   bool _loaded = false;
 
-  Map<String, double> get positions => Map<String, double>.unmodifiable(_positions);
+  Map<String, double> get positions =>
+      Map<String, double>.unmodifiable(_positions);
 
   int get length => _positions.length;
 

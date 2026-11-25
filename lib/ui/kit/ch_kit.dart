@@ -254,6 +254,34 @@ class _ChPressableState extends State<ChPressable> {
   }
 }
 
+/// Centra el contenido y le pone un ancho máximo legible en pantallas anchas.
+///
+/// En móvil no cambia nada (el máximo es mayor que la pantalla); en escritorio
+/// evita que las filas y los interruptores se separen a lo largo de un metro de
+/// cristal.
+class ChContent extends StatelessWidget {
+  const ChContent({
+    super.key,
+    required this.child,
+    this.maxWidth = 920,
+    this.padding = EdgeInsets.zero,
+  });
+
+  final Widget child;
+  final double maxWidth;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Padding(padding: padding, child: child),
+      ),
+    );
+  }
+}
+
 /// Encabezado de sección: pestaña de acento, título y acción opcional.
 class ChSectionHeader extends StatelessWidget {
   const ChSectionHeader(
@@ -284,22 +312,27 @@ class ChSectionHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(width: ChSpace.sm + 1),
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: chTitle(palette, size: 14.5, letterSpacing: -0.1),
+        Expanded(
+          child: Row(
+            children: <Widget>[
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: chTitle(palette, size: 14.5, letterSpacing: -0.1),
+                ),
+              ),
+              if (count != null) ...<Widget>[
+                const SizedBox(width: ChSpace.sm),
+                Text(
+                  count.toString().padLeft(2, '0'),
+                  style: chMono(palette, size: 10.5, color: palette.border),
+                ),
+              ],
+            ],
           ),
         ),
-        if (count != null) ...<Widget>[
-          const SizedBox(width: ChSpace.sm),
-          Text(
-            count.toString().padLeft(2, '0'),
-            style: chMono(palette, size: 10.5, color: palette.border),
-          ),
-        ],
-        const Spacer(),
         if (onAction != null)
           TextButton(
             onPressed: onAction,
