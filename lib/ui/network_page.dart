@@ -719,7 +719,6 @@ class _NetworkPageState extends State<NetworkPage> {
           server == null ? 'Red y nube' : server.name,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: chTitle(palette, size: 16.5),
         ),
         leading: server == null
             ? null

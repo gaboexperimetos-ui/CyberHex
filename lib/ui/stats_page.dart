@@ -67,7 +67,7 @@ class _StatsPageState extends State<StatsPage> {
     final artists = stats.topArtists(6);
     return Scaffold(
       appBar: AppBar(
-        title: Text('Estadísticas', style: chTitle(palette, size: 17)),
+        title: const Text('Estadísticas'),
         actions: [
           IconButton(
             tooltip: 'Borrar estadísticas',

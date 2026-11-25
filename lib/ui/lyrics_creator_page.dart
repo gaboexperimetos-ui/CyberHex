@@ -178,7 +178,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
       appBar: AppBar(
         backgroundColor: palette.background,
         foregroundColor: palette.foreground,
-        title: Text('Estudio de letras', style: chTitle(palette, size: 17)),
+        title: const Text('Estudio de letras', style: TextStyle(fontSize: 17)),
         actions: [
           IconButton(
             tooltip: 'Guardar .lrc junto al audio',

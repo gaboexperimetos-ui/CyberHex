@@ -184,9 +184,7 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context, _) {
         final palette = paletteOf(context);
         return Scaffold(
-          appBar: AppBar(
-            title: Text('Ajustes', style: chTitle(palette, size: 17)),
-          ),
+          appBar: AppBar(title: const Text('Ajustes')),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
             children: [

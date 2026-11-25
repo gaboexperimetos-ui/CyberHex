@@ -194,7 +194,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Listas', style: chTitle(paletteOf(context), size: 17)),
+        title: const Text('Listas'),
         actions: [
           IconButton(
             tooltip: 'Importar .m3u / .m3u8 / .pls',
@@ -508,18 +508,13 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final playlist = _playlist;
     if (playlist == null) {
       return Scaffold(
-        appBar: AppBar(
-          title: Text('Lista', style: chTitle(paletteOf(context), size: 17)),
-        ),
+        appBar: AppBar(title: const Text('Lista')),
         body: const Center(child: Text('La lista ya no existe.')),
       );
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          playlist.name,
-          style: chTitle(paletteOf(context), size: 17),
-        ),
+        title: Text(playlist.name),
         actions: [
           IconButton(
             tooltip: 'Reproducir todo',

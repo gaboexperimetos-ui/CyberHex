@@ -167,9 +167,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final progress = _progress;
     final fraction = progress?.fraction;
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Descargas', style: chTitle(palette, size: 17)),
-      ),
+      appBar: AppBar(title: const Text('Descargas')),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         children: [

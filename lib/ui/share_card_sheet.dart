@@ -10,6 +10,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/lyrics_parser.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Tarjeta compartible: carátula, pista, un verso elegido y una forma de onda.
 ///
@@ -173,16 +174,14 @@ class _ShareCardSheetState extends State<ShareCardSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
-                'Tarjeta compartible',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+              ChSheetHeader(
+                icon: Icons.ios_share_rounded,
+                title: 'Tarjeta compartible',
+                palette: palette,
+                subtitle:
+                    'Se exporta tal cual se ve, a 3× (unas 1020 × 1320 px).',
               ),
-              const SizedBox(height: 4),
-              const Text(
-                'Se exporta tal cual se ve, a 3× (unas 1020 × 1320 px).',
-                style: TextStyle(fontSize: 12),
-              ),
-              const SizedBox(height: 14),
+              const SizedBox(height: ChSpace.md),
               Center(
                 child: RepaintBoundary(
                   key: _cardKey,
