@@ -2,14 +2,15 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'design/ch_ambient.dart';
 import 'kit/ch_kit.dart';
 
-/// Mini-reproductor flotante: una barra con carátula, título y transporte que
-/// se queda abajo en la biblioteca y en las listas.
+/// Mini-reproductor flotante de cristal.
 ///
-/// No duplica estado: escucha al controlador y dibuja lo que hay. Tocar el
-/// cuerpo abre el reproductor; el botón hace play/pausa, y deslizar a los lados
-/// cambia de pista sin salir de la pantalla.
+/// Se apoya encima de la navegación y no ocupa una fila entera: carátula,
+/// título y transporte, con el progreso pegado al canto inferior. Tocar el
+/// cuerpo abre el reproductor; deslizar a los lados cambia de pista y subir
+/// abre el reproductor completo.
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({
     super.key,
@@ -36,8 +37,9 @@ class MiniPlayer extends StatelessWidget {
         final palette = paletteOf(context);
         final title = snapshot.title.isEmpty ? 'Sin título' : snapshot.title;
         final artist = snapshot.artist.trim();
+        final cover = snapshot.cover;
         return Padding(
-          padding: EdgeInsets.fromLTRB(10, 0, 10, 6 + bottomPadding),
+          padding: EdgeInsets.fromLTRB(12, 0, 12, 8 + bottomPadding),
           child: GestureDetector(
             behavior: HitTestBehavior.deferToChild,
             onHorizontalDragEnd: (details) {
@@ -50,58 +52,79 @@ class MiniPlayer extends StatelessWidget {
               }
             },
             onVerticalDragEnd: (details) {
-              // Como en Namida: se sube para abrir el reproductor.
               if ((details.primaryVelocity ?? 0) < -320) onOpen();
             },
-            child: Material(
-              color: palette.surface,
-              elevation: 6,
-              borderRadius: BorderRadius.circular(ChRadius.lg),
-              child: InkWell(
-                onTap: onOpen,
+            child: ChGlass(
+              radius: ChRadius.lg,
+              padding: EdgeInsets.zero,
+              blur: 24,
+              onTap: onOpen,
+              child: ClipRRect(
                 borderRadius: BorderRadius.circular(ChRadius.lg),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(ChRadius.lg),
-                    border: Border.all(
-                      color: palette.border.withValues(alpha: 0.55),
+                child: Stack(
+                  children: <Widget>[
+                    if (cover != null)
+                      Positioned.fill(
+                        child: ChBlurredCover(
+                          cover: cover,
+                          sigma: 30,
+                          opacity: 0.42,
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: <Color>[
+                              palette.surface.withValues(alpha: 0.42),
+                              Color.lerp(
+                                palette.surface,
+                                palette.accent,
+                                0.10,
+                              )!.withValues(alpha: 0.55),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(6, 6, 4, 6),
-                        child: Row(
-                          children: <Widget>[
-                            ChCoverThumb(
-                              seed: title,
-                              palette: palette,
-                              cover: snapshot.cover,
-                              size: 42,
-                              radius: ChRadius.sm,
-                              hex: snapshot.cover == null,
-                            ),
-                            const SizedBox(width: ChSpace.md),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w600,
-                                      letterSpacing: -0.1,
-                                      color: palette.foreground,
-                                    ),
-                                  ),
-                                  if (artist.isNotEmpty)
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+                          child: Row(
+                            children: <Widget>[
+                              ChCoverThumb(
+                                seed: title,
+                                palette: palette,
+                                cover: cover,
+                                size: 46,
+                                radius: ChRadius.md,
+                                hex: cover == null,
+                                glow: snapshot.playing,
+                              ),
+                              const SizedBox(width: ChSpace.md),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: <Widget>[
                                     Text(
-                                      artist,
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w600,
+                                        letterSpacing: -0.1,
+                                        color: palette.foreground,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 1),
+                                    Text(
+                                      artist.isEmpty ? 'Desconocido' : artist,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
@@ -109,46 +132,47 @@ class MiniPlayer extends StatelessWidget {
                                         color: palette.muted,
                                       ),
                                     ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                            ChPlayButton(
-                              playing: snapshot.playing,
-                              busy: snapshot.busy,
-                              onPressed: snapshot.busy
-                                  ? null
-                                  : () {
-                                      chHaptic();
-                                      controller.toggle();
-                                    },
-                              size: 38,
-                            ),
-                            IconButton(
-                              tooltip: 'Siguiente',
-                              onPressed: () {
-                                chHaptic();
-                                controller.next();
-                              },
-                              iconSize: 22,
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                Icons.skip_next_rounded,
-                                color: palette.muted,
+                              ChPlayButton(
+                                playing: snapshot.playing,
+                                busy: snapshot.busy,
+                                onPressed: snapshot.busy
+                                    ? null
+                                    : () {
+                                        chHaptic();
+                                        controller.toggle();
+                                      },
+                                size: 40,
                               ),
-                            ),
-                          ],
+                              IconButton(
+                                tooltip: 'Siguiente',
+                                onPressed: () {
+                                  chHaptic();
+                                  controller.next();
+                                },
+                                iconSize: 23,
+                                visualDensity: VisualDensity.compact,
+                                icon: Icon(
+                                  Icons.skip_next_rounded,
+                                  color: palette.muted,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      _Progress(
-                        value: snapshot.duration > 0
-                            ? (controller.position.value / snapshot.duration)
-                                  .clamp(0.0, 1.0)
-                                  .toDouble()
-                            : 0.0,
-                        palette: palette,
-                      ),
-                    ],
-                  ),
+                        _Progress(
+                          value: snapshot.duration > 0
+                              ? (controller.position.value / snapshot.duration)
+                                    .clamp(0.0, 1.0)
+                                    .toDouble()
+                              : 0.0,
+                          palette: palette,
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -175,7 +199,7 @@ class _Progress extends StatelessWidget {
       child: LinearProgressIndicator(
         value: value,
         minHeight: 2,
-        backgroundColor: palette.surfaceHigh,
+        backgroundColor: palette.background.withValues(alpha: 0.35),
         color: palette.accent,
       ),
     );

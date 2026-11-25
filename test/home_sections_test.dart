@@ -118,6 +118,8 @@ void main() {
     );
     expect(find.text('Artista · 2'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Álbum'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Álbum'));
     await tester.pumpAndSettle();
     expect(tapped, 'Álbum');

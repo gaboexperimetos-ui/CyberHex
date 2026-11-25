@@ -13,6 +13,7 @@ import '../core/stats_store.dart';
 import '../core/text_search.dart';
 import '../theme.dart';
 import 'audio_export_sheet.dart';
+import 'design/ch_ambient.dart';
 import 'downloader_page.dart';
 import 'kit/ch_kit.dart';
 import 'network_page.dart';
@@ -506,91 +507,127 @@ class _LibraryPageState extends State<LibraryPage>
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final pad = wide ? 28.0 : 16.0;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Biblioteca'),
-        actions: [
-          PopupMenuButton<LibrarySort>(
-            tooltip: 'Ordenar',
-            icon: const Icon(Icons.sort_rounded),
-            initialValue: _sort,
-            onSelected: (value) => setState(() => _sort = value),
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: LibrarySort.title, child: Text('Título')),
-              PopupMenuItem(value: LibrarySort.artist, child: Text('Artista')),
-              PopupMenuItem(value: LibrarySort.album, child: Text('Álbum')),
-              PopupMenuItem(
-                value: LibrarySort.duration,
-                child: Text('Duración'),
+      backgroundColor: Colors.transparent,
+      body: ChAmbient(
+        palette: palette,
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: EdgeInsets.fromLTRB(pad, 14, pad, 10),
+                child: _header(palette),
               ),
-            ],
-          ),
-          PopupMenuButton<String>(
-            tooltip: 'Más',
-            icon: const Icon(Icons.more_vert_rounded),
-            onSelected: (value) {
-              switch (value) {
-                case 'folder':
-                  _pickFolder();
-                case 'playlists':
-                  _openPlaylists();
-                case 'stats':
-                  _openStats();
-                case 'downloads':
-                  _openDownloads();
-                case 'radio':
-                  _openRadio();
-                case 'network':
-                  _openNetwork();
-                case 'export':
-                  _openExport();
-              }
-            },
-            itemBuilder: (context) => const <PopupMenuEntry<String>>[
-              PopupMenuItem(value: 'folder', child: Text('Elegir carpeta')),
-              PopupMenuItem(value: 'playlists', child: Text('Listas y colas')),
-              PopupMenuItem(value: 'stats', child: Text('Estadísticas')),
-              PopupMenuItem(value: 'downloads', child: Text('Descargas')),
-              PopupMenuItem(value: 'radio', child: Text('Radios por Internet')),
-              PopupMenuItem(value: 'network', child: Text('Red y nube')),
-              PopupMenuItem(
-                value: 'export',
-                child: Text('Exportar la pista actual'),
-              ),
-            ],
-          ),
-        ],
-        bottom: _root == null
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(48),
-                child: TabBar(
-                  controller: _tabs,
-                  isScrollable: true,
-                  tabAlignment: TabAlignment.start,
-                  tabs: const [
-                    Tab(text: 'Canciones'),
-                    Tab(text: 'Álbumes'),
-                    Tab(text: 'Artistas'),
-                    Tab(text: 'Carpetas'),
-                    Tab(text: 'Favoritos'),
-                  ],
+              if (_root != null)
+                Padding(
+                  padding: EdgeInsets.symmetric(horizontal: pad - 8),
+                  child: TabBar(
+                    controller: _tabs,
+                    isScrollable: true,
+                    tabAlignment: TabAlignment.start,
+                    dividerColor: palette.foreground.withValues(alpha: 0.06),
+                    indicatorSize: TabBarIndicatorSize.label,
+                    tabs: const [
+                      Tab(text: 'Canciones'),
+                      Tab(text: 'Álbumes'),
+                      Tab(text: 'Artistas'),
+                      Tab(text: 'Carpetas'),
+                      Tab(text: 'Favoritos'),
+                    ],
+                  ),
                 ),
-              ),
+              Expanded(child: ChContent(maxWidth: 1080, child: _body())),
+              if (widget.showMiniPlayer)
+                MiniPlayer(
+                  controller: _controller,
+                  onOpen:
+                      widget.onOpenPlayer ??
+                      () =>
+                          Navigator.of(context)
+                              .popUntil((route) => route.isFirst),
+                ),
+            ],
+          ),
+        ),
       ),
-      body: Column(
-        children: [
-          Expanded(child: ChContent(maxWidth: 1080, child: _body())),
-          if (widget.showMiniPlayer)
-            MiniPlayer(
-              controller: _controller,
-              onOpen:
-                  widget.onOpenPlayer ??
-                  () =>
-                      Navigator.of(context).popUntil((route) => route.isFirst),
+    );
+  }
+
+  /// Cabecera editorial: ceja, titular y acciones de orden y menú.
+  Widget _header(CyberHexPalette palette) {
+    final root = _root;
+    final count = _entries.length;
+    final subtitle = root == null
+        ? 'Sin carpeta elegida · elige dónde vive tu música'
+        : '$count ${count == 1 ? 'pista' : 'pistas'} · $_rootLabel';
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        Expanded(
+          child: ChEditorialHeader(
+            eyebrow: 'CyberHex · biblioteca local',
+            title: 'Biblioteca',
+            palette: palette,
+            titleSize: 30,
+            subtitle: subtitle,
+          ),
+        ),
+        const SizedBox(width: ChSpace.md),
+        _RoundMenu<LibrarySort>(
+          palette: palette,
+          icon: Icons.sort_rounded,
+          tooltip: 'Ordenar',
+          initialValue: _sort,
+          onSelected: (value) => setState(() => _sort = value),
+          itemBuilder: (context) => const [
+            PopupMenuItem(value: LibrarySort.title, child: Text('Título')),
+            PopupMenuItem(value: LibrarySort.artist, child: Text('Artista')),
+            PopupMenuItem(value: LibrarySort.album, child: Text('Álbum')),
+            PopupMenuItem(value: LibrarySort.duration, child: Text('Duración')),
+          ],
+        ),
+        const SizedBox(width: ChSpace.sm),
+        _RoundMenu<String>(
+          palette: palette,
+          icon: Icons.more_horiz_rounded,
+          tooltip: 'Más',
+          onSelected: (value) {
+            switch (value) {
+              case 'folder':
+                _pickFolder();
+              case 'playlists':
+                _openPlaylists();
+              case 'stats':
+                _openStats();
+              case 'downloads':
+                _openDownloads();
+              case 'radio':
+                _openRadio();
+              case 'network':
+                _openNetwork();
+              case 'export':
+                _openExport();
+            }
+          },
+          itemBuilder: (context) => const <PopupMenuEntry<String>>[
+            PopupMenuItem(value: 'folder', child: Text('Elegir carpeta')),
+            PopupMenuItem(value: 'playlists', child: Text('Listas y colas')),
+            PopupMenuItem(value: 'stats', child: Text('Estadísticas')),
+            PopupMenuItem(value: 'downloads', child: Text('Descargas')),
+            PopupMenuItem(value: 'radio', child: Text('Radios por Internet')),
+            PopupMenuItem(value: 'network', child: Text('Red y nube')),
+            PopupMenuItem(
+              value: 'export',
+              child: Text('Exportar la pista actual'),
             ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -872,33 +909,172 @@ class _LibraryPageState extends State<LibraryPage>
 
   Widget _welcome() {
     final palette = paletteOf(context);
-    return ChEmptyState(
-      icon: Icons.library_music_rounded,
-      palette: palette,
-      title: 'Tu biblioteca',
-      message:
-          'Elige una carpeta y CyberHex la recorrerá en busca de FLAC, '
-          'MP3, WAV, OGG, OPUS, M4A, AAC y ALAC.',
-      action: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FilledButton.icon(
-            onPressed: _pickFolder,
-            icon: const Icon(Icons.folder_open_rounded, size: 18),
-            label: const Text('Elegir carpeta'),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: ChSpace.md),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 320),
-              child: Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11.5, color: palette.error),
-              ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 40),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ChGlass(
+            radius: ChRadius.xl,
+            padding: const EdgeInsets.all(ChSpace.lg),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    ChHexBadge(
+                      icon: Icons.library_music_rounded,
+                      palette: palette,
+                      size: 64,
+                    ),
+                    const SizedBox(width: ChSpace.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            'PRIMER PASO',
+                            style: chEyebrow(
+                              palette,
+                              size: 9,
+                              color: palette.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Tu biblioteca',
+                            style: chTitle(palette, size: 24),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: ChSpace.md),
+                Text(
+                  'Elige una carpeta y CyberHex la recorrerá en tu equipo, sin '
+                  'subir nada a ningún sitio. Los metadatos se leen del archivo '
+                  'y las carátulas se guardan en caché local.',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.55,
+                    color: palette.muted,
+                  ),
+                ),
+                const SizedBox(height: ChSpace.md),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    for (final format in const <String>[
+                      'FLAC',
+                      'MP3',
+                      'WAV',
+                      'OGG',
+                      'OPUS',
+                      'M4A',
+                      'AAC',
+                      'ALAC',
+                    ])
+                      _FormatChip(label: format, palette: palette),
+                  ],
+                ),
+                const SizedBox(height: ChSpace.lg),
+                Wrap(
+                  spacing: ChSpace.sm,
+                  runSpacing: ChSpace.sm,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: <Widget>[
+                    FilledButton.icon(
+                      onPressed: _pickFolder,
+                      icon: const Icon(Icons.folder_open_rounded, size: 18),
+                      label: const Text('Elegir carpeta'),
+                    ),
+                    Text(
+                      'Nada sale de este equipo.',
+                      style: chMono(palette, size: 9.5),
+                    ),
+                  ],
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: ChSpace.md),
+                  Text(
+                    _error!,
+                    style: TextStyle(fontSize: 11.5, color: palette.error),
+                  ),
+                ],
+              ],
             ),
-          ],
-        ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Menú circular de cristal para las acciones de la cabecera.
+class _RoundMenu<T> extends StatelessWidget {
+  const _RoundMenu({
+    required this.palette,
+    required this.icon,
+    required this.tooltip,
+    required this.onSelected,
+    required this.itemBuilder,
+    this.initialValue,
+  });
+
+  final CyberHexPalette palette;
+  final IconData icon;
+  final String tooltip;
+  final ValueChanged<T> onSelected;
+  final PopupMenuItemBuilder<T> itemBuilder;
+  final T? initialValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: palette.surfaceHigh.withValues(alpha: 0.5),
+        border: Border.all(color: palette.foreground.withValues(alpha: 0.09)),
+      ),
+      child: PopupMenuButton<T>(
+        tooltip: tooltip,
+        icon: Icon(icon, size: 20, color: palette.foreground),
+        initialValue: initialValue,
+        onSelected: onSelected,
+        itemBuilder: itemBuilder,
+      ),
+    );
+  }
+}
+
+/// Insignia de formato del estado vacío.
+class _FormatChip extends StatelessWidget {
+  const _FormatChip({required this.label, required this.palette});
+
+  final String label;
+  final CyberHexPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: palette.accent.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(ChRadius.pill),
+        border: Border.all(color: palette.accent.withValues(alpha: 0.22)),
+      ),
+      child: Text(
+        label,
+        style: chMono(
+          palette,
+          size: 9,
+          weight: FontWeight.w600,
+          color: palette.accent,
+        ),
       ),
     );
   }

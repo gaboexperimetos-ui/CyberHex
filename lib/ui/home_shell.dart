@@ -205,10 +205,6 @@ class _HomeShellState extends State<HomeShell> {
       body: Row(
         children: [
           if (wide) _navigationRail(palette) else const SizedBox.shrink(),
-          if (wide)
-            const VerticalDivider(width: 1, thickness: 0)
-          else
-            const SizedBox.shrink(),
           Expanded(child: content),
         ],
       ),
@@ -255,71 +251,75 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   Widget _navigationRail(CyberHexPalette palette) {
-    return NavigationRailTheme(
-      data: NavigationRailThemeData(
-        backgroundColor: palette.surface,
-        indicatorColor: palette.accent.withValues(alpha: 0.16),
-        selectedIconTheme: IconThemeData(color: palette.accent, size: 24),
-        unselectedIconTheme: IconThemeData(color: palette.muted, size: 24),
-        selectedLabelTextStyle: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: palette.accent,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomLeft,
+          colors: <Color>[
+            Color.lerp(palette.surface, palette.primary, 0.30)!,
+            palette.surface,
+            palette.background,
+          ],
+          stops: const <double>[0, 0.55, 1],
         ),
-        unselectedLabelTextStyle: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: palette.muted,
+        border: Border(
+          right: BorderSide(color: palette.foreground.withValues(alpha: 0.06)),
         ),
       ),
-      child: NavigationRail(
-        selectedIndex: _index,
-        onDestinationSelected: _select,
-        labelType: NavigationRailLabelType.all,
-        leading: Padding(
-          padding: const EdgeInsets.fromLTRB(0, 18, 0, 10),
-          child: Column(
-            children: <Widget>[
-              ChHexBadge(
-                icon: Icons.graphic_eq_rounded,
-                palette: palette,
-                size: 42,
-              ),
-              const SizedBox(height: ChSpace.sm),
-              Text(
-                'CYBERHEX',
-                style: TextStyle(
-                  fontFamily: 'Righteous',
-                  fontSize: 9.5,
-                  letterSpacing: 1.6,
-                  color: palette.foreground.withValues(alpha: 0.9),
-                ),
-              ),
-            ],
+      child: NavigationRailTheme(
+        data: NavigationRailThemeData(
+          backgroundColor: Colors.transparent,
+          indicatorColor: palette.accent.withValues(alpha: 0.16),
+          indicatorShape: const StadiumBorder(),
+          useIndicator: true,
+          selectedIconTheme: IconThemeData(color: palette.accent, size: 22),
+          unselectedIconTheme: IconThemeData(color: palette.muted, size: 22),
+          selectedLabelTextStyle: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: -0.1,
+            color: palette.foreground,
+          ),
+          unselectedLabelTextStyle: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            letterSpacing: -0.1,
+            color: palette.muted,
           ),
         ),
-        destinations: const <NavigationRailDestination>[
-          NavigationRailDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: Text('Inicio'),
-          ),
-          NavigationRailDestination(
-            icon: Icon(Icons.library_music_outlined),
-            selectedIcon: Icon(Icons.library_music_rounded),
-            label: Text('Biblioteca'),
-          ),
-          NavigationRailDestination(
-            icon: Icon(Icons.queue_music_outlined),
-            selectedIcon: Icon(Icons.queue_music_rounded),
-            label: Text('Listas'),
-          ),
-          NavigationRailDestination(
-            icon: Icon(Icons.tune_outlined),
-            selectedIcon: Icon(Icons.tune_rounded),
-            label: Text('Ajustes'),
-          ),
-        ],
+        child: NavigationRail(
+          extended: true,
+          minExtendedWidth: 214,
+          labelType: NavigationRailLabelType.none,
+          groupAlignment: -0.72,
+          selectedIndex: _index,
+          onDestinationSelected: _select,
+          leading: _RailBrand(palette: palette),
+          trailing: _RailEngine(palette: palette),
+          destinations: const <NavigationRailDestination>[
+            NavigationRailDestination(
+              icon: Icon(Icons.home_outlined),
+              selectedIcon: Icon(Icons.home_rounded),
+              label: Text('Inicio'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.library_music_outlined),
+              selectedIcon: Icon(Icons.library_music_rounded),
+              label: Text('Biblioteca'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.queue_music_outlined),
+              selectedIcon: Icon(Icons.queue_music_rounded),
+              label: Text('Listas'),
+            ),
+            NavigationRailDestination(
+              icon: Icon(Icons.tune_outlined),
+              selectedIcon: Icon(Icons.tune_rounded),
+              label: Text('Ajustes'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -371,4 +371,135 @@ class _HomeShellState extends State<HomeShell> {
           label: 'Ajustes',
         ),
       ];
+}
+
+/// Marca de la barra lateral: sello hexagonal y palabra.
+class _RailBrand extends StatelessWidget {
+  const _RailBrand({required this.palette});
+
+  final CyberHexPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 178,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 24, 18, 26),
+        child: Row(
+          children: <Widget>[
+            ChHexBadge(
+              icon: Icons.graphic_eq_rounded,
+              palette: palette,
+              size: 44,
+            ),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text.rich(
+                    TextSpan(
+                      style: TextStyle(
+                        fontFamily: 'Righteous',
+                        fontSize: 15,
+                        letterSpacing: 1.0,
+                        color: palette.foreground,
+                      ),
+                      children: <InlineSpan>[
+                        const TextSpan(text: 'CYBER'),
+                        TextSpan(
+                          text: 'HEX',
+                          style: TextStyle(color: palette.accent),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'AUDIO ENGINE',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: chMono(palette, size: 7.5, letterSpacing: 0.9),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Ficha técnica al pie de la barra lateral.
+class _RailEngine extends StatelessWidget {
+  const _RailEngine({required this.palette});
+
+  final CyberHexPalette palette;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 178,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 0, 14, 18),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: palette.surfaceHigh.withValues(alpha: 0.32),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: palette.foreground.withValues(alpha: 0.06),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: palette.accent,
+                      shape: BoxShape.circle,
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: palette.accent.withValues(alpha: 0.7),
+                          blurRadius: 7,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Flexible(
+                    child: Text(
+                      'MOTOR NATIVO',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: chEyebrow(palette, size: 8, color: palette.accent),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 7),
+              Text(
+                '48 kHz · 24 bit',
+                style: chMono(palette, size: 10, color: palette.foreground),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'FLAC · WAV · MP3 · OGG',
+                style: chMono(palette, size: 8, color: palette.muted),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
