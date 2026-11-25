@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/lyrics_parser.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Estudio de letras: convierte un texto pegado en un `.lrc` sincronizado.
 ///
@@ -53,6 +54,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
   }
 
   void _prepare() {
+    chHaptic();
     final lines = LyricsParser.parsePlain(_text.text).lines;
     setState(() {
       _lines = lines;
@@ -65,6 +67,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
   }
 
   void _mark() {
+    chHaptic();
     if (_lines.isEmpty) {
       _prepare();
       return;
@@ -87,6 +90,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
   /// Ajuste fino del último verso marcado (o del que toca, si aún no hay).
   void _nudge(double delta) {
     if (_lines.isEmpty || _stamps.isEmpty) return;
+    chHaptic();
     final index = (_cursor > 0 ? _cursor - 1 : 0).clamp(0, _lines.length - 1);
     if (_stamps[index] < 0) return;
     setState(() {
@@ -98,6 +102,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
 
   void _undo() {
     if (_cursor == 0 || _stamps.isEmpty) return;
+    chHaptic();
     setState(() {
       _cursor -= 1;
       _stamps[_cursor] = -1;
@@ -173,7 +178,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
       appBar: AppBar(
         backgroundColor: palette.background,
         foregroundColor: palette.foreground,
-        title: const Text('Estudio de letras', style: TextStyle(fontSize: 17)),
+        title: Text('Estudio de letras', style: chTitle(palette, size: 17)),
         actions: [
           IconButton(
             tooltip: 'Guardar .lrc junto al audio',
@@ -218,17 +223,13 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
           children: [
             Text(
               'Pega la letra (una línea por verso)',
-              style: TextStyle(fontSize: 13, color: palette.muted),
+              style: chTitle(palette, size: 13.5),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: ChSpace.sm),
             Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  color: palette.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: palette.border),
-                ),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: ChSurface(
+                radius: ChRadius.md,
+                padding: const EdgeInsets.symmetric(horizontal: ChSpace.md),
                 child: TextField(
                   controller: _text,
                   maxLines: null,
@@ -242,14 +243,12 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: ChSpace.md),
             FilledButton.icon(
               onPressed: _prepare,
               icon: const Icon(Icons.format_list_numbered_rounded, size: 18),
               label: const Text('Preparar versos'),
               style: FilledButton.styleFrom(
-                backgroundColor: palette.accent,
-                foregroundColor: palette.onAccent,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
@@ -277,8 +276,11 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                   key: key,
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: InkWell(
-                    borderRadius: BorderRadius.circular(10),
-                    onTap: () => setState(() => _cursor = index),
+                    borderRadius: BorderRadius.circular(ChRadius.sm),
+                    onTap: () {
+                      chHaptic();
+                      setState(() => _cursor = index);
+                    },
                     child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -288,7 +290,7 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                         color: current
                             ? palette.accent.withValues(alpha: 0.12)
                             : palette.surface.withValues(alpha: 0.5),
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(ChRadius.sm),
                       ),
                       child: Row(
                         children: [
@@ -309,14 +311,12 @@ class _LyricsCreatorPageState extends State<LyricsCreatorPage> {
                           const SizedBox(width: 8),
                           Text(
                             stamp >= 0 ? _stamp(stamp) : '—',
-                            style: TextStyle(
-                              fontSize: 11,
+                            style: chMono(
+                              palette,
+                              size: 10.5,
                               color: stamp >= 0
                                   ? palette.accent
                                   : palette.muted,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
                             ),
                           ),
                         ],
@@ -413,61 +413,73 @@ class _Transport extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
     final snapshot = controller.snapshot;
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: palette.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: palette.border.withValues(alpha: 0.6)),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        ChSpace.lg,
+        ChSpace.sm,
+        ChSpace.lg,
+        ChSpace.sm,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                if (artist.isNotEmpty)
+      child: ChSurface(
+        radius: ChRadius.md,
+        padding: const EdgeInsets.symmetric(
+          horizontal: ChSpace.md,
+          vertical: 10,
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    artist,
+                    title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: palette.muted),
+                    style: chTitle(palette, size: 13.5),
                   ),
-              ],
+                  if (artist.isNotEmpty)
+                    Text(
+                      artist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: palette.muted),
+                    ),
+                ],
+              ),
             ),
-          ),
-          IconButton(
-            tooltip: 'Atrás 5 s',
-            onPressed: () {
-              final target = controller.position.value - 5;
-              controller.seek(target < 0 ? 0 : target);
-            },
-            icon: const Icon(Icons.replay_5_rounded),
-          ),
-          IconButton(
-            tooltip: snapshot.playing ? 'Pausa' : 'Reproducir',
-            onPressed: controller.toggle,
-            icon: Icon(
-              snapshot.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              color: palette.accent,
+            IconButton(
+              tooltip: 'Atrás 5 s',
+              onPressed: () {
+                chHaptic();
+                final target = controller.position.value - 5;
+                controller.seek(target < 0 ? 0 : target);
+              },
+              icon: const Icon(Icons.replay_5_rounded),
             ),
-          ),
-          IconButton(
-            tooltip: 'Adelante 5 s',
-            onPressed: () => controller.seek(controller.position.value + 5),
-            icon: const Icon(Icons.forward_5_rounded),
-          ),
-        ],
+            IconButton(
+              tooltip: snapshot.playing ? 'Pausa' : 'Reproducir',
+              onPressed: () {
+                chHaptic();
+                controller.toggle();
+              },
+              icon: Icon(
+                snapshot.playing
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded,
+                color: palette.accent,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Adelante 5 s',
+              onPressed: () {
+                chHaptic();
+                controller.seek(controller.position.value + 5);
+              },
+              icon: const Icon(Icons.forward_5_rounded),
+            ),
+          ],
+        ),
       ),
     );
   }
