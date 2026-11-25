@@ -184,7 +184,9 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context, _) {
         final palette = paletteOf(context);
         return Scaffold(
-          appBar: AppBar(title: const Text('Ajustes')),
+          appBar: AppBar(
+            title: Text('Ajustes', style: chTitle(palette, size: 17)),
+          ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
             children: [
@@ -197,17 +199,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     ChoiceChip(
                       label: Text(
                         id.label,
-                        style: const TextStyle(fontSize: 12),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: widget.theme.themeId == id
+                              ? palette.onAccent
+                              : palette.foreground,
+                        ),
                       ),
                       selected: widget.theme.themeId == id,
-                      selectedColor: palette.accent.withValues(alpha: 0.24),
+                      selectedColor: palette.accent,
                       backgroundColor: palette.surfaceHigh,
                       side: BorderSide(
                         color: widget.theme.themeId == id
                             ? palette.accent
                             : palette.border,
                       ),
-                      onSelected: (_) => widget.theme.setTheme(id),
+                      onSelected: (_) {
+                        chHaptic();
+                        widget.theme.setTheme(id);
+                      },
                     ),
                 ],
               ),
@@ -217,9 +227,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 dense: true,
                 value: widget.theme.dynamicColor,
                 onChanged: widget.theme.setDynamicColor,
-                title: const Text(
+                title: Text(
                   'Color dinámico de carátula',
-                  style: TextStyle(fontSize: 14),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 subtitle: Text(
                   widget.theme.coverAccent == null
@@ -237,17 +247,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     ChoiceChip(
                       label: Text(
                         style.label,
-                        style: const TextStyle(fontSize: 12),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: widget.theme.coverStyle == style
+                              ? palette.onAccent
+                              : palette.foreground,
+                        ),
                       ),
                       selected: widget.theme.coverStyle == style,
-                      selectedColor: palette.accent.withValues(alpha: 0.24),
+                      selectedColor: palette.accent,
                       backgroundColor: palette.surfaceHigh,
                       side: BorderSide(
                         color: widget.theme.coverStyle == style
                             ? palette.accent
                             : palette.border,
                       ),
-                      onSelected: (_) => widget.theme.setCoverStyle(style),
+                      onSelected: (_) {
+                        chHaptic();
+                        widget.theme.setCoverStyle(style);
+                      },
                     ),
                 ],
               ),
@@ -257,9 +275,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 dense: true,
                 value: widget.theme.pocketMode,
                 onChanged: widget.theme.setPocketMode,
-                title: const Text(
+                title: Text(
                   'Modo bolsillo',
-                  style: TextStyle(fontSize: 14),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 subtitle: Text(
                   'Bloquea los toques del reproductor; se sale manteniendo pulsado.',
@@ -275,7 +293,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   onChanged: (_) => widget.theme.toggleAction(action),
                   title: Text(
                     action.label,
-                    style: const TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   secondary: Icon(action.icon, size: 20, color: palette.muted),
                   controlAffinity: ListTileControlAffinity.trailing,
@@ -316,18 +334,25 @@ class _SettingsPageState extends State<SettingsPage> {
                         ChoiceChip(
                           label: Text(
                             device.label,
-                            style: const TextStyle(fontSize: 12),
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: device.index == player.outputDevice
+                                  ? palette.onAccent
+                                  : palette.foreground,
+                            ),
                           ),
                           selected: device.index == player.outputDevice,
-                          selectedColor: palette.accent.withValues(alpha: 0.24),
+                          selectedColor: palette.accent,
                           backgroundColor: palette.surfaceHigh,
                           side: BorderSide(
                             color: device.index == player.outputDevice
                                 ? palette.accent
                                 : palette.border,
                           ),
-                          onSelected: (_) =>
-                              player.setOutputDevice(device.index),
+                          onSelected: (_) {
+                            chHaptic();
+                            player.setOutputDevice(device.index);
+                          },
                         ),
                     ],
                   ),
@@ -336,9 +361,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   dense: true,
                   value: player.snapshot.s16Output,
                   onChanged: player.setS16Output,
-                  title: const Text(
+                  title: Text(
                     'Salida S16 con dither TPDF',
-                    style: TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     'Entrega 16 bits con dither en vez de f32: para DACs y '
@@ -358,9 +383,9 @@ class _SettingsPageState extends State<SettingsPage> {
                       SettingsPage.alwaysOnTop.value = value;
                       widget.desktop!.setAlwaysOnTop(value);
                     },
-                    title: const Text(
+                    title: Text(
                       'Ventana siempre encima',
-                      style: TextStyle(fontSize: 14),
+                      style: chTitle(palette, size: 13.5),
                     ),
                     subtitle: Text(
                       'Solo Linux: la ventana queda por delante del resto.',
@@ -376,9 +401,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     size: 20,
                     color: palette.muted,
                   ),
-                  title: const Text(
+                  title: Text(
                     'Notificar la pista nueva',
-                    style: TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     'Manda una notificación de escritorio ahora mismo '
@@ -397,9 +422,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 dense: true,
                 value: widget.theme.autoPlayOnConnect,
                 onChanged: widget.theme.setAutoPlayOnConnect,
-                title: const Text(
+                title: Text(
                   'Auto-play al conectar',
-                  style: TextStyle(fontSize: 14),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 subtitle: Text(
                   'Si había una pista en pausa, arranca al enchufar auriculares '
@@ -419,7 +444,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       : (_) => widget.theme.toggleMediaAction(action),
                   title: Text(
                     action.label,
-                    style: const TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: action == MediaAction.toggle
                       ? Text(
@@ -438,9 +463,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     size: 20,
                     color: palette.muted,
                   ),
-                  title: const Text(
+                  title: Text(
                     'Exportar la pista actual',
-                    style: TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     'Elige un rango y renderiza WAV con el DSP puesto.',
@@ -498,9 +523,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   onChanged: (value) => _scrobbler!.updateSettings(
                     _scrobbler!.settings.copyWith(enabled: value),
                   ),
-                  title: const Text(
+                  title: Text(
                     'Enviar escuchas',
-                    style: TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     'Cuenta si suena más de la mitad o más de cuatro minutos. '
@@ -585,9 +610,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     size: 20,
                     color: palette.muted,
                   ),
-                  title: const Text(
+                  title: Text(
                     'API local y Study Platform',
-                    style: TextStyle(fontSize: 14),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     widget.connections!.localApiUrl == null
