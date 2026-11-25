@@ -7,6 +7,7 @@ import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../core/stats_store.dart';
 import '../theme.dart';
+import 'design/ch_ambient.dart';
 import 'kit/ch_kit.dart';
 import 'mini_player.dart';
 
@@ -192,22 +193,22 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Listas'),
-        actions: [
-          IconButton(
-            tooltip: 'Importar .m3u / .m3u8 / .pls',
-            onPressed: _import,
-            icon: const Icon(Icons.file_open_rounded),
-          ),
-          IconButton(
-            tooltip: 'Nueva lista',
-            onPressed: _create,
-            icon: const Icon(Icons.playlist_add_rounded),
-          ),
-        ],
-      ),
+    return ChPageScaffold(
+      eyebrow: 'CyberHex · colecciones',
+      title: 'Listas',
+      subtitle: 'Inteligentes y tuyas · en este equipo',
+      actions: <Widget>[
+        IconButton(
+          tooltip: 'Importar .m3u / .m3u8 / .pls',
+          onPressed: _import,
+          icon: const Icon(Icons.file_open_rounded),
+        ),
+        IconButton(
+          tooltip: 'Nueva lista',
+          onPressed: _create,
+          icon: const Icon(Icons.playlist_add_rounded),
+        ),
+      ],
       body: Column(
         children: [
           Expanded(child: _list()),

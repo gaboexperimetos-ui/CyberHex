@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/stats_store.dart';
 import '../theme.dart';
+import 'design/ch_ambient.dart';
 import 'kit/ch_kit.dart';
 
 /// Estadísticas de escucha: totales, top de pistas y artistas, franja horaria e
@@ -65,152 +66,147 @@ class _StatsPageState extends State<StatsPage> {
     final stats = widget.stats;
     final top = stats.topTracks(8);
     final artists = stats.topArtists(6);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Estadísticas'),
-        actions: [
-          IconButton(
-            tooltip: 'Borrar estadísticas',
-            onPressed: stats.totalPlays == 0 ? null : _confirmClear,
-            icon: const Icon(Icons.delete_outline_rounded),
-          ),
-        ],
-      ),
-      body: ChContent(
-        maxWidth: 980,
-        child: stats.totalPlays == 0
-            ? ChEmptyState(
-                icon: Icons.insights_rounded,
-                title: 'Aún no hay datos',
-                message:
-                    'Todavía no hay nada que contar.\nDale al play y vuelve por '
-                    'aquí.',
-                palette: palette,
-              )
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _Figure(
-                          value: '${stats.totalPlays}',
-                          label: 'reproducciones',
-                          icon: Icons.play_circle_outline_rounded,
-                        ),
+    return ChPageScaffold(
+      eyebrow: 'CyberHex · historial',
+      title: 'Estadísticas',
+      subtitle: 'Lo que suena en este equipo',
+      maxWidth: 980,
+      actions: <Widget>[
+        IconButton(
+          tooltip: 'Borrar estadísticas',
+          onPressed: stats.totalPlays == 0 ? null : _confirmClear,
+          icon: const Icon(Icons.delete_outline_rounded),
+        ),
+      ],
+      body: stats.totalPlays == 0
+          ? ChEmptyState(
+              icon: Icons.insights_rounded,
+              title: 'Aún no hay datos',
+              message:
+                  'Todavía no hay nada que contar.\nDale al play y vuelve por '
+                  'aquí.',
+              palette: palette,
+            )
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: _Figure(
+                        value: '${stats.totalPlays}',
+                        label: 'reproducciones',
+                        icon: Icons.play_circle_outline_rounded,
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _Figure(
-                          value: _minutes(stats.totalMinutes),
-                          label: 'escuchados',
-                          icon: Icons.timer_outlined,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _Figure(
-                          value: '${stats.tracks.length}',
-                          label: stats.tracks.length == 1
-                              ? 'pista distinta'
-                              : 'pistas distintas',
-                          icon: Icons.library_music_outlined,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _Figure(
-                          value: stats.favoriteHour < 0
-                              ? '—'
-                              : '${stats.favoriteHour.toString().padLeft(2, '0')}:00',
-                          label: stats.favoriteSlot,
-                          icon: Icons.schedule_rounded,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const _Title('Por hora del día'),
-                  _HourChart(hours: stats.byHour, peak: stats.favoriteHour),
-                  const _Title('Más escuchadas'),
-                  if (top.isEmpty)
-                    Text('—', style: chMono(palette, size: 12))
-                  else
-                    for (var i = 0; i < top.length; i++)
-                      _RankRow(
-                        position: i + 1,
-                        title: top[i].label,
-                        subtitle: top[i].artist.isEmpty
-                            ? '${top[i].plays}× · ${top[i].minutes} min'
-                            : '${top[i].artist} · ${top[i].plays}× · ${top[i].minutes} min',
-                      ),
-                  const _Title('Artistas'),
-                  if (artists.isEmpty)
-                    Text('—', style: chMono(palette, size: 12))
-                  else
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final artist in artists)
-                          Chip(
-                            backgroundColor: palette.surfaceHigh,
-                            side: BorderSide(color: palette.border),
-                            label: Text(
-                              '${artist.key} · ${artist.value}',
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                          ),
-                      ],
                     ),
-                  const _Title('Historial reciente'),
-                  if (stats.history.isEmpty)
-                    Text('—', style: chMono(palette, size: 12))
-                  else
-                    for (final entry in stats.history.take(12))
-                      ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            ChCoverThumb(
-                              seed: entry.label,
-                              palette: palette,
-                              size: 36,
-                              hex: true,
-                            ),
-                            const SizedBox(width: ChSpace.sm + 2),
-                            Text(
-                              entry.clock,
-                              style: chMono(palette, size: 10.5),
-                            ),
-                          ],
-                        ),
-                        title: Text(
-                          entry.label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: chTitle(palette, size: 13.5),
-                        ),
-                        subtitle: entry.artist.isEmpty
-                            ? null
-                            : Text(
-                                entry.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: palette.muted,
-                                ),
-                              ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _Figure(
+                        value: _minutes(stats.totalMinutes),
+                        label: 'escuchados',
+                        icon: Icons.timer_outlined,
                       ),
-                ],
-              ),
-      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _Figure(
+                        value: '${stats.tracks.length}',
+                        label: stats.tracks.length == 1
+                            ? 'pista distinta'
+                            : 'pistas distintas',
+                        icon: Icons.library_music_outlined,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _Figure(
+                        value: stats.favoriteHour < 0
+                            ? '—'
+                            : '${stats.favoriteHour.toString().padLeft(2, '0')}:00',
+                        label: stats.favoriteSlot,
+                        icon: Icons.schedule_rounded,
+                      ),
+                    ),
+                  ],
+                ),
+                const _Title('Por hora del día'),
+                _HourChart(hours: stats.byHour, peak: stats.favoriteHour),
+                const _Title('Más escuchadas'),
+                if (top.isEmpty)
+                  Text('—', style: chMono(palette, size: 12))
+                else
+                  for (var i = 0; i < top.length; i++)
+                    _RankRow(
+                      position: i + 1,
+                      title: top[i].label,
+                      subtitle: top[i].artist.isEmpty
+                          ? '${top[i].plays}× · ${top[i].minutes} min'
+                          : '${top[i].artist} · ${top[i].plays}× · ${top[i].minutes} min',
+                    ),
+                const _Title('Artistas'),
+                if (artists.isEmpty)
+                  Text('—', style: chMono(palette, size: 12))
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      for (final artist in artists)
+                        Chip(
+                          backgroundColor: palette.surfaceHigh,
+                          side: BorderSide(color: palette.border),
+                          label: Text(
+                            '${artist.key} · ${artist.value}',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                    ],
+                  ),
+                const _Title('Historial reciente'),
+                if (stats.history.isEmpty)
+                  Text('—', style: chMono(palette, size: 12))
+                else
+                  for (final entry in stats.history.take(12))
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          ChCoverThumb(
+                            seed: entry.label,
+                            palette: palette,
+                            size: 36,
+                            hex: true,
+                          ),
+                          const SizedBox(width: ChSpace.sm + 2),
+                          Text(entry.clock, style: chMono(palette, size: 10.5)),
+                        ],
+                      ),
+                      title: Text(
+                        entry.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: chTitle(palette, size: 13.5),
+                      ),
+                      subtitle: entry.artist.isEmpty
+                          ? null
+                          : Text(
+                              entry.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: palette.muted,
+                              ),
+                            ),
+                    ),
+              ],
+            ),
     );
   }
 

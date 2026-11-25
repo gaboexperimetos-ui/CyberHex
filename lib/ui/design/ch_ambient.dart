@@ -297,3 +297,79 @@ class ChEditorialHeader extends StatelessWidget {
     );
   }
 }
+
+/// Armazón de una página de primer nivel: fondo atmosférico, cabecera
+/// editorial y cuerpo, con el ancho máximo opcional.
+class ChPageScaffold extends StatelessWidget {
+  const ChPageScaffold({
+    super.key,
+    required this.title,
+    required this.body,
+    this.eyebrow = 'CyberHex',
+    this.subtitle,
+    this.actions = const <Widget>[],
+    this.leading,
+    this.maxWidth,
+    this.titleSize = 30,
+  });
+
+  final String title;
+  final Widget body;
+  final String eyebrow;
+  final String? subtitle;
+  final List<Widget> actions;
+  final Widget? leading;
+  final double? maxWidth;
+  final double titleSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = paletteOf(context);
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final pad = wide ? 28.0 : 16.0;
+    final trailing = actions.isEmpty
+        ? null
+        : Row(mainAxisSize: MainAxisSize.min, children: actions);
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: ChAmbient(
+        palette: palette,
+        child: SafeArea(
+          bottom: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: EdgeInsets.fromLTRB(pad, 14, pad, 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: <Widget>[
+                    if (leading != null) ...<Widget>[
+                      leading!,
+                      const SizedBox(width: ChSpace.md),
+                    ],
+                    Expanded(
+                      child: ChEditorialHeader(
+                        eyebrow: eyebrow,
+                        title: title,
+                        palette: palette,
+                        subtitle: subtitle,
+                        trailing: trailing,
+                        titleSize: titleSize,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: maxWidth == null
+                    ? body
+                    : ChContent(maxWidth: maxWidth!, child: body),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

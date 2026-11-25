@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/player_controller.dart';
 import '../core/session_store.dart';
 import '../theme.dart';
+import 'design/ch_ambient.dart';
 import 'kit/ch_kit.dart';
 import 'mini_player.dart';
 
@@ -713,48 +714,44 @@ class _NetworkPageState extends State<NetworkPage> {
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
     final server = _server;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          server == null ? 'Red y nube' : server.name,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        leading: server == null
-            ? null
-            : IconButton(
-                tooltip: 'Volver a servidores',
-                icon: const Icon(Icons.arrow_back_rounded),
-                onPressed: () => setState(() {
-                  _server = null;
-                  _entries = const <RemoteEntry>[];
-                  _message = null;
-                }),
-              ),
-        actions: [
-          if (server != null && server.kind == RemoteKind.webdav)
-            IconButton(
-              tooltip: 'Subir un nivel',
-              onPressed: () {
-                final current = _current;
-                if (current == null) return;
-                final segments = current.pathSegments
-                    .where((s) => s.isNotEmpty)
-                    .toList();
-                if (segments.length <= 1) return;
-                final parentPath =
-                    '/${segments.take(segments.length - 1).join('/')}/';
-                unawaited(_list(current.replace(path: parentPath)));
-              },
-              icon: const Icon(Icons.arrow_upward_rounded),
+    return ChPageScaffold(
+      eyebrow: 'CyberHex · red',
+      title: server == null ? 'Red y nube' : server.name,
+      subtitle: 'Servidores, WebDAV y enlaces',
+      leading: server == null
+          ? null
+          : IconButton(
+              tooltip: 'Volver a servidores',
+              icon: const Icon(Icons.arrow_back_rounded),
+              onPressed: () => setState(() {
+                _server = null;
+                _entries = const <RemoteEntry>[];
+                _message = null;
+              }),
             ),
+      actions: [
+        if (server != null && server.kind == RemoteKind.webdav)
           IconButton(
-            tooltip: 'Añadir servidor o enlace',
-            onPressed: _addServer,
-            icon: const Icon(Icons.add_link_rounded),
+            tooltip: 'Subir un nivel',
+            onPressed: () {
+              final current = _current;
+              if (current == null) return;
+              final segments = current.pathSegments
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+              if (segments.length <= 1) return;
+              final parentPath =
+                  '/${segments.take(segments.length - 1).join('/')}/';
+              unawaited(_list(current.replace(path: parentPath)));
+            },
+            icon: const Icon(Icons.arrow_upward_rounded),
           ),
-        ],
-      ),
+        IconButton(
+          tooltip: 'Añadir servidor o enlace',
+          onPressed: _addServer,
+          icon: const Icon(Icons.add_link_rounded),
+        ),
+      ],
       body: Column(
         children: [
           if (_loading)

@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/player_controller.dart';
 import '../core/radio_store.dart';
 import '../theme.dart';
+import 'design/ch_ambient.dart';
 import 'kit/ch_kit.dart';
 import 'mini_player.dart';
 
@@ -218,27 +219,27 @@ class _RadioPageState extends State<RadioPage> {
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
     final mine = _store.stations;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Radios'),
-        actions: [
-          IconButton(
-            tooltip: 'Importar .m3u/.m3u8/.pls',
-            onPressed: _import,
-            icon: const Icon(Icons.playlist_add_rounded),
-          ),
-          IconButton(
-            tooltip: 'Exportar .m3u',
-            onPressed: _export,
-            icon: const Icon(Icons.save_alt_rounded),
-          ),
-          IconButton(
-            tooltip: 'Nueva emisora',
-            onPressed: _add,
-            icon: const Icon(Icons.add_rounded),
-          ),
-        ],
-      ),
+    return ChPageScaffold(
+      eyebrow: 'CyberHex · radio',
+      title: 'Radios',
+      subtitle: 'Emisoras en streaming',
+      actions: [
+        IconButton(
+          tooltip: 'Importar .m3u/.m3u8/.pls',
+          onPressed: _import,
+          icon: const Icon(Icons.playlist_add_rounded),
+        ),
+        IconButton(
+          tooltip: 'Exportar .m3u',
+          onPressed: _export,
+          icon: const Icon(Icons.save_alt_rounded),
+        ),
+        IconButton(
+          tooltip: 'Nueva emisora',
+          onPressed: _add,
+          icon: const Icon(Icons.add_rounded),
+        ),
+      ],
       body: Column(
         children: [
           if (_busyId != null)
