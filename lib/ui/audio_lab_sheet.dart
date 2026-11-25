@@ -349,10 +349,14 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
                           level: v,
                         ),
                       ),
-                      const Text(
+                      Text(
                         'Se mezcla bajo la música antes del limitador: nunca tapa '
                         'la pista y no cuesta nada cuando está apagado.',
-                        style: TextStyle(fontSize: 11, height: 1.4),
+                        style: TextStyle(
+                          fontSize: 11,
+                          height: 1.4,
+                          color: palette.muted,
+                        ),
                       ),
                     ],
                   ),
@@ -511,20 +515,45 @@ class _SectionState extends State<_Section> {
       child: Column(
         children: [
           ListTile(
-            title: Text(
-              widget.title,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+            title: Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 13,
+                  decoration: BoxDecoration(
+                    color: palette.accent,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: ChSpace.sm),
+                Flexible(
+                  child: Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: chTitle(palette, size: 14),
+                  ),
+                ),
+              ],
             ),
             trailing: Icon(
               _open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
               color: palette.muted,
             ),
-            onTap: () => setState(() => _open = !_open),
+            onTap: () {
+              chHaptic();
+              setState(() => _open = !_open);
+            },
             dense: true,
           ),
           if (_open)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+              padding: const EdgeInsets.fromLTRB(
+                ChSpace.md + 2,
+                0,
+                ChSpace.md + 2,
+                ChSpace.md + 2,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: widget.children,
@@ -551,15 +580,16 @@ class _ToggleRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
       dense: true,
-      title: Text(label, style: const TextStyle(fontSize: 13)),
+      title: Text(label, style: chTitle(palette, size: 13.5)),
       subtitle: subtitle == null
           ? null
           : Text(
               subtitle!,
-              style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
+              style: TextStyle(fontSize: 11, color: palette.muted),
             ),
       value: value,
       onChanged: onChanged,
@@ -586,20 +616,27 @@ class _SliderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final clamped = value.clamp(min, max).toDouble();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
-            Expanded(child: Text(label, style: const TextStyle(fontSize: 13))),
+            Expanded(child: Text(label, style: chTitle(palette, size: 13.5))),
             Text(
               format(clamped),
-              style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
+              style: chMono(palette, size: 10.5, color: palette.accent),
             ),
           ],
         ),
-        Slider(value: clamped, min: min, max: max, onChanged: onChanged),
+        Slider(
+          value: clamped,
+          min: min,
+          max: max,
+          onChanged: onChanged,
+          onChangeEnd: (_) => chHaptic(),
+        ),
       ],
     );
   }
@@ -628,7 +665,7 @@ class _ChoiceRow<T> extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 13)),
+          Text(label, style: chTitle(palette, size: 13.5)),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,
@@ -638,11 +675,19 @@ class _ChoiceRow<T> extends StatelessWidget {
                 ChoiceChip(
                   label: Text(
                     i < labels.length ? labels[i] : '${options[i]}',
-                    style: const TextStyle(fontSize: 11),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: options[i] == value
+                          ? palette.onAccent
+                          : palette.foreground,
+                    ),
                   ),
                   selected: options[i] == value,
-                  onSelected: (_) => onSelected(options[i]),
-                  selectedColor: palette.accent.withValues(alpha: 0.22),
+                  onSelected: (_) {
+                    chHaptic();
+                    onSelected(options[i]);
+                  },
+                  selectedColor: palette.accent,
                   backgroundColor: palette.surfaceHigh,
                   side: BorderSide(
                     color: options[i] == value
@@ -666,6 +711,7 @@ class _LoopRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final active = controller.loopActive;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -674,15 +720,15 @@ class _LoopRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Expanded(
-                child: Text('Loop A-B', style: TextStyle(fontSize: 13)),
+              Expanded(
+                child: Text('Loop A-B', style: chTitle(palette, size: 13.5)),
               ),
               Text(
                 active
                     ? '${controller.loopStart.toStringAsFixed(1)} – '
                           '${controller.loopEnd.toStringAsFixed(1)} s'
                     : 'apagado',
-                style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
+                style: chMono(palette, size: 10.5, color: palette.muted),
               ),
             ],
           ),
@@ -692,6 +738,7 @@ class _LoopRow extends StatelessWidget {
             children: [
               OutlinedButton(
                 onPressed: () {
+                  chHaptic();
                   final a = controller.loopStart;
                   final b = controller.position.value;
                   if (b > a) {
@@ -704,7 +751,10 @@ class _LoopRow extends StatelessWidget {
               ),
               if (active)
                 TextButton(
-                  onPressed: controller.clearLoop,
+                  onPressed: () {
+                    chHaptic();
+                    controller.clearLoop();
+                  },
                   child: const Text('Quitar'),
                 ),
             ],
@@ -728,6 +778,7 @@ class _SleepRow extends StatefulWidget {
 class _SleepRowState extends State<_SleepRow> {
   @override
   Widget build(BuildContext context) {
+    final palette = paletteOf(context);
     final remaining = widget.controller.sleepRemaining;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -736,12 +787,15 @@ class _SleepRowState extends State<_SleepRow> {
         children: [
           Row(
             children: [
-              const Expanded(
-                child: Text('Temporizador', style: TextStyle(fontSize: 13)),
+              Expanded(
+                child: Text(
+                  'Temporizador',
+                  style: chTitle(palette, size: 13.5),
+                ),
               ),
               Text(
                 remaining > 0 ? '${(remaining / 60).ceil()} min' : 'apagado',
-                style: TextStyle(fontSize: 11, color: paletteOf(context).muted),
+                style: chMono(palette, size: 10.5, color: palette.muted),
               ),
             ],
           ),
@@ -752,6 +806,7 @@ class _SleepRowState extends State<_SleepRow> {
               for (final minutes in const <int>[15, 30, 60])
                 OutlinedButton(
                   onPressed: () {
+                    chHaptic();
                     widget.controller.setSleepTimer(minutes * 60.0);
                     setState(() {});
                   },
@@ -793,13 +848,16 @@ class _CueList extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Text(
-                '${tracks.length} cortes',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
+              padding: const EdgeInsets.fromLTRB(
+                ChSpace.lg,
+                0,
+                ChSpace.lg,
+                ChSpace.sm,
+              ),
+              child: ChSheetHeader(
+                icon: Icons.playlist_play_rounded,
+                title: '${tracks.length} cortes',
+                palette: palette,
               ),
             ),
             Flexible(
@@ -813,11 +871,11 @@ class _CueList extends StatelessWidget {
                     dense: true,
                     leading: Text(
                       '${track.number}',
-                      style: TextStyle(color: palette.muted, fontSize: 12),
+                      style: chMono(palette, size: 11, color: palette.muted),
                     ),
                     title: Text(
                       track.label,
-                      style: const TextStyle(fontSize: 13),
+                      style: chTitle(palette, size: 13.5),
                     ),
                     subtitle: Text(
                       '${_time(track.start)}'
@@ -827,6 +885,7 @@ class _CueList extends StatelessWidget {
                     onTap: track.file.isEmpty
                         ? null
                         : () async {
+                            chHaptic();
                             await controller.openFile(track.file);
                             controller.seek(track.start);
                             if (context.mounted) {
