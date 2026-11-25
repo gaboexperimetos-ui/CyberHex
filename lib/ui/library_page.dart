@@ -605,37 +605,46 @@ class _LibraryPageState extends State<LibraryPage>
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(14, 6, 14, 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _search,
-                  textInputAction: TextInputAction.search,
-                  onChanged: (value) => setState(() => _query = value),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: 'Buscar en la biblioteca',
-                    prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                    suffixIcon: _query.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Limpiar',
-                            icon: const Icon(Icons.close_rounded, size: 17),
-                            onPressed: () {
-                              _search.clear();
-                              setState(() => _query = '');
-                            },
-                          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 560;
+              return Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _search,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (value) => setState(() => _query = value),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Buscar en la biblioteca',
+                        prefixIcon: const Icon(Icons.search_rounded, size: 19),
+                        suffixIcon: _query.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Limpiar',
+                                icon: const Icon(Icons.close_rounded, size: 17),
+                                onPressed: () {
+                                  _search.clear();
+                                  setState(() => _query = '');
+                                },
+                              ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: ChSpace.sm),
-              FilterChip(
-                label: const Text('Ocultar < 30 s'),
-                selected: _hideShort,
-                onSelected: (value) => setState(() => _hideShort = value),
-              ),
-            ],
+                  const SizedBox(width: ChSpace.sm),
+                  Tooltip(
+                    message: 'Ocultar pistas de menos de 30 s',
+                    child: FilterChip(
+                      avatar: const Icon(Icons.timer_outlined, size: 16),
+                      label: Text(compact ? '> 30 s' : 'Ocultar < 30 s'),
+                      selected: _hideShort,
+                      onSelected: (value) => setState(() => _hideShort = value),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
         Padding(

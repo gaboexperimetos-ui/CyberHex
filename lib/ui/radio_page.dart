@@ -250,86 +250,89 @@ class _RadioPageState extends State<RadioPage> {
               color: palette.accent,
             ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
-              children: [
-                if (_message != null)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 6,
-                    ),
-                    child: Text(
-                      _message!,
-                      style: TextStyle(fontSize: 12, color: palette.accent),
-                    ),
-                  ),
-                const _SectionLabel('Mis emisoras'),
-                if (mine.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
-                    child: ChSurface(
-                      radius: ChRadius.md,
-                      child: Row(
-                        children: <Widget>[
-                          ChHexBadge(
-                            icon: Icons.radio_rounded,
-                            palette: palette,
-                            size: 40,
-                          ),
-                          const SizedBox(width: ChSpace.md),
-                          Expanded(
-                            child: Text(
-                              'Aún no hay emisoras. Añade una URL o importa '
-                              'una lista .m3u/.pls.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: palette.muted,
-                                height: 1.4,
-                              ),
-                            ),
-                          ),
-                        ],
+            child: ChContent(
+              maxWidth: 920,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+                children: [
+                  if (_message != null)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 6,
+                      ),
+                      child: Text(
+                        _message!,
+                        style: TextStyle(fontSize: 12, color: palette.accent),
                       ),
                     ),
-                  ),
-                for (final station in mine)
-                  _StationTile(
-                    station: station,
-                    palette: palette,
-                    busy: _busyId == station.id,
-                    enabled: _busyId == null,
-                    onPlay: () => _play(station),
-                    onRename: () => _rename(station),
-                    onDelete: () => _store.remove(station.id),
-                  ),
-                const _SectionLabel('Sugeridas'),
-                for (final station in RadioStore.builtinStations)
-                  _StationTile(
-                    station: station,
-                    palette: palette,
-                    busy: _busyId == station.id,
-                    enabled: _busyId == null,
-                    onPlay: () => _play(station),
-                    onAdd: () => _store.add(
-                      name: station.name,
-                      url: station.url,
-                      genre: station.genre,
+                  const _SectionLabel('Mis emisoras'),
+                  if (mine.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 4, 4, 6),
+                      child: ChSurface(
+                        radius: ChRadius.md,
+                        child: Row(
+                          children: <Widget>[
+                            ChHexBadge(
+                              icon: Icons.radio_rounded,
+                              palette: palette,
+                              size: 40,
+                            ),
+                            const SizedBox(width: ChSpace.md),
+                            Expanded(
+                              child: Text(
+                                'Aún no hay emisoras. Añade una URL o importa '
+                                'una lista .m3u/.pls.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: palette.muted,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  for (final station in mine)
+                    _StationTile(
+                      station: station,
+                      palette: palette,
+                      busy: _busyId == station.id,
+                      enabled: _busyId == null,
+                      onPlay: () => _play(station),
+                      onRename: () => _rename(station),
+                      onDelete: () => _store.remove(station.id),
+                    ),
+                  const _SectionLabel('Sugeridas'),
+                  for (final station in RadioStore.builtinStations)
+                    _StationTile(
+                      station: station,
+                      palette: palette,
+                      busy: _busyId == station.id,
+                      enabled: _busyId == null,
+                      onPlay: () => _play(station),
+                      onAdd: () => _store.add(
+                        name: station.name,
+                        url: station.url,
+                        genre: station.genre,
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'El motor reproduce archivos: cada emisora se baja a un archivo '
+                    'temporal (ventana de ${RadioStore.defaultWindow.inSeconds} s o '
+                    '${RadioStore.maxBufferBytes >> 20} MB) y suena desde ahí. Es '
+                    'radio con búfer, no directo continuo.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: palette.muted,
+                      height: 1.5,
                     ),
                   ),
-                const SizedBox(height: 10),
-                Text(
-                  'El motor reproduce archivos: cada emisora se baja a un archivo '
-                  'temporal (ventana de ${RadioStore.defaultWindow.inSeconds} s o '
-                  '${RadioStore.maxBufferBytes >> 20} MB) y suena desde ahí. Es '
-                  'radio con búfer, no directo continuo.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: palette.muted,
-                    height: 1.5,
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           MiniPlayer(

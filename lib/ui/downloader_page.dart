@@ -168,158 +168,161 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final fraction = progress?.fraction;
     return Scaffold(
       appBar: AppBar(title: const Text('Descargas')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
-        children: [
-          TextField(
-            controller: _query,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _search(),
-            decoration: InputDecoration(
-              labelText: 'Buscar en Internet Archive',
-              hintText: 'por ejemplo: blues 1927, piano nocturno…',
-              labelStyle: TextStyle(fontSize: 12, color: palette.muted),
-              prefixIcon: const Icon(Icons.search_rounded, size: 20),
-              suffixIcon: IconButton(
-                tooltip: 'Buscar',
-                onPressed: _searching ? null : _search,
-                icon: _searching
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.arrow_forward_rounded, size: 20),
+      body: ChContent(
+        maxWidth: 820,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+          children: [
+            TextField(
+              controller: _query,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (_) => _search(),
+              decoration: InputDecoration(
+                labelText: 'Buscar en Internet Archive',
+                hintText: 'por ejemplo: blues 1927, piano nocturno…',
+                labelStyle: TextStyle(fontSize: 12, color: palette.muted),
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                suffixIcon: IconButton(
+                  tooltip: 'Buscar',
+                  onPressed: _searching ? null : _search,
+                  icon: _searching
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.arrow_forward_rounded, size: 20),
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _url,
-            keyboardType: TextInputType.url,
-            decoration: InputDecoration(
-              labelText: 'URL directa de audio',
-              hintText: 'https://…/episodio.mp3',
-              labelStyle: TextStyle(fontSize: 12, color: palette.muted),
-              prefixIcon: const Icon(Icons.link_rounded, size: 20),
-              suffixIcon: IconButton(
-                tooltip: 'Descargar la URL',
-                onPressed: _downloading == null ? _downloadUrl : null,
-                icon: const Icon(Icons.download_rounded, size: 20),
-              ),
-            ),
-          ),
-          if (_message != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Text(
-                _message!,
-                style: TextStyle(fontSize: 12, color: palette.accent),
-              ),
-            ),
-          if (_downloading != null) ...[
-            const SizedBox(height: 14),
-            Text(
-              'Descargando ${_downloading!.name}',
-              style: TextStyle(fontSize: 12, color: palette.foreground),
-            ),
-            const SizedBox(height: 6),
-            LinearProgressIndicator(
-              value: fraction,
-              minHeight: 6,
-              backgroundColor: palette.surfaceHigh,
-              color: palette.accent,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              progress == null
-                  ? ''
-                  : fraction == null
-                  ? '${_kib(progress.received)} recibidos'
-                  : '${(fraction * 100).round()} % · '
-                        '${_kib(progress.received)} de ${_kib(progress.total)}',
-              style: TextStyle(fontSize: 11, color: palette.muted),
-            ),
-          ],
-          if (_downloaded != null)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _enqueueLast,
-                icon: const Icon(Icons.playlist_add_rounded, size: 18),
-                label: const Text('Añadir a la cola'),
-              ),
-            ),
-          if (_results.isNotEmpty) ...[
-            const _Label('Resultados'),
-            for (final item in _results)
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: _selected?.identifier == item.identifier
-                    ? ChHexBadge(
-                        icon: Icons.radio_button_checked_rounded,
-                        palette: palette,
-                        size: 40,
-                      )
-                    : ChCoverThumb(
-                        seed: item.title,
-                        palette: palette,
-                        size: 40,
-                        hex: true,
-                      ),
-                title: Text(
-                  item.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: chTitle(palette, size: 13.5),
-                ),
-                subtitle: Text(
-                  item.subtitle.isEmpty ? item.identifier : item.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 11, color: palette.muted),
-                ),
-                onTap: _loadingFiles ? null : () => _openItem(item),
-              ),
-          ],
-          if (_loadingFiles)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-          if (_files.isNotEmpty) ...[
-            _Label('Archivos de ${_selected?.title ?? ''}'),
-            for (final candidate in _files)
-              ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: ChHexBadge(
-                  icon: Icons.audio_file_outlined,
-                  palette: palette,
-                  size: 40,
-                  color: palette.muted,
-                ),
-                title: Text(
-                  candidate.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: chTitle(palette, size: 13.5),
-                ),
-                subtitle: Text(
-                  '${candidate.format} · ${candidate.sizeLabel}',
-                  style: TextStyle(fontSize: 11, color: palette.muted),
-                ),
-                trailing: IconButton(
-                  tooltip: 'Descargar',
-                  onPressed: _downloading == null
-                      ? () => _download(candidate)
-                      : null,
+            const SizedBox(height: 10),
+            TextField(
+              controller: _url,
+              keyboardType: TextInputType.url,
+              decoration: InputDecoration(
+                labelText: 'URL directa de audio',
+                hintText: 'https://…/episodio.mp3',
+                labelStyle: TextStyle(fontSize: 12, color: palette.muted),
+                prefixIcon: const Icon(Icons.link_rounded, size: 20),
+                suffixIcon: IconButton(
+                  tooltip: 'Descargar la URL',
+                  onPressed: _downloading == null ? _downloadUrl : null,
                   icon: const Icon(Icons.download_rounded, size: 20),
                 ),
               ),
+            ),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _message!,
+                  style: TextStyle(fontSize: 12, color: palette.accent),
+                ),
+              ),
+            if (_downloading != null) ...[
+              const SizedBox(height: 14),
+              Text(
+                'Descargando ${_downloading!.name}',
+                style: TextStyle(fontSize: 12, color: palette.foreground),
+              ),
+              const SizedBox(height: 6),
+              LinearProgressIndicator(
+                value: fraction,
+                minHeight: 6,
+                backgroundColor: palette.surfaceHigh,
+                color: palette.accent,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                progress == null
+                    ? ''
+                    : fraction == null
+                    ? '${_kib(progress.received)} recibidos'
+                    : '${(fraction * 100).round()} % · '
+                          '${_kib(progress.received)} de ${_kib(progress.total)}',
+                style: TextStyle(fontSize: 11, color: palette.muted),
+              ),
+            ],
+            if (_downloaded != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _enqueueLast,
+                  icon: const Icon(Icons.playlist_add_rounded, size: 18),
+                  label: const Text('Añadir a la cola'),
+                ),
+              ),
+            if (_results.isNotEmpty) ...[
+              const _Label('Resultados'),
+              for (final item in _results)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: _selected?.identifier == item.identifier
+                      ? ChHexBadge(
+                          icon: Icons.radio_button_checked_rounded,
+                          palette: palette,
+                          size: 40,
+                        )
+                      : ChCoverThumb(
+                          seed: item.title,
+                          palette: palette,
+                          size: 40,
+                          hex: true,
+                        ),
+                  title: Text(
+                    item.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: chTitle(palette, size: 13.5),
+                  ),
+                  subtitle: Text(
+                    item.subtitle.isEmpty ? item.identifier : item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                  onTap: _loadingFiles ? null : () => _openItem(item),
+                ),
+            ],
+            if (_loadingFiles)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            if (_files.isNotEmpty) ...[
+              _Label('Archivos de ${_selected?.title ?? ''}'),
+              for (final candidate in _files)
+                ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: ChHexBadge(
+                    icon: Icons.audio_file_outlined,
+                    palette: palette,
+                    size: 40,
+                    color: palette.muted,
+                  ),
+                  title: Text(
+                    candidate.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: chTitle(palette, size: 13.5),
+                  ),
+                  subtitle: Text(
+                    '${candidate.format} · ${candidate.sizeLabel}',
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                  trailing: IconButton(
+                    tooltip: 'Descargar',
+                    onPressed: _downloading == null
+                        ? () => _download(candidate)
+                        : null,
+                    icon: const Icon(Icons.download_rounded, size: 20),
+                  ),
+                ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
