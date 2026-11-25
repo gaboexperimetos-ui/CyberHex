@@ -250,9 +250,9 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
                   onChanged: _busy
                       ? null
                       : (value) => setState(() => _albumScope = value),
-                  title: const Text(
+                  title: Text(
                     'Aplicar al álbum completo',
-                    style: TextStyle(fontSize: 13),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     'Mismo artista, álbum y carátula a los archivos del directorio '
@@ -401,7 +401,7 @@ class _CoverRow extends StatelessWidget {
             children: [
               Text(
                 image == null ? 'Sin carátula' : 'Carátula incrustada',
-                style: TextStyle(fontSize: 13, color: palette.foreground),
+                style: chTitle(palette, size: 13.5),
               ),
               const SizedBox(height: 4),
               Wrap(

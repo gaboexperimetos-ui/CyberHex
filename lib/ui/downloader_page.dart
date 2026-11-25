@@ -167,7 +167,9 @@ class _DownloaderPageState extends State<DownloaderPage> {
     final progress = _progress;
     final fraction = progress?.fraction;
     return Scaffold(
-      appBar: AppBar(title: const Text('Descargas')),
+      appBar: AppBar(
+        title: Text('Descargas', style: chTitle(palette, size: 17)),
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
         children: [
@@ -272,7 +274,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
                   item.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 subtitle: Text(
                   item.subtitle.isEmpty ? item.identifier : item.subtitle,
@@ -304,7 +306,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
                   candidate.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 subtitle: Text(
                   '${candidate.format} · ${candidate.sizeLabel}',

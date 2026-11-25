@@ -332,7 +332,10 @@ class _QueueSheetState extends State<QueueSheet> {
           _automix.setEnabled(value);
           setState(() {});
         },
-        title: const Text('Automix DJ', style: TextStyle(fontSize: 14)),
+        title: Text(
+          'Automix DJ',
+          style: chTitle(paletteOf(context), size: 13.5),
+        ),
         subtitle: Text(
           _automix.enabled
               ? '${_automix.status} · ${automixLabel(_automix.phase)}'
@@ -349,7 +352,10 @@ class _QueueSheetState extends State<QueueSheet> {
       dense: true,
       value: _controller.queueProtected,
       onChanged: (value) => _controller.queueProtected = value,
-      title: const Text('Cola protegida', style: TextStyle(fontSize: 14)),
+      title: Text(
+        'Cola protegida',
+        style: chTitle(paletteOf(context), size: 13.5),
+      ),
       subtitle: Text(
         'Abrir un archivo lo añade al final en vez de vaciar la cola.',
         style: TextStyle(fontSize: 12, color: paletteOf(context).muted),
@@ -397,9 +403,10 @@ class _QueueTile extends StatelessWidget {
         item.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+        style: chTitle(
+          palette,
+          size: 13.5,
+          weight: active ? FontWeight.w600 : FontWeight.w400,
           color: active ? palette.accent : palette.foreground,
         ),
       ),

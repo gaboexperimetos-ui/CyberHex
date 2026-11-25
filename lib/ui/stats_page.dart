@@ -67,7 +67,7 @@ class _StatsPageState extends State<StatsPage> {
     final artists = stats.topArtists(6);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Estadísticas'),
+        title: Text('Estadísticas', style: chTitle(palette, size: 17)),
         actions: [
           IconButton(
             tooltip: 'Borrar estadísticas',
@@ -133,7 +133,7 @@ class _StatsPageState extends State<StatsPage> {
                 _HourChart(hours: stats.byHour, peak: stats.favoriteHour),
                 const _Title('Más escuchadas'),
                 if (top.isEmpty)
-                  Text('—', style: TextStyle(color: palette.muted))
+                  Text('—', style: chMono(palette, size: 12))
                 else
                   for (var i = 0; i < top.length; i++)
                     _RankRow(
@@ -145,7 +145,7 @@ class _StatsPageState extends State<StatsPage> {
                     ),
                 const _Title('Artistas'),
                 if (artists.isEmpty)
-                  Text('—', style: TextStyle(color: palette.muted))
+                  Text('—', style: chMono(palette, size: 12))
                 else
                   Wrap(
                     spacing: 8,
@@ -164,7 +164,7 @@ class _StatsPageState extends State<StatsPage> {
                   ),
                 const _Title('Historial reciente'),
                 if (stats.history.isEmpty)
-                  Text('—', style: TextStyle(color: palette.muted))
+                  Text('—', style: chMono(palette, size: 12))
                 else
                   for (final entry in stats.history.take(12))
                     ListTile(
@@ -187,7 +187,7 @@ class _StatsPageState extends State<StatsPage> {
                         entry.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 13),
+                        style: chTitle(palette, size: 13.5),
                       ),
                       subtitle: entry.artist.isEmpty
                           ? null
@@ -364,7 +364,7 @@ class _RankRow extends StatelessWidget {
                   title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 13),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 Text(
                   subtitle,

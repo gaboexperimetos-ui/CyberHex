@@ -91,7 +91,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: paletteOf(context).surface,
-        title: Text(title, style: const TextStyle(fontSize: 16)),
+        title: Text(title),
         content: TextField(
           controller: text,
           autofocus: true,
@@ -194,7 +194,7 @@ class _PlaylistsPageState extends State<PlaylistsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Listas'),
+        title: Text('Listas', style: chTitle(paletteOf(context), size: 17)),
         actions: [
           IconButton(
             tooltip: 'Importar .m3u / .m3u8 / .pls',
@@ -508,13 +508,18 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     final playlist = _playlist;
     if (playlist == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Lista')),
+        appBar: AppBar(
+          title: Text('Lista', style: chTitle(paletteOf(context), size: 17)),
+        ),
         body: const Center(child: Text('La lista ya no existe.')),
       );
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(playlist.name),
+        title: Text(
+          playlist.name,
+          style: chTitle(paletteOf(context), size: 17),
+        ),
         actions: [
           IconButton(
             tooltip: 'Reproducir todo',
@@ -551,7 +556,7 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
                     name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 13),
+                    style: chTitle(palette, size: 13.5),
                   ),
                   subtitle: Text(
                     '${index + 1} · $path',

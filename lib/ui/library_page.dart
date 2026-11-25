@@ -740,10 +740,7 @@ class _LibraryPageState extends State<LibraryPage>
                   key,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: chTitle(palette, size: 14.5),
                 ),
                 subtitle: Text(
                   items.length == 1 ? '1 pista' : '${items.length} pistas',
@@ -815,7 +812,7 @@ class _LibraryPageState extends State<LibraryPage>
         entry.track.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        style: chTitle(palette, size: 14.5),
       ),
       subtitle: Text(
         subtitle,

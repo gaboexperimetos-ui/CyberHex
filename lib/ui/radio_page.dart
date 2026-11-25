@@ -220,7 +220,7 @@ class _RadioPageState extends State<RadioPage> {
     final mine = _store.stations;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Radios'),
+        title: Text('Radios', style: chTitle(paletteOf(context), size: 17)),
         actions: [
           IconButton(
             tooltip: 'Importar .m3u/.m3u8/.pls',
