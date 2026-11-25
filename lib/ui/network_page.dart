@@ -7,6 +7,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/player_controller.dart';
 import '../core/session_store.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 import 'mini_player.dart';
 
 /// Tipo de servidor remoto.
@@ -50,26 +51,30 @@ class RemoteServer {
 
   bool get usesBearer => token.trim().isNotEmpty;
 
-  RemoteServer copyWith({String? name, String? url, String? password, String? token}) =>
-      RemoteServer(
-        id: id,
-        name: name ?? this.name,
-        url: url ?? this.url,
-        kind: kind,
-        username: username,
-        password: password ?? this.password,
-        token: token ?? this.token,
-      );
+  RemoteServer copyWith({
+    String? name,
+    String? url,
+    String? password,
+    String? token,
+  }) => RemoteServer(
+    id: id,
+    name: name ?? this.name,
+    url: url ?? this.url,
+    kind: kind,
+    username: username,
+    password: password ?? this.password,
+    token: token ?? this.token,
+  );
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'id': id,
-        'name': name,
-        'url': url,
-        'kind': kind.name,
-        'username': username,
-        'password': password,
-        'token': token,
-      };
+    'id': id,
+    'name': name,
+    'url': url,
+    'kind': kind.name,
+    'username': username,
+    'password': password,
+    'token': token,
+  };
 
   static RemoteServer? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -174,13 +179,18 @@ class WebDavClient {
     request.followRedirects = true;
     request.headers.set(HttpHeaders.userAgentHeader, 'CyberHex/1.0');
     request.headers.set('Depth', '1');
-    request.headers.contentType =
-        ContentType('application', 'xml', charset: 'utf-8');
+    request.headers.contentType = ContentType(
+      'application',
+      'xml',
+      charset: 'utf-8',
+    );
     _authHeaders(server).forEach(request.headers.set);
-    final body = utf8.encode('<?xml version="1.0" encoding="utf-8"?>'
-        '<d:propfind xmlns:d="DAV:"><d:prop>'
-        '<d:displayname/><d:getcontentlength/><d:resourcetype/>'
-        '</d:prop></d:propfind>');
+    final body = utf8.encode(
+      '<?xml version="1.0" encoding="utf-8"?>'
+      '<d:propfind xmlns:d="DAV:"><d:prop>'
+      '<d:displayname/><d:getcontentlength/><d:resourcetype/>'
+      '</d:prop></d:propfind>',
+    );
     // Longitud explícita: con `write` el cuerpo va troceado (chunked) y algunos
     // servidores (y el propio `HttpServer` de los tests) contestan 400.
     request.contentLength = body.length;
@@ -188,8 +198,10 @@ class WebDavClient {
 
     final response = await request.close();
     if (response.statusCode == 401) {
-      throw RemoteException('El servidor pide usuario y contraseña (401).',
-          statusCode: 401);
+      throw RemoteException(
+        'El servidor pide usuario y contraseña (401).',
+        statusCode: 401,
+      );
     }
     if (response.statusCode != 207 && response.statusCode != 200) {
       throw RemoteException(
@@ -201,7 +213,9 @@ class WebDavClient {
     return parseMultiStatus(text, base: url).where((entry) {
       // El propio directorio viene en la respuesta: se filtra.
       final self = url.path.endsWith('/') ? url.path : '${url.path}/';
-      final path = entry.url.path.endsWith('/') ? entry.url.path : '${entry.url.path}/';
+      final path = entry.url.path.endsWith('/')
+          ? entry.url.path
+          : '${entry.url.path}/';
       return path != self;
     }).toList();
   }
@@ -209,10 +223,12 @@ class WebDavClient {
   /// Interpreta un `207 Multi-Status`.
   static List<RemoteEntry> parseMultiStatus(String xml, {required Uri base}) {
     final entries = <RemoteEntry>[];
-    final responsePattern =
-        RegExp(r'<(?:[A-Za-z0-9]+:)?response\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9]+:)?response>');
-    final hrefPattern =
-        RegExp(r'<(?:[A-Za-z0-9]+:)?href\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9]+:)?href>');
+    final responsePattern = RegExp(
+      r'<(?:[A-Za-z0-9]+:)?response\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9]+:)?response>',
+    );
+    final hrefPattern = RegExp(
+      r'<(?:[A-Za-z0-9]+:)?href\b[^>]*>([\s\S]*?)</(?:[A-Za-z0-9]+:)?href>',
+    );
 
     for (final match in responsePattern.allMatches(xml)) {
       final block = match.group(1) ?? '';
@@ -229,7 +245,8 @@ class WebDavClient {
       }
       if (url == null) continue;
 
-      final isCollection = block.contains(':collection') ||
+      final isCollection =
+          block.contains(':collection') ||
           RegExp(r'<collection\b').hasMatch(block);
       final segments = url.pathSegments.where((segment) => segment.isNotEmpty);
       String name = '/';
@@ -249,12 +266,14 @@ class WebDavClient {
         r'<(?:[A-Za-z0-9]+:)?getcontentlength\b[^>]*>(\d+)<',
       ).firstMatch(block);
 
-      entries.add(RemoteEntry(
-        name: name,
-        url: url,
-        isCollection: isCollection,
-        size: int.tryParse(lengthMatch?.group(1) ?? '') ?? 0,
-      ));
+      entries.add(
+        RemoteEntry(
+          name: name,
+          url: url,
+          isCollection: isCollection,
+          size: int.tryParse(lengthMatch?.group(1) ?? '') ?? 0,
+        ),
+      );
     }
     return entries;
   }
@@ -313,7 +332,7 @@ class WebDavClient {
 /// Servidores y enlaces guardados (`network.json`, escritura atómica).
 class NetworkStore extends ChangeNotifier {
   NetworkStore({File? file})
-      : file = file ?? File('${StorageDirectory.current.path}/network.json');
+    : file = file ?? File('${StorageDirectory.current.path}/network.json');
 
   NetworkStore.memory() : file = null;
 
@@ -342,7 +361,9 @@ class NetworkStore extends ChangeNotifier {
   }) {
     final server = RemoteServer(
       id: 'n${DateTime.now().microsecondsSinceEpoch}',
-      name: name.trim().isEmpty ? (Uri.tryParse(url)?.host ?? url) : name.trim(),
+      name: name.trim().isEmpty
+          ? (Uri.tryParse(url)?.host ?? url)
+          : name.trim(),
       url: url.trim(),
       kind: kind,
       username: username.trim(),
@@ -397,7 +418,10 @@ class NetworkStore extends ChangeNotifier {
     notifyListeners();
     if (file == null) return;
     _saveTimer?.cancel();
-    _saveTimer = Timer(const Duration(milliseconds: 300), () => unawaited(save()));
+    _saveTimer = Timer(
+      const Duration(milliseconds: 300),
+      () => unawaited(save()),
+    );
   }
 
   Future<void> save() async {
@@ -459,8 +483,9 @@ class NetworkPage extends StatefulWidget {
 
 class _NetworkPageState extends State<NetworkPage> {
   late final WebDavClient _client = widget.client ?? WebDavClient();
-  late final Directory _cache =
-      Directory('${StorageDirectory.current.path}/cloud_cache');
+  late final Directory _cache = Directory(
+    '${StorageDirectory.current.path}/cloud_cache',
+  );
 
   RemoteServer? _server;
   Uri? _current;
@@ -572,11 +597,13 @@ class _NetworkPageState extends State<NetworkPage> {
     final server = _server;
     final uri = server?.uri;
     if (server == null || uri == null) return;
-    await _downloadAndPlay(RemoteEntry(
-      name: uri.pathSegments.isEmpty ? server.name : uri.pathSegments.last,
-      url: uri,
-      isCollection: false,
-    ));
+    await _downloadAndPlay(
+      RemoteEntry(
+        name: uri.pathSegments.isEmpty ? server.name : uri.pathSegments.last,
+        url: uri,
+        isCollection: false,
+      ),
+    );
   }
 
   Future<void> _addServer() async {
@@ -601,7 +628,10 @@ class _NetworkPageState extends State<NetworkPage> {
                     for (final option in RemoteKind.values)
                       ButtonSegment<RemoteKind>(
                         value: option,
-                        label: Text(option.label, style: const TextStyle(fontSize: 11)),
+                        label: Text(
+                          option.label,
+                          style: const TextStyle(fontSize: 11),
+                        ),
                       ),
                   ],
                   selected: <RemoteKind>{kind},
@@ -685,7 +715,12 @@ class _NetworkPageState extends State<NetworkPage> {
     final server = _server;
     return Scaffold(
       appBar: AppBar(
-        title: Text(server == null ? 'Red y nube' : server.name),
+        title: Text(
+          server == null ? 'Red y nube' : server.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: chTitle(palette, size: 16.5),
+        ),
         leading: server == null
             ? null
             : IconButton(
@@ -704,9 +739,12 @@ class _NetworkPageState extends State<NetworkPage> {
               onPressed: () {
                 final current = _current;
                 if (current == null) return;
-                final segments = current.pathSegments.where((s) => s.isNotEmpty).toList();
+                final segments = current.pathSegments
+                    .where((s) => s.isNotEmpty)
+                    .toList();
                 if (segments.length <= 1) return;
-                final parentPath = '/${segments.take(segments.length - 1).join('/')}/';
+                final parentPath =
+                    '/${segments.take(segments.length - 1).join('/')}/';
                 unawaited(_list(current.replace(path: parentPath)));
               },
               icon: const Icon(Icons.arrow_upward_rounded),
@@ -720,11 +758,17 @@ class _NetworkPageState extends State<NetworkPage> {
       ),
       body: Column(
         children: [
-          if (_loading) LinearProgressIndicator(minHeight: 2, color: palette.accent),
-          Expanded(child: server == null ? _serversView(palette) : _browserView(palette, server)),
+          if (_loading)
+            LinearProgressIndicator(minHeight: 2, color: palette.accent),
+          Expanded(
+            child: server == null
+                ? _serversView(palette)
+                : _browserView(palette, server),
+          ),
           MiniPlayer(
             controller: widget.controller,
-            onOpen: widget.onOpenPlayer ??
+            onOpen:
+                widget.onOpenPlayer ??
                 () => Navigator.of(context).popUntil((route) => route.isFirst),
           ),
         ],
@@ -734,47 +778,55 @@ class _NetworkPageState extends State<NetworkPage> {
 
   Widget _serversView(CyberHexPalette palette) {
     final servers = _store.servers;
+    if (servers.isEmpty) {
+      return ChEmptyState(
+        palette: palette,
+        icon: Icons.cloud_off_rounded,
+        title: 'Sin servidores',
+        message:
+            'Añade una carpeta WebDAV (Nextcloud, ownCloud, Synology…) o un '
+            'enlace directo de nube.',
+        action: FilledButton.icon(
+          onPressed: _addServer,
+          icon: const Icon(Icons.add_link_rounded, size: 18),
+          label: const Text('Añadir servidor'),
+        ),
+      );
+    }
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      padding: const EdgeInsets.fromLTRB(
+        ChSpace.md,
+        ChSpace.sm,
+        ChSpace.md,
+        ChSpace.xl,
+      ),
       children: [
         if (_message != null) _messageLine(palette),
-        if (servers.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
-            child: Text(
-              'Sin servidores. Añade una carpeta WebDAV (Nextcloud, ownCloud, '
-              'Synology…) o un enlace directo de nube.',
-              style: TextStyle(fontSize: 12, color: palette.muted, height: 1.5),
-            ),
-          ),
         for (final item in servers)
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 6),
-            leading: Icon(
-              item.kind == RemoteKind.cloud ? Icons.cloud_rounded : Icons.dns_rounded,
-              color: palette.accent,
+          Padding(
+            padding: const EdgeInsets.only(bottom: ChSpace.sm),
+            child: _RemoteTile(
+              palette: palette,
+              icon: item.kind == RemoteKind.cloud
+                  ? Icons.cloud_rounded
+                  : Icons.dns_rounded,
+              title: item.name,
+              subtitle: '${item.kind.label} · ${item.uri?.host ?? item.url}',
+              onTap: () => unawaited(_open(item)),
+              trailing: PopupMenuButton<String>(
+                tooltip: 'Más',
+                onSelected: (value) {
+                  if (value == 'open') unawaited(_open(item));
+                  if (value == 'delete') _store.remove(item.id);
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem<String>(value: 'open', child: Text('Abrir')),
+                  PopupMenuItem<String>(value: 'delete', child: Text('Quitar')),
+                ],
+              ),
             ),
-            title: Text(item.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(
-              '${item.kind.label} · ${item.uri?.host ?? item.url}',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: palette.muted),
-            ),
-            trailing: PopupMenuButton<String>(
-              tooltip: 'Más',
-              onSelected: (value) {
-                if (value == 'open') unawaited(_open(item));
-                if (value == 'delete') _store.remove(item.id);
-              },
-              itemBuilder: (context) => const [
-                PopupMenuItem<String>(value: 'open', child: Text('Abrir')),
-                PopupMenuItem<String>(value: 'delete', child: Text('Quitar')),
-              ],
-            ),
-            onTap: () => unawaited(_open(item)),
           ),
-        const SizedBox(height: 12),
+        const SizedBox(height: ChSpace.sm),
         Text(
           'Las credenciales se guardan en `network.json` en claro: usa una clave '
           'de aplicación del servidor, no la contraseña principal.',
@@ -787,83 +839,94 @@ class _NetworkPageState extends State<NetworkPage> {
   Widget _browserView(CyberHexPalette palette, RemoteServer server) {
     if (server.kind == RemoteKind.cloud) {
       return ListView(
-        padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+        padding: const EdgeInsets.fromLTRB(
+          ChSpace.md,
+          ChSpace.sm,
+          ChSpace.md,
+          ChSpace.xl,
+        ),
         children: [
           if (_message != null) _messageLine(palette),
-          ListTile(
-            leading: Icon(Icons.cloud_download_rounded, color: palette.accent),
-            title: const Text('Descargar y reproducir'),
-            subtitle: Text(
-              server.url,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, color: palette.muted),
-            ),
-            onTap: _busyEntry == null ? () => unawaited(_openCloudLink()) : null,
+          _RemoteTile(
+            palette: palette,
+            icon: Icons.cloud_download_rounded,
+            title: 'Descargar y reproducir',
+            subtitle: server.url,
+            accent: true,
+            onTap: _busyEntry == null
+                ? () => unawaited(_openCloudLink())
+                : null,
           ),
           if (_busyEntry != null)
             const Padding(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.all(ChSpace.lg),
               child: Center(child: CircularProgressIndicator()),
             ),
         ],
       );
     }
 
+    if (_entries.isEmpty && !_loading) {
+      return ChEmptyState(
+        palette: palette,
+        icon: Icons.folder_off_rounded,
+        title: 'Nada que mostrar aquí',
+        message: 'Esta carpeta está vacía o no se pudo leer.',
+      );
+    }
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 24),
+      padding: const EdgeInsets.fromLTRB(
+        ChSpace.md,
+        ChSpace.sm,
+        ChSpace.md,
+        ChSpace.xl,
+      ),
       children: [
         if (_message != null) _messageLine(palette),
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+          padding: const EdgeInsets.fromLTRB(
+            ChSpace.xs,
+            0,
+            ChSpace.xs,
+            ChSpace.sm,
+          ),
           child: Text(
             _current?.path ?? '',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: palette.muted),
+            style: chMono(palette, size: 10.5, color: palette.muted),
           ),
         ),
         for (final entry in _entries)
-          ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 6),
-            leading: Icon(
-              entry.isCollection
+          Padding(
+            padding: const EdgeInsets.only(bottom: ChSpace.xs),
+            child: _RemoteTile(
+              palette: palette,
+              icon: entry.isCollection
                   ? Icons.folder_rounded
                   : entry.isAudio
-                      ? Icons.audio_file_rounded
-                      : Icons.insert_drive_file_outlined,
-              color: entry.isAudio ? palette.accent : palette.muted,
-            ),
-            title: Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: entry.sizeLabel.isEmpty
-                ? null
-                : Text(
-                    entry.sizeLabel,
-                    style: TextStyle(fontSize: 11, color: palette.muted),
-                  ),
-            trailing: _busyEntry == entry.url.toString()
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-            onTap: () {
-              if (entry.isCollection) {
-                unawaited(_list(entry.url));
-              } else if (entry.isAudio) {
-                unawaited(_downloadAndPlay(entry));
-              } else {
-                _say('${entry.name} no es un formato de audio conocido.');
-              }
-            },
-          ),
-        if (_entries.isEmpty && !_loading)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
-            child: Text(
-              'Nada que mostrar aquí.',
-              style: TextStyle(fontSize: 12, color: palette.muted),
+                  ? Icons.audio_file_rounded
+                  : Icons.insert_drive_file_outlined,
+              title: entry.name,
+              subtitle: entry.sizeLabel,
+              accent: entry.isAudio,
+              trailing: _busyEntry == entry.url.toString()
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
+              onTap: () {
+                if (entry.isCollection) {
+                  unawaited(_list(entry.url));
+                } else if (entry.isAudio) {
+                  unawaited(_downloadAndPlay(entry));
+                } else {
+                  _say('${entry.name} no es un formato de audio conocido.');
+                }
+              },
             ),
           ),
       ],
@@ -871,10 +934,91 @@ class _NetworkPageState extends State<NetworkPage> {
   }
 
   Widget _messageLine(CyberHexPalette palette) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        child: Text(
-          _message!,
-          style: TextStyle(fontSize: 12, color: palette.accent),
+    padding: const EdgeInsets.fromLTRB(ChSpace.xs, 0, ChSpace.xs, ChSpace.sm),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.info_outline_rounded, size: 15, color: palette.accent),
+        const SizedBox(width: ChSpace.xs + 2),
+        Expanded(
+          child: Text(
+            _message!,
+            style: TextStyle(fontSize: 11.5, color: palette.accent),
+          ),
         ),
-      );
+      ],
+    ),
+  );
+}
+
+/// Fila de servidor o de entrada remota: sello, nombre, detalle y acción.
+class _RemoteTile extends StatelessWidget {
+  const _RemoteTile({
+    required this.palette,
+    required this.icon,
+    required this.title,
+    this.subtitle,
+    this.onTap,
+    this.trailing,
+    this.accent = false,
+  });
+
+  final CyberHexPalette palette;
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final VoidCallback? onTap;
+  final Widget? trailing;
+  final bool accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = subtitle;
+    return ChSurface(
+      radius: ChRadius.md,
+      padding: const EdgeInsets.symmetric(
+        horizontal: ChSpace.md,
+        vertical: ChSpace.sm,
+      ),
+      onTap: onTap,
+      child: Row(
+        children: [
+          ChHexBadge(
+            icon: icon,
+            palette: palette,
+            size: 38,
+            color: accent ? palette.accent : palette.muted,
+          ),
+          const SizedBox(width: ChSpace.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: chTitle(palette, size: 13.5),
+                ),
+                if (hint != null && hint.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    hint,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.muted),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: ChSpace.xs),
+            trailing!,
+          ],
+        ],
+      ),
+    );
+  }
 }

@@ -7,6 +7,7 @@ import '../core/lyrics_parser.dart';
 import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 import 'lyrics_creator_page.dart';
 
 /// Visor de letras sincronizadas a pantalla completa.
@@ -167,7 +168,7 @@ class _LyricsPageState extends State<LyricsPage> {
               snapshot.title.isEmpty ? 'Letras' : snapshot.title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              style: chTitle(palette, size: 16.5),
             ),
             Text(
               _subtitle(snapshot),
@@ -258,6 +259,7 @@ class _LyricsPageState extends State<LyricsPage> {
           showTranslation: _bilingual,
           onTap: line.isTimed
               ? () {
+                  chHaptic();
                   _controller.seek(_lyrics.displayTime(line));
                   if (!snapshot.playing) _controller.play();
                 }
@@ -407,49 +409,26 @@ class _EmptyLyrics extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = paletteOf(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lyrics_outlined, size: 52, color: palette.muted),
-            const SizedBox(height: 14),
-            Text(
-              hasTrack
-                  ? 'Esta pista no trae letra.'
-                  : 'Abre una pista para ver su letra.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 16, color: palette.foreground),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'CyberHex busca un archivo .lrc junto al audio y, si no hay, '
-              'las letras incrustadas en el MP3 (USLT) o en el FLAC (LYRICS).',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
-                height: 1.45,
-                color: palette.muted,
-              ),
-            ),
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: hasTrack ? onCreator : null,
-              icon: const Icon(Icons.mic_external_on_rounded, size: 18),
-              label: const Text('Crear la letra'),
-              style: FilledButton.styleFrom(
-                backgroundColor: palette.accent,
-                foregroundColor: palette.onAccent,
-              ),
-            ),
-            const SizedBox(height: 6),
-            TextButton(
-              onPressed: onReload,
-              child: const Text('Buscar de nuevo'),
-            ),
-          ],
-        ),
+    return ChEmptyState(
+      palette: palette,
+      icon: Icons.lyrics_outlined,
+      title: hasTrack
+          ? 'Esta pista no trae letra.'
+          : 'Abre una pista para ver su letra.',
+      message:
+          'CyberHex busca un archivo .lrc junto al audio y, si no hay, '
+          'las letras incrustadas en el MP3 (USLT) o en el FLAC (LYRICS).',
+      action: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FilledButton.icon(
+            onPressed: hasTrack ? onCreator : null,
+            icon: const Icon(Icons.mic_external_on_rounded, size: 18),
+            label: const Text('Crear la letra'),
+          ),
+          const SizedBox(height: ChSpace.xs),
+          TextButton(onPressed: onReload, child: const Text('Buscar de nuevo')),
+        ],
       ),
     );
   }

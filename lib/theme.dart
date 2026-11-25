@@ -521,5 +521,23 @@ ThemeData buildCyberHexThemed(CyberHexPalette palette) {
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
     ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(26),
+        side: BorderSide(color: palette.border.withValues(alpha: 0.6)),
+      ),
+      titleTextStyle: TextStyle(
+        fontSize: 17,
+        fontWeight: FontWeight.w700,
+        color: palette.foreground,
+      ),
+      contentTextStyle: TextStyle(
+        fontSize: 13,
+        height: 1.45,
+        color: palette.muted,
+      ),
+    ),
   );
 }
