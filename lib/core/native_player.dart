@@ -46,9 +46,15 @@ typedef _TextNative = Pointer<Utf8> Function(Pointer<Void>);
 typedef _TextDart = Pointer<Utf8> Function(Pointer<Void>);
 
 typedef _CoverAtNative = Pointer<Uint8> Function(
-    Pointer<Void>, Int32, Pointer<Uint64>);
+  Pointer<Void>,
+  Int32,
+  Pointer<Uint64>,
+);
 typedef _CoverAtDart = Pointer<Uint8> Function(
-    Pointer<Void>, int, Pointer<Uint64>);
+  Pointer<Void>,
+  int,
+  Pointer<Uint64>,
+);
 
 typedef _PlainTextNative = Pointer<Utf8> Function();
 typedef _PlainTextDart = Pointer<Utf8> Function();
@@ -83,7 +89,12 @@ typedef _SetTwoFloatsNative = Int32 Function(Pointer<Void>, Float, Float);
 typedef _SetTwoFloatsDart = int Function(Pointer<Void>, double, double);
 typedef _SetIntAndFloatNative = Int32 Function(Pointer<Void>, Int32, Float);
 typedef _SetIntAndFloatDart = int Function(Pointer<Void>, int, double);
-typedef _SetIntTwoFloatsNative = Int32 Function(Pointer<Void>, Int32, Float, Float);
+typedef _SetIntTwoFloatsNative = Int32 Function(
+  Pointer<Void>,
+  Int32,
+  Float,
+  Float,
+);
 typedef _SetIntTwoFloatsDart = int Function(Pointer<Void>, int, double, double);
 typedef _OutFloatNative = Int32 Function(Pointer<Void>, Pointer<Float>);
 typedef _OutFloatDart = int Function(Pointer<Void>, Pointer<Float>);
@@ -96,33 +107,83 @@ typedef _TwoDoublesDart = int Function(Pointer<Void>, double, double);
 typedef _FloatOutNative = Int32 Function(Pointer<Void>, Pointer<Float>);
 typedef _FloatOutDart = int Function(Pointer<Void>, Pointer<Float>);
 typedef _SilenceNative = Int32 Function(
-    Pointer<Utf8>, Float, Pointer<Double>, Pointer<Double>);
+  Pointer<Utf8>,
+  Float,
+  Pointer<Double>,
+  Pointer<Double>,
+);
 typedef _SilenceDart = int Function(
-    Pointer<Utf8>, double, Pointer<Double>, Pointer<Double>);
+  Pointer<Utf8>,
+  double,
+  Pointer<Double>,
+  Pointer<Double>,
+);
 typedef _DeviceNameNative = Pointer<Utf8> Function(Int32);
 typedef _DeviceNameDart = Pointer<Utf8> Function(int);
 typedef _LyricLineNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Uint32);
 typedef _LyricLineDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
 typedef _BpmNative = Double Function(Pointer<Utf8>);
 typedef _BpmDart = double Function(Pointer<Utf8>);
-typedef _RenderNative = Int32 Function(Pointer<Utf8>, Pointer<Utf8>, Double, Double);
-typedef _RenderDart = int Function(Pointer<Utf8>, Pointer<Utf8>, double, double);
+typedef _RenderNative = Int32 Function(
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Double,
+  Double,
+);
+typedef _RenderDart = int Function(
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  double,
+  double,
+);
 typedef _RenderDspNative = Int32 Function(
-    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, Double, Double);
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  Double,
+  Double,
+);
 typedef _RenderDspDart = int Function(
-    Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>, double, double);
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Pointer<Utf8>,
+  double,
+  double,
+);
 typedef _MarkersAddNative = Int32 Function(
-    Pointer<Void>, Pointer<Utf8>, Double, Pointer<Utf8>);
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Double,
+  Pointer<Utf8>,
+);
 typedef _MarkersAddDart = int Function(
-    Pointer<Void>, Pointer<Utf8>, double, Pointer<Utf8>);
-typedef _MarkersIndexNative = Int32 Function(Pointer<Void>, Pointer<Utf8>, Int32);
+  Pointer<Void>,
+  Pointer<Utf8>,
+  double,
+  Pointer<Utf8>,
+);
+typedef _MarkersIndexNative = Int32 Function(
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Int32,
+);
 typedef _MarkersIndexDart = int Function(Pointer<Void>, Pointer<Utf8>, int);
-typedef _MarkersDoubleNative = Double Function(Pointer<Void>, Pointer<Utf8>, Int32);
+typedef _MarkersDoubleNative = Double Function(
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Int32,
+);
 typedef _MarkersDoubleDart = double Function(Pointer<Void>, Pointer<Utf8>, int);
 typedef _MarkersNameNative = Pointer<Utf8> Function(
-    Pointer<Void>, Pointer<Utf8>, Int32);
+  Pointer<Void>,
+  Pointer<Utf8>,
+  Int32,
+);
 typedef _MarkersNameDart = Pointer<Utf8> Function(
-    Pointer<Void>, Pointer<Utf8>, int);
+  Pointer<Void>,
+  Pointer<Utf8>,
+  int,
+);
 typedef _MarkersTrackNative = Int32 Function(Pointer<Void>, Pointer<Utf8>);
 typedef _MarkersTrackDart = int Function(Pointer<Void>, Pointer<Utf8>);
 typedef _HandlePathNative = Pointer<Void> Function(Pointer<Utf8>);
@@ -203,13 +264,24 @@ bool _loadTrackInIsolate(int address, String path) {
 /// La biblioteca se crea y se destruye dentro del isolate; solo cruzan rutas.
 ({List<String> paths, int removed}) _scanLibraryInIsolate(String root) {
   final lib = DynamicLibrary.open(_libraryName);
-  final create = lib.lookupFunction<_LibCreateNative, _LibCreateDart>('ch_library_create');
-  final destroy = lib.lookupFunction<_LibDestroyNative, _LibDestroyDart>('ch_library_destroy');
-  final scan = lib.lookupFunction<_LibScanNative, _LibScanDart>('ch_library_scan');
-  final count = lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_count');
-  final path = lib.lookupFunction<_LibPathNative, _LibPathDart>('ch_library_path');
-  final removedFn =
-      lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_removed');
+  final create = lib.lookupFunction<_LibCreateNative, _LibCreateDart>(
+    'ch_library_create',
+  );
+  final destroy = lib.lookupFunction<_LibDestroyNative, _LibDestroyDart>(
+    'ch_library_destroy',
+  );
+  final scan = lib.lookupFunction<_LibScanNative, _LibScanDart>(
+    'ch_library_scan',
+  );
+  final count = lib.lookupFunction<_LibCountNative, _LibCountDart>(
+    'ch_library_count',
+  );
+  final path = lib.lookupFunction<_LibPathNative, _LibPathDart>(
+    'ch_library_path',
+  );
+  final removedFn = lib.lookupFunction<_LibCountNative, _LibCountDart>(
+    'ch_library_removed',
+  );
 
   final handle = create();
   if (handle == nullptr) return (paths: const <String>[], removed: 0);
@@ -237,7 +309,9 @@ bool _loadTrackInIsolate(int address, String path) {
 /// `load_add` delega en `play_index`, que devuelve 0 y no el índice.
 int _loadAddInIsolate(int address, String path) {
   final lib = DynamicLibrary.open(_libraryName);
-  final loadAdd = lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_load_add');
+  final loadAdd = lib.lookupFunction<_PathArgNative, _PathArgDart>(
+    'ch_engine_load_add',
+  );
   final engine = Pointer<Void>.fromAddress(address);
   final utf8 = path.toNativeUtf8();
   try {
@@ -246,7 +320,6 @@ int _loadAddInIsolate(int address, String path) {
     malloc.free(utf8);
   }
 }
-
 
 /// BPM fuera del hilo de UI: decodifica hasta 30 s del archivo.
 double _bpmInIsolate(String path) {
@@ -267,7 +340,9 @@ double _bpmInIsolate(String path) {
   if (!lib.providesSymbol('ch_engine_detect_silence')) {
     return (lead: -1.0, tail: -1.0);
   }
-  final fn = lib.lookupFunction<_SilenceNative, _SilenceDart>('ch_engine_detect_silence');
+  final fn = lib.lookupFunction<_SilenceNative, _SilenceDart>(
+    'ch_engine_detect_silence',
+  );
   final utf8 = path.toNativeUtf8();
   final lead = calloc<Double>();
   final tail = calloc<Double>();
@@ -288,19 +363,34 @@ int _renderWavInIsolate(
   String destination,
   double start,
   double end,
+  ExportFormat format,
 ) {
   final lib = DynamicLibrary.open(_libraryName);
   final src = source.toNativeUtf8();
   final dst = destination.toNativeUtf8();
   try {
-    if (address == 0) {
-      if (!lib.providesSymbol('ch_engine_render_wav')) return -1;
-      final fn = lib.lookupFunction<_RenderNative, _RenderDart>('ch_engine_render_wav');
-      return fn(src, dst, start, end);
+    if (format == ExportFormat.wav16) {
+      if (address == 0) {
+        if (!lib.providesSymbol('ch_engine_render_wav')) return -1;
+        final fn = lib.lookupFunction<_RenderNative, _RenderDart>(
+          'ch_engine_render_wav',
+        );
+        return fn(src, dst, start, end);
+      }
+      if (!lib.providesSymbol('ch_engine_render_wav_ex')) return -1;
+      final fn = lib.lookupFunction<_RenderDspNative, _RenderDspDart>(
+        'ch_engine_render_wav_ex',
+      );
+      return fn(Pointer<Void>.fromAddress(address), src, dst, start, end);
     }
-    if (!lib.providesSymbol('ch_engine_render_wav_ex')) return -1;
-    final fn = lib.lookupFunction<_RenderDspNative, _RenderDspDart>(
-        'ch_engine_render_wav_ex');
+    final symbol = switch (format) {
+      ExportFormat.wav24 => 'ch_engine_render_wav24',
+      ExportFormat.wavF32 => 'ch_engine_render_wav_f32',
+      ExportFormat.aiff => 'ch_engine_render_aiff',
+      ExportFormat.wav16 => 'ch_engine_render_wav_ex',
+    };
+    if (!lib.providesSymbol(symbol)) return -1;
+    final fn = lib.lookupFunction<_RenderDspNative, _RenderDspDart>(symbol);
     return fn(Pointer<Void>.fromAddress(address), src, dst, start, end);
   } finally {
     malloc.free(src);
@@ -325,19 +415,33 @@ List<Map<String, Object?>> _cueInIsolate(String source, bool isText) {
     final handle = open(utf8);
     if (handle == nullptr) return const <Map<String, Object?>>[];
     try {
-      final countFn = lib.lookupFunction<_HandleIntNative, _HandleIntDart>('ch_cue_count');
-      final fileFn =
-          lib.lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>('ch_cue_file');
-      final titleFn =
-          lib.lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>('ch_cue_title');
-      final performerFn =
-          lib.lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>('ch_cue_performer');
-      final startFn =
-          lib.lookupFunction<_HandleIndexDoubleNative, _HandleIndexDoubleDart>('ch_cue_start');
-      final endFn =
-          lib.lookupFunction<_HandleIndexDoubleNative, _HandleIndexDoubleDart>('ch_cue_end');
-      final numberFn =
-          lib.lookupFunction<_HandleIndexIntNative, _HandleIndexIntDart>('ch_cue_number');
+      final countFn = lib.lookupFunction<_HandleIntNative, _HandleIntDart>(
+        'ch_cue_count',
+      );
+      final fileFn = lib
+          .lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>(
+            'ch_cue_file',
+          );
+      final titleFn = lib
+          .lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>(
+            'ch_cue_title',
+          );
+      final performerFn = lib
+          .lookupFunction<_HandleIndexTextNative, _HandleIndexTextDart>(
+            'ch_cue_performer',
+          );
+      final startFn = lib
+          .lookupFunction<_HandleIndexDoubleNative, _HandleIndexDoubleDart>(
+            'ch_cue_start',
+          );
+      final endFn = lib
+          .lookupFunction<_HandleIndexDoubleNative, _HandleIndexDoubleDart>(
+            'ch_cue_end',
+          );
+      final numberFn = lib
+          .lookupFunction<_HandleIndexIntNative, _HandleIndexIntDart>(
+            'ch_cue_number',
+          );
       final total = countFn(handle);
       final out = <Map<String, Object?>>[];
       for (var i = 0; i < total; i++) {
@@ -391,7 +495,8 @@ class NativePlayer implements PlayerApi {
 
   static String? _openFailure;
 
-  static String lastCoreError() => _openFailure ?? 'no se pudo cargar el motor nativo';
+  static String lastCoreError() =>
+      _openFailure ?? 'no se pudo cargar el motor nativo';
 
   final Pointer<Void> _engine;
   final _Bindings _bindings;
@@ -403,7 +508,10 @@ class NativePlayer implements PlayerApi {
   late final Pointer<Float> _outBuf;
 
   @override
-  final List<double> eqGains = List<double>.filled(_Bindings.instance.eqBandCount(), 0);
+  final List<double> eqGains = List<double>.filled(
+    _Bindings.instance.eqBandCount(),
+    0,
+  );
 
   String? _title;
   String? _artist;
@@ -580,7 +688,8 @@ class NativePlayer implements PlayerApi {
   }
 
   @override
-  bool get shuffle => !_disposed && (_bindings.shuffle?.call(_engine) ?? 0) != 0;
+  bool get shuffle =>
+      !_disposed && (_bindings.shuffle?.call(_engine) ?? 0) != 0;
 
   @override
   void setRepeatMode(int mode) {
@@ -706,7 +815,8 @@ class NativePlayer implements PlayerApi {
   }
 
   @override
-  bool get s16Output => !_disposed && (_bindings.s16Fn?.call(_engine) ?? 0) != 0;
+  bool get s16Output =>
+      !_disposed && (_bindings.s16Fn?.call(_engine) ?? 0) != 0;
 
   @override
   void setS16Output(bool enabled) {
@@ -852,7 +962,10 @@ class NativePlayer implements PlayerApi {
     if (fn == null) return false;
     if (fn(_engine, from, to) != 0) return false;
     _syncMirror();
-    if (from < 0 || to < 0 || from >= _queuePaths.length || to >= _queuePaths.length) {
+    if (from < 0 ||
+        to < 0 ||
+        from >= _queuePaths.length ||
+        to >= _queuePaths.length) {
       return true;
     }
     final item = _queuePaths.removeAt(from);
@@ -926,7 +1039,8 @@ class NativePlayer implements PlayerApi {
         if (line.isEmpty || line.startsWith('#')) continue;
         var value = line;
         final equals = line.indexOf('=');
-        if (equals > 0 && line.substring(0, equals).toLowerCase().startsWith('file')) {
+        if (equals > 0 &&
+            line.substring(0, equals).toLowerCase().startsWith('file')) {
           value = line.substring(equals + 1).trim();
         }
         if (value.isEmpty) continue;
@@ -1039,7 +1153,6 @@ class NativePlayer implements PlayerApi {
         return PlayerEventKind.unknown;
     }
   }
-
 
   // ---------------------------------------------------------------------
   // Fase 3: medición, mezcla fina y transporte extendido
@@ -1155,7 +1268,8 @@ class NativePlayer implements PlayerApi {
   }
 
   @override
-  bool get gapless => !_disposed && (_bindings.gapless?.call(_engine) ?? 1) != 0;
+  bool get gapless =>
+      !_disposed && (_bindings.gapless?.call(_engine) ?? 1) != 0;
 
   @override
   void setGapless(bool enabled) {
@@ -1250,10 +1364,12 @@ class NativePlayer implements PlayerApi {
     for (var i = 0; i < count; i++) {
       final position = _bindings.markersPosition?.call(handle, track, i) ?? 0;
       final namePtr = _bindings.markersName?.call(handle, track, i);
-      out.add(AudioMarker(
-        position: position,
-        name: namePtr == null ? '' : namePtr.toDartString(),
-      ));
+      out.add(
+        AudioMarker(
+          position: position,
+          name: namePtr == null ? '' : namePtr.toDartString(),
+        ),
+      );
     }
     return List<AudioMarker>.unmodifiable(out);
   }
@@ -1311,12 +1427,16 @@ class NativePlayer implements PlayerApi {
   double get sleepRemaining => _bindings.sleepRemaining?.call(_engine) ?? -1;
 
   @override
-  Future<SilenceTrim?> detectSilence(String path,
-      {double thresholdDb = -60}) async {
+  Future<SilenceTrim?> detectSilence(
+    String path, {
+    double thresholdDb = -60,
+  }) async {
     if (_disposed) return null;
     if (_bindings.detectSilence == null) return null;
     try {
-      final result = await Isolate.run(() => _silenceInIsolate(path, thresholdDb));
+      final result = await Isolate.run(
+        () => _silenceInIsolate(path, thresholdDb),
+      );
       if (_disposed || result.lead < 0) return null;
       return SilenceTrim(lead: result.lead, tail: result.tail);
     } catch (error) {
@@ -1329,7 +1449,9 @@ class NativePlayer implements PlayerApi {
   List<AudioDevice> get outputDevices {
     final count = _bindings.deviceCount?.call() ?? 0;
     if (count <= 0) return const <AudioDevice>[];
-    final out = <AudioDevice>[const AudioDevice(index: -1, name: 'Predeterminado')];
+    final out = <AudioDevice>[
+      const AudioDevice(index: -1, name: 'Predeterminado'),
+    ];
     for (var i = 0; i < count; i++) {
       final name = _bindings.deviceName?.call(i)?.toDartString() ?? '';
       out.add(AudioDevice(index: i, name: name));
@@ -1415,14 +1537,24 @@ class NativePlayer implements PlayerApi {
     double start = 0,
     double end = 0,
     bool withDsp = true,
+    ExportFormat format = ExportFormat.wav16,
   }) async {
     if (_disposed) return false;
-    if (withDsp && _bindings.renderDsp == null) return false;
-    if (!withDsp && _bindings.renderFlat == null) return false;
+    if (format == ExportFormat.wav16) {
+      if (withDsp && _bindings.renderDsp == null) return false;
+      if (!withDsp && _bindings.renderFlat == null) return false;
+    }
     try {
       final address = withDsp ? _engine.address : 0;
       final code = await Isolate.run(
-        () => _renderWavInIsolate(address, sourcePath, destinationPath, start, end),
+        () => _renderWavInIsolate(
+          address,
+          sourcePath,
+          destinationPath,
+          start,
+          end,
+          format,
+        ),
       );
       if (code != 0) {
         _failure = _renderError(code);
@@ -1507,323 +1639,490 @@ class NativePlayer implements PlayerApi {
 
 class _Bindings {
   _Bindings._(DynamicLibrary lib)
-      : create = lib.lookupFunction<_CreateNative, _CreateDart>('ch_engine_create'),
-        destroy = lib.lookupFunction<_DestroyNative, _DestroyDart>('ch_engine_destroy'),
-        load = lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_load'),
-        play = lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_play'),
-        pause = lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_pause'),
-        seek = lib.lookupFunction<_SeekNative, _SeekDart>('ch_engine_seek'),
-        next = lib.providesSymbol('ch_engine_next')
-            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_next')
-            : null,
-        previous = lib.providesSymbol('ch_engine_previous')
-            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_previous')
-            : null,
-        setVolume = lib.lookupFunction<_VolumeNative, _VolumeDart>('ch_engine_set_volume'),
-        eqBandCount = lib.lookupFunction<_EqCountNative, _EqCountDart>('ch_engine_eq_band_count'),
-        eqBandFreq = lib.providesSymbol('ch_engine_eq_band_freq')
-            ? lib.lookupFunction<_EqFreqNative, _EqFreqDart>('ch_engine_eq_band_freq')
-            : null,
-        setEqGains = lib.lookupFunction<_EqGainsNative, _EqGainsDart>('ch_engine_set_eq_gains'),
-        position = lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_position'),
-        duration = lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_duration'),
-        isPlaying = lib.lookupFunction<_IntNative, _IntDart>('ch_engine_is_playing'),
-        pollEvent =
-            lib.lookupFunction<_PollEventNative, _PollEventDart>('ch_engine_poll_event'),
-        levels = lib.providesSymbol('ch_engine_levels')
-            ? lib.lookupFunction<_LevelsNative, _LevelsDart>('ch_engine_levels')
-            : null,
-        setPauseFade = lib.providesSymbol('ch_engine_set_pause_fade')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_pause_fade')
-            : null,
-        pauseFade = lib.providesSymbol('ch_engine_pause_fade')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_pause_fade')
-            : null,
-        setEqPreamp = lib.providesSymbol('ch_engine_set_eq_preamp')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_eq_preamp')
-            : null,
-        eqPreamp = lib.providesSymbol('ch_engine_eq_preamp')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_eq_preamp')
-            : null,
-        setReplayGainMode = lib.providesSymbol('ch_engine_set_replaygain_mode')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_replaygain_mode')
-            : null,
-        replayGainMode = lib.providesSymbol('ch_engine_replaygain_mode')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_replaygain_mode')
-            : null,
-        setLoop = lib.providesSymbol('ch_engine_set_loop')
-            ? lib.lookupFunction<_SetLoopNative, _SetLoopDart>('ch_engine_set_loop')
-            : null,
-        loopStart = lib.providesSymbol('ch_engine_loop_start')
-            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_loop_start')
-            : null,
-        loopEnd = lib.providesSymbol('ch_engine_loop_end')
-            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_loop_end')
-            : null,
-        skippedTracks = lib.providesSymbol('ch_engine_skipped_tracks')
-            ? lib.lookupFunction<_U64Native, _U64Dart>('ch_engine_skipped_tracks')
-            : null,
-        abiVersion = lib.providesSymbol('ch_engine_abi_version')
-            ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>('ch_engine_abi_version')
-            : null,
-        setBalance = lib.providesSymbol('ch_engine_set_balance')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_balance')
-            : null,
-        balance = lib.providesSymbol('ch_engine_balance')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_balance')
-            : null,
-        setRepeat = lib.providesSymbol('ch_engine_set_repeat')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_repeat')
-            : null,
-        repeat = lib.providesSymbol('ch_engine_repeat')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_repeat')
-            : null,
-        setShuffle = lib.providesSymbol('ch_engine_set_shuffle')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_shuffle')
-            : null,
-        shuffle = lib.providesSymbol('ch_engine_shuffle')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_shuffle')
-            : null,
-        setChannelMode = lib.providesSymbol('ch_engine_set_channel_mode')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_channel_mode')
-            : null,
-        channelMode = lib.providesSymbol('ch_engine_channel_mode')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_channel_mode')
-            : null,
-        titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
-        artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
-        albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
-        coverCount = lib.lookupFunction<_IntNative, _IntDart>('ch_engine_cover_count'),
-        coverAt =
-            lib.lookupFunction<_CoverAtNative, _CoverAtDart>('ch_engine_cover_at'),
-        engineLastErrorFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_last_error'),
-        coreLastErrorFn = lib.lookupFunction<_PlainTextNative, _PlainTextDart>('ch_core_last_error'),
-        playIndex = lib.providesSymbol('ch_engine_play_index')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_play_index')
-            : null,
-        loadAdd = lib.providesSymbol('ch_engine_load_add')
-            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_load_add')
-            : null,
-        queueAdd = lib.providesSymbol('ch_engine_queue_add')
-            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_queue_add')
-            : null,
-        queueCount = lib.providesSymbol('ch_engine_queue_count')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_count')
-            : null,
-        queueIndex = lib.providesSymbol('ch_engine_queue_index')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_index')
-            : null,
-        queueClear = lib.providesSymbol('ch_engine_queue_clear')
-            ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_queue_clear')
-            : null,
-        queueMove = lib.providesSymbol('ch_engine_queue_move')
-            ? lib.lookupFunction<_TwoIntsNative, _TwoIntsDart>('ch_engine_queue_move')
-            : null,
-        queueRemove = lib.providesSymbol('ch_engine_queue_remove')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_queue_remove')
-            : null,
-        queueInsert = lib.providesSymbol('ch_engine_queue_insert')
-            ? lib.lookupFunction<_IntAndPathNative, _IntAndPathDart>('ch_engine_queue_insert')
-            : null,
-        queueImport = lib.providesSymbol('ch_engine_queue_import')
-            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_queue_import')
-            : null,
-        queueExport = lib.providesSymbol('ch_engine_queue_export')
-            ? lib.lookupFunction<_PathArgNative, _PathArgDart>('ch_engine_queue_export')
-            : null,
-        libraryCreate = lib.providesSymbol('ch_library_create')
-            ? lib.lookupFunction<_LibCreateNative, _LibCreateDart>('ch_library_create')
-            : null,
-        libraryDestroy = lib.providesSymbol('ch_library_destroy')
-            ? lib.lookupFunction<_LibDestroyNative, _LibDestroyDart>('ch_library_destroy')
-            : null,
-        libraryScan = lib.providesSymbol('ch_library_scan')
-            ? lib.lookupFunction<_LibScanNative, _LibScanDart>('ch_library_scan')
-            : null,
-        libraryCount = lib.providesSymbol('ch_library_count')
-            ? lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_count')
-            : null,
-        libraryPath = lib.providesSymbol('ch_library_path')
-            ? lib.lookupFunction<_LibPathNative, _LibPathDart>('ch_library_path')
-            : null,
-        libraryRemovedFn = lib.providesSymbol('ch_library_removed')
-            ? lib.lookupFunction<_LibCountNative, _LibCountDart>('ch_library_removed')
-            : null,
-        set9D = lib.providesSymbol('ch_engine_set_9d')
-            ? lib.lookupFunction<_SetIntTwoFloatsNative, _SetIntTwoFloatsDart>(
-                'ch_engine_set_9d')
-            : null,
-        nineDEnabled = lib.providesSymbol('ch_engine_9d_enabled')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_9d_enabled')
-            : null,
-        nineDSpeed = lib.providesSymbol('ch_engine_9d_speed')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_9d_speed')
-            : null,
-        nineDDepth = lib.providesSymbol('ch_engine_9d_depth')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_9d_depth')
-            : null,
-        setStereoEnhance = lib.providesSymbol('ch_engine_set_stereo_enhance')
-            ? lib.lookupFunction<_SetTwoFloatsNative, _SetTwoFloatsDart>(
-                'ch_engine_set_stereo_enhance')
-            : null,
-        setStereoWidthFn = lib.providesSymbol('ch_engine_set_stereo_width')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_stereo_width')
-            : null,
-        stereoWidthFn = lib.providesSymbol('ch_engine_stereo_width')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_stereo_width')
-            : null,
-        bassPunchFn = lib.providesSymbol('ch_engine_bass_punch')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_bass_punch')
-            : null,
-        setVocalCut = lib.providesSymbol('ch_engine_set_vocal_cut')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_vocal_cut')
-            : null,
-        vocalCutFn = lib.providesSymbol('ch_engine_vocal_cut')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_vocal_cut')
-            : null,
-        setCrossfeedFn = lib.providesSymbol('ch_engine_set_crossfeed')
-            ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
-                'ch_engine_set_crossfeed')
-            : null,
-        crossfeedFn = lib.providesSymbol('ch_engine_crossfeed')
-            ? lib.lookupFunction<_OutFloatNative, _OutFloatDart>('ch_engine_crossfeed')
-            : null,
-        setNightMode = lib.providesSymbol('ch_engine_set_night_mode')
-            ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
-                'ch_engine_set_night_mode')
-            : null,
-        nightModeFn = lib.providesSymbol('ch_engine_night_mode')
-            ? lib.lookupFunction<_OutFloatNative, _OutFloatDart>('ch_engine_night_mode')
-            : null,
-        setS16 = lib.providesSymbol('ch_engine_set_s16_output')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_s16_output')
-            : null,
-        s16Fn = lib.providesSymbol('ch_engine_s16_output')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_s16_output')
-            : null,
-        spectrum = lib.providesSymbol('ch_engine_spectrum')
-            ? lib.lookupFunction<_SpectrumNative, _SpectrumDart>('ch_engine_spectrum')
-            : null,
-        setReplayGain = lib.providesSymbol('ch_engine_set_replaygain')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_replaygain')
-            : null,
-        rgGainDb = lib.providesSymbol('ch_engine_replaygain_gain_db')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
-                'ch_engine_replaygain_gain_db')
-            : null,
-        rgPeak = lib.providesSymbol('ch_engine_replaygain_peak')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
-                'ch_engine_replaygain_peak')
-            : null,
-        speed = lib.providesSymbol('ch_engine_speed')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_speed')
-            : null,
-        setSpeed = lib.providesSymbol('ch_engine_set_speed')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_speed')
-            : null,
-        pitch = lib.providesSymbol('ch_engine_pitch')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_pitch')
-            : null,
-        setPitch = lib.providesSymbol('ch_engine_set_pitch')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_pitch')
-            : null,
-        crossfade = lib.providesSymbol('ch_engine_crossfade')
-            ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>('ch_engine_crossfade')
-            : null,
-        setCrossfade = lib.providesSymbol('ch_engine_set_crossfade')
-            ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>('ch_engine_set_crossfade')
-            : null,
-        gapless = lib.providesSymbol('ch_engine_gapless')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_gapless')
-            : null,
-        setGapless = lib.providesSymbol('ch_engine_set_gapless')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_gapless')
-            : null,
-        setSleepTimer = lib.providesSymbol('ch_engine_set_sleep_timer')
-            ? lib.lookupFunction<_TwoDoublesNative, _TwoDoublesDart>(
-                'ch_engine_set_sleep_timer')
-            : null,
-        sleepRemaining = lib.providesSymbol('ch_engine_sleep_remaining')
-            ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_sleep_remaining')
-            : null,
-        detectSilence = lib.providesSymbol('ch_engine_detect_silence')
-            ? lib.lookupFunction<_SilenceNative, _SilenceDart>('ch_engine_detect_silence')
-            : null,
-        deviceCount = lib.providesSymbol('ch_engine_output_device_count')
-            ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>(
-                'ch_engine_output_device_count')
-            : null,
-        deviceName = lib.providesSymbol('ch_engine_output_device_name')
-            ? lib.lookupFunction<_DeviceNameNative, _DeviceNameDart>(
-                'ch_engine_output_device_name')
-            : null,
-        currentDevice = lib.providesSymbol('ch_engine_output_device')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_output_device')
-            : null,
-        setOutputDevice = lib.providesSymbol('ch_engine_set_output_device')
-            ? lib.lookupFunction<_SetIntNative, _SetIntDart>('ch_engine_set_output_device')
-            : null,
-        lyricsCount = lib.providesSymbol('ch_engine_lyrics_count')
-            ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_lyrics_count')
-            : null,
-        lyricLine = lib.providesSymbol('ch_engine_lyric_line')
-            ? lib.lookupFunction<_LyricLineNative, _LyricLineDart>('ch_engine_lyric_line')
-            : null,
-        soundscapeSet = lib.providesSymbol('ch_engine_set_soundscape')
-            ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
-                'ch_engine_set_soundscape')
-            : null,
-        soundscapeGet = lib.providesSymbol('ch_engine_soundscape')
-            ? lib.lookupFunction<_FloatOutNative, _FloatOutDart>('ch_engine_soundscape')
-            : null,
-        detectBpm = lib.providesSymbol('ch_engine_detect_bpm')
-            ? lib.lookupFunction<_BpmNative, _BpmDart>('ch_engine_detect_bpm')
-            : null,
-        renderFlat = lib.providesSymbol('ch_engine_render_wav')
-            ? lib.lookupFunction<_RenderNative, _RenderDart>('ch_engine_render_wav')
-            : null,
-        renderDsp = lib.providesSymbol('ch_engine_render_wav_ex')
-            ? lib.lookupFunction<_RenderDspNative, _RenderDspDart>(
-                'ch_engine_render_wav_ex')
-            : null,
-        cueRead = lib.providesSymbol('ch_cue_read')
-            ? lib.lookupFunction<_HandlePathNative, _HandlePathDart>('ch_cue_read')
-            : null,
-        cueParse = lib.providesSymbol('ch_cue_parse')
-            ? lib.lookupFunction<_HandlePathNative, _HandlePathDart>('ch_cue_parse')
-            : null,
-        markersCreate = lib.providesSymbol('ch_markers_create')
-            ? lib.lookupFunction<_LibCreateNative, _LibCreateDart>('ch_markers_create')
-            : null,
-        markersDestroy = lib.providesSymbol('ch_markers_destroy')
-            ? lib.lookupFunction<_HandleVoidNative, _HandleVoidDart>('ch_markers_destroy')
-            : null,
-        markersLoad = lib.providesSymbol('ch_markers_load')
-            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_load')
-            : null,
-        markersSave = lib.providesSymbol('ch_markers_save')
-            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_save')
-            : null,
-        markersAdd = lib.providesSymbol('ch_markers_add')
-            ? lib.lookupFunction<_MarkersAddNative, _MarkersAddDart>('ch_markers_add')
-            : null,
-        markersCount = lib.providesSymbol('ch_markers_count')
-            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_count')
-            : null,
-        markersPosition = lib.providesSymbol('ch_markers_position')
-            ? lib.lookupFunction<_MarkersDoubleNative, _MarkersDoubleDart>(
-                'ch_markers_position')
-            : null,
-        markersName = lib.providesSymbol('ch_markers_name')
-            ? lib.lookupFunction<_MarkersNameNative, _MarkersNameDart>('ch_markers_name')
-            : null,
-        markersRemove = lib.providesSymbol('ch_markers_remove')
-            ? lib.lookupFunction<_MarkersIndexNative, _MarkersIndexDart>(
-                'ch_markers_remove')
-            : null,
-        markersClear = lib.providesSymbol('ch_markers_clear')
-            ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>('ch_markers_clear')
-            : null;
+    : create = lib.lookupFunction<_CreateNative, _CreateDart>(
+        'ch_engine_create',
+      ),
+      destroy = lib.lookupFunction<_DestroyNative, _DestroyDart>(
+        'ch_engine_destroy',
+      ),
+      load = lib.lookupFunction<_LoadNative, _LoadDart>('ch_engine_load'),
+      play = lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_play'),
+      pause = lib.lookupFunction<_ControlNative, _ControlDart>(
+        'ch_engine_pause',
+      ),
+      seek = lib.lookupFunction<_SeekNative, _SeekDart>('ch_engine_seek'),
+      next = lib.providesSymbol('ch_engine_next')
+          ? lib.lookupFunction<_ControlNative, _ControlDart>('ch_engine_next')
+          : null,
+      previous = lib.providesSymbol('ch_engine_previous')
+          ? lib.lookupFunction<_ControlNative, _ControlDart>(
+              'ch_engine_previous',
+            )
+          : null,
+      setVolume = lib.lookupFunction<_VolumeNative, _VolumeDart>(
+        'ch_engine_set_volume',
+      ),
+      eqBandCount = lib.lookupFunction<_EqCountNative, _EqCountDart>(
+        'ch_engine_eq_band_count',
+      ),
+      eqBandFreq = lib.providesSymbol('ch_engine_eq_band_freq')
+          ? lib.lookupFunction<_EqFreqNative, _EqFreqDart>(
+              'ch_engine_eq_band_freq',
+            )
+          : null,
+      setEqGains = lib.lookupFunction<_EqGainsNative, _EqGainsDart>(
+        'ch_engine_set_eq_gains',
+      ),
+      position = lib.lookupFunction<_DoubleNative, _DoubleDart>(
+        'ch_engine_position',
+      ),
+      duration = lib.lookupFunction<_DoubleNative, _DoubleDart>(
+        'ch_engine_duration',
+      ),
+      isPlaying = lib.lookupFunction<_IntNative, _IntDart>(
+        'ch_engine_is_playing',
+      ),
+      pollEvent = lib.lookupFunction<_PollEventNative, _PollEventDart>(
+        'ch_engine_poll_event',
+      ),
+      levels = lib.providesSymbol('ch_engine_levels')
+          ? lib.lookupFunction<_LevelsNative, _LevelsDart>('ch_engine_levels')
+          : null,
+      setPauseFade = lib.providesSymbol('ch_engine_set_pause_fade')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_pause_fade',
+            )
+          : null,
+      pauseFade = lib.providesSymbol('ch_engine_pause_fade')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_pause_fade',
+            )
+          : null,
+      setEqPreamp = lib.providesSymbol('ch_engine_set_eq_preamp')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_eq_preamp',
+            )
+          : null,
+      eqPreamp = lib.providesSymbol('ch_engine_eq_preamp')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_eq_preamp',
+            )
+          : null,
+      setReplayGainMode = lib.providesSymbol('ch_engine_set_replaygain_mode')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_replaygain_mode',
+            )
+          : null,
+      replayGainMode = lib.providesSymbol('ch_engine_replaygain_mode')
+          ? lib.lookupFunction<_IntNative, _IntDart>(
+              'ch_engine_replaygain_mode',
+            )
+          : null,
+      setLoop = lib.providesSymbol('ch_engine_set_loop')
+          ? lib.lookupFunction<_SetLoopNative, _SetLoopDart>(
+              'ch_engine_set_loop',
+            )
+          : null,
+      loopStart = lib.providesSymbol('ch_engine_loop_start')
+          ? lib.lookupFunction<_DoubleNative, _DoubleDart>(
+              'ch_engine_loop_start',
+            )
+          : null,
+      loopEnd = lib.providesSymbol('ch_engine_loop_end')
+          ? lib.lookupFunction<_DoubleNative, _DoubleDart>('ch_engine_loop_end')
+          : null,
+      skippedTracks = lib.providesSymbol('ch_engine_skipped_tracks')
+          ? lib.lookupFunction<_U64Native, _U64Dart>('ch_engine_skipped_tracks')
+          : null,
+      abiVersion = lib.providesSymbol('ch_engine_abi_version')
+          ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>(
+              'ch_engine_abi_version',
+            )
+          : null,
+      setBalance = lib.providesSymbol('ch_engine_set_balance')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_balance',
+            )
+          : null,
+      balance = lib.providesSymbol('ch_engine_balance')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_balance',
+            )
+          : null,
+      setRepeat = lib.providesSymbol('ch_engine_set_repeat')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_repeat',
+            )
+          : null,
+      repeat = lib.providesSymbol('ch_engine_repeat')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_repeat')
+          : null,
+      setShuffle = lib.providesSymbol('ch_engine_set_shuffle')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_shuffle',
+            )
+          : null,
+      shuffle = lib.providesSymbol('ch_engine_shuffle')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_shuffle')
+          : null,
+      setChannelMode = lib.providesSymbol('ch_engine_set_channel_mode')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_channel_mode',
+            )
+          : null,
+      channelMode = lib.providesSymbol('ch_engine_channel_mode')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_channel_mode')
+          : null,
+      titleFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_title'),
+      artistFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_artist'),
+      albumFn = lib.lookupFunction<_TextNative, _TextDart>('ch_engine_album'),
+      coverCount = lib.lookupFunction<_IntNative, _IntDart>(
+        'ch_engine_cover_count',
+      ),
+      coverAt = lib.lookupFunction<_CoverAtNative, _CoverAtDart>(
+        'ch_engine_cover_at',
+      ),
+      engineLastErrorFn = lib.lookupFunction<_TextNative, _TextDart>(
+        'ch_engine_last_error',
+      ),
+      coreLastErrorFn = lib.lookupFunction<_PlainTextNative, _PlainTextDart>(
+        'ch_core_last_error',
+      ),
+      playIndex = lib.providesSymbol('ch_engine_play_index')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_play_index',
+            )
+          : null,
+      loadAdd = lib.providesSymbol('ch_engine_load_add')
+          ? lib.lookupFunction<_PathArgNative, _PathArgDart>(
+              'ch_engine_load_add',
+            )
+          : null,
+      queueAdd = lib.providesSymbol('ch_engine_queue_add')
+          ? lib.lookupFunction<_PathArgNative, _PathArgDart>(
+              'ch_engine_queue_add',
+            )
+          : null,
+      queueCount = lib.providesSymbol('ch_engine_queue_count')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_count')
+          : null,
+      queueIndex = lib.providesSymbol('ch_engine_queue_index')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_queue_index')
+          : null,
+      queueClear = lib.providesSymbol('ch_engine_queue_clear')
+          ? lib.lookupFunction<_ControlNative, _ControlDart>(
+              'ch_engine_queue_clear',
+            )
+          : null,
+      queueMove = lib.providesSymbol('ch_engine_queue_move')
+          ? lib.lookupFunction<_TwoIntsNative, _TwoIntsDart>(
+              'ch_engine_queue_move',
+            )
+          : null,
+      queueRemove = lib.providesSymbol('ch_engine_queue_remove')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_queue_remove',
+            )
+          : null,
+      queueInsert = lib.providesSymbol('ch_engine_queue_insert')
+          ? lib.lookupFunction<_IntAndPathNative, _IntAndPathDart>(
+              'ch_engine_queue_insert',
+            )
+          : null,
+      queueImport = lib.providesSymbol('ch_engine_queue_import')
+          ? lib.lookupFunction<_PathArgNative, _PathArgDart>(
+              'ch_engine_queue_import',
+            )
+          : null,
+      queueExport = lib.providesSymbol('ch_engine_queue_export')
+          ? lib.lookupFunction<_PathArgNative, _PathArgDart>(
+              'ch_engine_queue_export',
+            )
+          : null,
+      libraryCreate = lib.providesSymbol('ch_library_create')
+          ? lib.lookupFunction<_LibCreateNative, _LibCreateDart>(
+              'ch_library_create',
+            )
+          : null,
+      libraryDestroy = lib.providesSymbol('ch_library_destroy')
+          ? lib.lookupFunction<_LibDestroyNative, _LibDestroyDart>(
+              'ch_library_destroy',
+            )
+          : null,
+      libraryScan = lib.providesSymbol('ch_library_scan')
+          ? lib.lookupFunction<_LibScanNative, _LibScanDart>('ch_library_scan')
+          : null,
+      libraryCount = lib.providesSymbol('ch_library_count')
+          ? lib.lookupFunction<_LibCountNative, _LibCountDart>(
+              'ch_library_count',
+            )
+          : null,
+      libraryPath = lib.providesSymbol('ch_library_path')
+          ? lib.lookupFunction<_LibPathNative, _LibPathDart>('ch_library_path')
+          : null,
+      libraryRemovedFn = lib.providesSymbol('ch_library_removed')
+          ? lib.lookupFunction<_LibCountNative, _LibCountDart>(
+              'ch_library_removed',
+            )
+          : null,
+      set9D = lib.providesSymbol('ch_engine_set_9d')
+          ? lib.lookupFunction<_SetIntTwoFloatsNative, _SetIntTwoFloatsDart>(
+              'ch_engine_set_9d',
+            )
+          : null,
+      nineDEnabled = lib.providesSymbol('ch_engine_9d_enabled')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_9d_enabled')
+          : null,
+      nineDSpeed = lib.providesSymbol('ch_engine_9d_speed')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_9d_speed',
+            )
+          : null,
+      nineDDepth = lib.providesSymbol('ch_engine_9d_depth')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_9d_depth',
+            )
+          : null,
+      setStereoEnhance = lib.providesSymbol('ch_engine_set_stereo_enhance')
+          ? lib.lookupFunction<_SetTwoFloatsNative, _SetTwoFloatsDart>(
+              'ch_engine_set_stereo_enhance',
+            )
+          : null,
+      setStereoWidthFn = lib.providesSymbol('ch_engine_set_stereo_width')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_stereo_width',
+            )
+          : null,
+      stereoWidthFn = lib.providesSymbol('ch_engine_stereo_width')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_stereo_width',
+            )
+          : null,
+      bassPunchFn = lib.providesSymbol('ch_engine_bass_punch')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_bass_punch',
+            )
+          : null,
+      setVocalCut = lib.providesSymbol('ch_engine_set_vocal_cut')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_vocal_cut',
+            )
+          : null,
+      vocalCutFn = lib.providesSymbol('ch_engine_vocal_cut')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_vocal_cut',
+            )
+          : null,
+      setCrossfeedFn = lib.providesSymbol('ch_engine_set_crossfeed')
+          ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
+              'ch_engine_set_crossfeed',
+            )
+          : null,
+      crossfeedFn = lib.providesSymbol('ch_engine_crossfeed')
+          ? lib.lookupFunction<_OutFloatNative, _OutFloatDart>(
+              'ch_engine_crossfeed',
+            )
+          : null,
+      setNightMode = lib.providesSymbol('ch_engine_set_night_mode')
+          ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
+              'ch_engine_set_night_mode',
+            )
+          : null,
+      nightModeFn = lib.providesSymbol('ch_engine_night_mode')
+          ? lib.lookupFunction<_OutFloatNative, _OutFloatDart>(
+              'ch_engine_night_mode',
+            )
+          : null,
+      setS16 = lib.providesSymbol('ch_engine_set_s16_output')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_s16_output',
+            )
+          : null,
+      s16Fn = lib.providesSymbol('ch_engine_s16_output')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_s16_output')
+          : null,
+      spectrum = lib.providesSymbol('ch_engine_spectrum')
+          ? lib.lookupFunction<_SpectrumNative, _SpectrumDart>(
+              'ch_engine_spectrum',
+            )
+          : null,
+      setReplayGain = lib.providesSymbol('ch_engine_set_replaygain')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_replaygain',
+            )
+          : null,
+      rgGainDb = lib.providesSymbol('ch_engine_replaygain_gain_db')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_replaygain_gain_db',
+            )
+          : null,
+      rgPeak = lib.providesSymbol('ch_engine_replaygain_peak')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_replaygain_peak',
+            )
+          : null,
+      speed = lib.providesSymbol('ch_engine_speed')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_speed',
+            )
+          : null,
+      setSpeed = lib.providesSymbol('ch_engine_set_speed')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_speed',
+            )
+          : null,
+      pitch = lib.providesSymbol('ch_engine_pitch')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_pitch',
+            )
+          : null,
+      setPitch = lib.providesSymbol('ch_engine_set_pitch')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_pitch',
+            )
+          : null,
+      crossfade = lib.providesSymbol('ch_engine_crossfade')
+          ? lib.lookupFunction<_GetFloatNative, _GetFloatDart>(
+              'ch_engine_crossfade',
+            )
+          : null,
+      setCrossfade = lib.providesSymbol('ch_engine_set_crossfade')
+          ? lib.lookupFunction<_SetFloatNative, _SetFloatDart>(
+              'ch_engine_set_crossfade',
+            )
+          : null,
+      gapless = lib.providesSymbol('ch_engine_gapless')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_gapless')
+          : null,
+      setGapless = lib.providesSymbol('ch_engine_set_gapless')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_gapless',
+            )
+          : null,
+      setSleepTimer = lib.providesSymbol('ch_engine_set_sleep_timer')
+          ? lib.lookupFunction<_TwoDoublesNative, _TwoDoublesDart>(
+              'ch_engine_set_sleep_timer',
+            )
+          : null,
+      sleepRemaining = lib.providesSymbol('ch_engine_sleep_remaining')
+          ? lib.lookupFunction<_DoubleNative, _DoubleDart>(
+              'ch_engine_sleep_remaining',
+            )
+          : null,
+      detectSilence = lib.providesSymbol('ch_engine_detect_silence')
+          ? lib.lookupFunction<_SilenceNative, _SilenceDart>(
+              'ch_engine_detect_silence',
+            )
+          : null,
+      deviceCount = lib.providesSymbol('ch_engine_output_device_count')
+          ? lib.lookupFunction<_NoArgIntNative, _NoArgIntDart>(
+              'ch_engine_output_device_count',
+            )
+          : null,
+      deviceName = lib.providesSymbol('ch_engine_output_device_name')
+          ? lib.lookupFunction<_DeviceNameNative, _DeviceNameDart>(
+              'ch_engine_output_device_name',
+            )
+          : null,
+      currentDevice = lib.providesSymbol('ch_engine_output_device')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_output_device')
+          : null,
+      setOutputDevice = lib.providesSymbol('ch_engine_set_output_device')
+          ? lib.lookupFunction<_SetIntNative, _SetIntDart>(
+              'ch_engine_set_output_device',
+            )
+          : null,
+      lyricsCount = lib.providesSymbol('ch_engine_lyrics_count')
+          ? lib.lookupFunction<_IntNative, _IntDart>('ch_engine_lyrics_count')
+          : null,
+      lyricLine = lib.providesSymbol('ch_engine_lyric_line')
+          ? lib.lookupFunction<_LyricLineNative, _LyricLineDart>(
+              'ch_engine_lyric_line',
+            )
+          : null,
+      soundscapeSet = lib.providesSymbol('ch_engine_set_soundscape')
+          ? lib.lookupFunction<_SetIntAndFloatNative, _SetIntAndFloatDart>(
+              'ch_engine_set_soundscape',
+            )
+          : null,
+      soundscapeGet = lib.providesSymbol('ch_engine_soundscape')
+          ? lib.lookupFunction<_FloatOutNative, _FloatOutDart>(
+              'ch_engine_soundscape',
+            )
+          : null,
+      detectBpm = lib.providesSymbol('ch_engine_detect_bpm')
+          ? lib.lookupFunction<_BpmNative, _BpmDart>('ch_engine_detect_bpm')
+          : null,
+      renderFlat = lib.providesSymbol('ch_engine_render_wav')
+          ? lib.lookupFunction<_RenderNative, _RenderDart>(
+              'ch_engine_render_wav',
+            )
+          : null,
+      renderDsp = lib.providesSymbol('ch_engine_render_wav_ex')
+          ? lib.lookupFunction<_RenderDspNative, _RenderDspDart>(
+              'ch_engine_render_wav_ex',
+            )
+          : null,
+      cueRead = lib.providesSymbol('ch_cue_read')
+          ? lib.lookupFunction<_HandlePathNative, _HandlePathDart>(
+              'ch_cue_read',
+            )
+          : null,
+      cueParse = lib.providesSymbol('ch_cue_parse')
+          ? lib.lookupFunction<_HandlePathNative, _HandlePathDart>(
+              'ch_cue_parse',
+            )
+          : null,
+      markersCreate = lib.providesSymbol('ch_markers_create')
+          ? lib.lookupFunction<_LibCreateNative, _LibCreateDart>(
+              'ch_markers_create',
+            )
+          : null,
+      markersDestroy = lib.providesSymbol('ch_markers_destroy')
+          ? lib.lookupFunction<_HandleVoidNative, _HandleVoidDart>(
+              'ch_markers_destroy',
+            )
+          : null,
+      markersLoad = lib.providesSymbol('ch_markers_load')
+          ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>(
+              'ch_markers_load',
+            )
+          : null,
+      markersSave = lib.providesSymbol('ch_markers_save')
+          ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>(
+              'ch_markers_save',
+            )
+          : null,
+      markersAdd = lib.providesSymbol('ch_markers_add')
+          ? lib.lookupFunction<_MarkersAddNative, _MarkersAddDart>(
+              'ch_markers_add',
+            )
+          : null,
+      markersCount = lib.providesSymbol('ch_markers_count')
+          ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>(
+              'ch_markers_count',
+            )
+          : null,
+      markersPosition = lib.providesSymbol('ch_markers_position')
+          ? lib.lookupFunction<_MarkersDoubleNative, _MarkersDoubleDart>(
+              'ch_markers_position',
+            )
+          : null,
+      markersName = lib.providesSymbol('ch_markers_name')
+          ? lib.lookupFunction<_MarkersNameNative, _MarkersNameDart>(
+              'ch_markers_name',
+            )
+          : null,
+      markersRemove = lib.providesSymbol('ch_markers_remove')
+          ? lib.lookupFunction<_MarkersIndexNative, _MarkersIndexDart>(
+              'ch_markers_remove',
+            )
+          : null,
+      markersClear = lib.providesSymbol('ch_markers_clear')
+          ? lib.lookupFunction<_MarkersTrackNative, _MarkersTrackDart>(
+              'ch_markers_clear',
+            )
+          : null;
 
   static final _Bindings instance = _Bindings._(_open());
 
@@ -1964,6 +2263,8 @@ class _Bindings {
         Platform.isMacOS) {
       return DynamicLibrary.open(_libraryName);
     }
-    throw UnsupportedError('CyberHex aún no soporta ${Platform.operatingSystem}');
+    throw UnsupportedError(
+      'CyberHex aún no soporta ${Platform.operatingSystem}',
+    );
   }
 }

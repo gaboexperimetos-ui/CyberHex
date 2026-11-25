@@ -317,34 +317,33 @@ class PlayerSnapshot {
 
   @override
   int get hashCode => Object.hashAll(<Object?>[
-        hasTrack,
-        title,
-        artist,
-        album,
-        cover,
-        duration,
-        playing,
-        busy,
-        volume,
-        repeatMode,
-        shuffle,
-        queueIndex,
-        queueProtected,
-        nineDEnabled,
-        nineDSpeed,
-        nineDDepth,
-        stereoWidth,
-        bassPunch,
-        vocalCut,
-        crossfeedEnabled,
-        crossfeedLevel,
-        nightModeEnabled,
-        nightModeAmount,
-        s16Output,
-        error,
-      ]);
+    hasTrack,
+    title,
+    artist,
+    album,
+    cover,
+    duration,
+    playing,
+    busy,
+    volume,
+    repeatMode,
+    shuffle,
+    queueIndex,
+    queueProtected,
+    nineDEnabled,
+    nineDSpeed,
+    nineDDepth,
+    stereoWidth,
+    bassPunch,
+    vocalCut,
+    crossfeedEnabled,
+    crossfeedLevel,
+    nightModeEnabled,
+    nightModeAmount,
+    s16Output,
+    error,
+  ]);
 }
-
 
 /// Paisajes sonoros del núcleo (`ch_engine_set_soundscape`).
 enum SoundscapePreset {
@@ -367,6 +366,29 @@ enum SoundscapePreset {
     if (code < 0 || code >= values.length) return SoundscapePreset.off;
     return values[code];
   }
+}
+
+/// Formato de salida de la exportación.
+///
+/// Todas las variantes son 48 kHz estéreo y aplican el DSP del motor cuando se
+/// pide; solo cambia la codificación del archivo.
+enum ExportFormat {
+  /// WAV PCM 16 bits con dither TPDF.
+  wav16('WAV 16 bits', 'wav'),
+
+  /// WAV PCM 24 bits: más margen para editar sin cuantizar.
+  wav24('WAV 24 bits', 'wav'),
+
+  /// WAV IEEE float 32: sin pérdida para seguir procesando.
+  wavF32('WAV float 32', 'wav'),
+
+  /// AIFF PCM 16 bits: el contenedor de Apple.
+  aiff('AIFF 16 bits', 'aiff');
+
+  const ExportFormat(this.label, this.extension);
+
+  final String label;
+  final String extension;
 }
 
 /// Niveles de salida para vúmetros, medidos después de EQ y limitador.
@@ -401,7 +423,8 @@ class PlayerLevels {
   int get hashCode => Object.hash(rmsLeft, rmsRight, peakLeft, peakRight);
 
   @override
-  String toString() => 'PlayerLevels(rms ${rmsLeft.toStringAsFixed(3)}/'
+  String toString() =>
+      'PlayerLevels(rms ${rmsLeft.toStringAsFixed(3)}/'
       '${rmsRight.toStringAsFixed(3)}, pico ${peakLeft.toStringAsFixed(3)}/'
       '${peakRight.toStringAsFixed(3)})';
 }
@@ -417,9 +440,9 @@ class AudioMarker {
   final String name;
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'position': position,
-        'name': name,
-      };
+    'position': position,
+    'name': name,
+  };
 
   static AudioMarker? fromJson(Object? raw) {
     if (raw is! Map) return null;
@@ -440,8 +463,7 @@ class AudioMarker {
   int get hashCode => Object.hash(position, name);
 
   @override
-  String toString() =>
-      'AudioMarker(${position.toStringAsFixed(2)} s, "$name")';
+  String toString() => 'AudioMarker(${position.toStringAsFixed(2)} s, "$name")';
 }
 
 /// Dispositivo de salida de audio del sistema.
@@ -541,7 +563,6 @@ class SilenceTrim {
       'SilenceTrim(inicio ${lead.toStringAsFixed(2)} s, fin ${tail.toStringAsFixed(2)} s)';
 }
 
-
 /// Ajustes de audio que la app guarda entre sesiones.
 ///
 /// Vive aquí (y no en `session_store.dart`) para que el controlador y la sesión
@@ -596,36 +617,36 @@ class AudioSettings {
   static const AudioSettings neutral = AudioSettings();
 
   Map<String, Object?> toJson() => <String, Object?>{
-        'nineD': <String, Object?>{
-          'on': nineDEnabled,
-          'speed': nineDSpeed,
-          'depth': nineDDepth,
-        },
-        'stereo': <String, Object?>{'width': stereoWidth, 'punch': bassPunch},
-        'vocalCut': vocalCut,
-        'crossfeed': <String, Object?>{
-          'on': crossfeedEnabled,
-          'level': crossfeedLevel,
-        },
-        'nightMode': <String, Object?>{
-          'on': nightModeEnabled,
-          'amount': nightModeAmount,
-        },
-        'balance': balance,
-        'channelMode': channelMode,
-        'replayGain': <String, Object?>{
-          'on': replayGainEnabled,
-          'album': replayGainAlbum,
-        },
-        'crossfade': crossfade,
-        'gapless': gapless,
-        'speed': speed,
-        'pitch': pitch,
-        'soundscape': <String, Object?>{
-          'preset': soundscape.name,
-          'level': soundscapeLevel,
-        },
-      };
+    'nineD': <String, Object?>{
+      'on': nineDEnabled,
+      'speed': nineDSpeed,
+      'depth': nineDDepth,
+    },
+    'stereo': <String, Object?>{'width': stereoWidth, 'punch': bassPunch},
+    'vocalCut': vocalCut,
+    'crossfeed': <String, Object?>{
+      'on': crossfeedEnabled,
+      'level': crossfeedLevel,
+    },
+    'nightMode': <String, Object?>{
+      'on': nightModeEnabled,
+      'amount': nightModeAmount,
+    },
+    'balance': balance,
+    'channelMode': channelMode,
+    'replayGain': <String, Object?>{
+      'on': replayGainEnabled,
+      'album': replayGainAlbum,
+    },
+    'crossfade': crossfade,
+    'gapless': gapless,
+    'speed': speed,
+    'pitch': pitch,
+    'soundscape': <String, Object?>{
+      'preset': soundscape.name,
+      'level': soundscapeLevel,
+    },
+  };
 
   factory AudioSettings.fromJson(Object? raw) {
     if (raw is! Map) return neutral;
@@ -649,7 +670,10 @@ class AudioSettings {
       bassPunch: number(stereo?['punch'], 0).clamp(0.0, 1.0).toDouble(),
       vocalCut: number(raw['vocalCut'], 0).clamp(0.0, 1.0).toDouble(),
       crossfeedEnabled: flag(crossfeed?['on'], false),
-      crossfeedLevel: number(crossfeed?['level'], 0.5).clamp(0.0, 1.0).toDouble(),
+      crossfeedLevel: number(
+        crossfeed?['level'],
+        0.5,
+      ).clamp(0.0, 1.0).toDouble(),
       nightModeEnabled: flag(night?['on'], false),
       nightModeAmount: number(night?['amount'], 0.5).clamp(0.0, 1.0).toDouble(),
       balance: number(raw['balance'], 0).clamp(-1.0, 1.0).toDouble(),
@@ -661,8 +685,10 @@ class AudioSettings {
       speed: number(raw['speed'], 1).clamp(0.25, 4.0).toDouble(),
       pitch: number(raw['pitch'], 0).clamp(-12.0, 12.0).toDouble(),
       soundscape: _soundscapeFrom(landscape?['preset']),
-      soundscapeLevel:
-          number(landscape?['level'], 0).clamp(0.0, 1.0).toDouble(),
+      soundscapeLevel: number(
+        landscape?['level'],
+        0,
+      ).clamp(0.0, 1.0).toDouble(),
     );
   }
 
@@ -749,30 +775,31 @@ class AudioSettings {
 
   @override
   int get hashCode => Object.hashAll(<Object?>[
-        nineDEnabled,
-        nineDSpeed,
-        nineDDepth,
-        stereoWidth,
-        bassPunch,
-        vocalCut,
-        crossfeedEnabled,
-        crossfeedLevel,
-        nightModeEnabled,
-        nightModeAmount,
-        balance,
-        channelMode,
-        replayGainEnabled,
-        replayGainAlbum,
-        crossfade,
-        gapless,
-        speed,
-        pitch,
-        soundscape,
-        soundscapeLevel,
-      ]);
+    nineDEnabled,
+    nineDSpeed,
+    nineDDepth,
+    stereoWidth,
+    bassPunch,
+    vocalCut,
+    crossfeedEnabled,
+    crossfeedLevel,
+    nightModeEnabled,
+    nightModeAmount,
+    balance,
+    channelMode,
+    replayGainEnabled,
+    replayGainAlbum,
+    crossfade,
+    gapless,
+    speed,
+    pitch,
+    soundscape,
+    soundscapeLevel,
+  ]);
 
   @override
-  String toString() => 'AudioSettings(9D: $nineDEnabled, ancho: $stereoWidth, '
+  String toString() =>
+      'AudioSettings(9D: $nineDEnabled, ancho: $stereoWidth, '
       'karaoke: $vocalCut, crossfeed: $crossfeedEnabled, noche: $nightModeEnabled, '
       'balance: $balance, paisaje: ${soundscape.name} @ $soundscapeLevel)';
 }
@@ -1058,7 +1085,7 @@ abstract class PlayerApi {
   /// Analiza como mucho 30 s y corre fuera del hilo de UI.
   Future<double> detectBpm(String path);
 
-  /// Exporta [start, end) a un WAV 48 kHz estéreo S16 con dither TPDF.
+  /// Exporta [start, end) al [format] elegido (48 kHz estéreo).
   ///
   /// Con [withDsp] aplica el DSP que tenga puesto el motor (EQ, 9D, ancho,
   /// crossfeed, noche, paisaje y balance); sin él exporta plano con la
@@ -1070,6 +1097,7 @@ abstract class PlayerApi {
     double start = 0,
     double end = 0,
     bool withDsp = true,
+    ExportFormat format = ExportFormat.wav16,
   });
 
   /// Cortes de una hoja `.cue` (rutas resueltas contra su carpeta).

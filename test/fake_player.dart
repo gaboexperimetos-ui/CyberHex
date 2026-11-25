@@ -47,9 +47,9 @@ class FakePlayer implements PlayerApi {
 
   @override
   List<double> get eqBandFrequencies => List<double>.generate(
-        _bandCount,
-        (i) => 20 * math.pow(1000, i / (_bandCount - 1)).toDouble(),
-      );
+    _bandCount,
+    (i) => 20 * math.pow(1000, i / (_bandCount - 1)).toDouble(),
+  );
 
   /// Resultado que devolverá [load] / [loadAsync].
   bool loadResult = true;
@@ -317,13 +317,13 @@ class FakePlayer implements PlayerApi {
 
   @override
   List<QueueItem> get queueItems => List<QueueItem>.unmodifiable(<QueueItem>[
-        for (var i = 0; i < queuePaths.length; i++)
-          QueueItem(
-            path: queuePaths[i],
-            title: titleFromPath(queuePaths[i]),
-            artist: i == queueIndexValue ? artist : '',
-          ),
-      ]);
+    for (var i = 0; i < queuePaths.length; i++)
+      QueueItem(
+        path: queuePaths[i],
+        title: titleFromPath(queuePaths[i]),
+        artist: i == queueIndexValue ? artist : '',
+      ),
+  ]);
 
   @override
   bool playAt(int index) {
@@ -372,7 +372,10 @@ class FakePlayer implements PlayerApi {
   @override
   bool moveQueueItem(int from, int to) {
     moveCalls++;
-    if (from < 0 || to < 0 || from >= queuePaths.length || to >= queuePaths.length) {
+    if (from < 0 ||
+        to < 0 ||
+        from >= queuePaths.length ||
+        to >= queuePaths.length) {
       return false;
     }
     if (from == to) return true;
@@ -435,7 +438,6 @@ class FakePlayer implements PlayerApi {
     scanCalls++;
     return library;
   }
-
 
   // ---------------------------------------------------------------------
   // Fase 3: medición, mezcla fina y transporte extendido
@@ -598,7 +600,9 @@ class FakePlayer implements PlayerApi {
 
   @override
   List<AudioMarker> markersOf(String trackPath) =>
-      List<AudioMarker>.unmodifiable(markers[trackPath] ?? const <AudioMarker>[]);
+      List<AudioMarker>.unmodifiable(
+        markers[trackPath] ?? const <AudioMarker>[],
+      );
 
   @override
   bool addMarker(String trackPath, double position, String name) {
@@ -635,8 +639,10 @@ class FakePlayer implements PlayerApi {
   double get sleepRemaining => sleepSeconds > 0 ? sleepSeconds : -1;
 
   @override
-  Future<SilenceTrim?> detectSilence(String path,
-      {double thresholdDb = -60}) async {
+  Future<SilenceTrim?> detectSilence(
+    String path, {
+    double thresholdDb = -60,
+  }) async {
     silenceCalls++;
     silenceThreshold = thresholdDb;
     return silenceValue;
@@ -709,15 +715,32 @@ class FakePlayer implements PlayerApi {
     double start = 0,
     double end = 0,
     bool withDsp = true,
+    ExportFormat format = ExportFormat.wav16,
   }) async {
     renderCalls++;
-    rendered.add((source: sourcePath, destination: destinationPath, start: start, end: end, dsp: withDsp));
+    rendered.add((
+      source: sourcePath,
+      destination: destinationPath,
+      start: start,
+      end: end,
+      dsp: withDsp,
+      format: format,
+    ));
     return renderResult;
   }
 
   int renderCalls = 0;
-  final List<({String source, String destination, double start, double end, bool dsp})>
-      rendered = [];
+  final List<
+    ({
+      String source,
+      String destination,
+      double start,
+      double end,
+      bool dsp,
+      ExportFormat format,
+    })
+  >
+  rendered = [];
 
   /// Cortes que devolverán [readCue] / [parseCue].
   List<CueTrack> cueTracks = const <CueTrack>[];

@@ -205,7 +205,7 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
                     ? 'Has oído todas las bandas: no hace falta compensar nada.'
                     : 'No has oído $missing de ${_testBands.length} bandas.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 14, color: palette.foreground),
+                style: chTitle(palette, size: 13.5),
               ),
               const SizedBox(height: 6),
               Text(

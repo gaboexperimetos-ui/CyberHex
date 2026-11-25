@@ -198,8 +198,9 @@ class PlayerController extends ChangeNotifier {
     if (_disposed || _loading != null) return null;
     // Con la cola protegida, `load_add` añade al final y reproduce sin vaciar;
     // sin ella, `load` deja la cola con esta única pista.
-    final future =
-        _queueProtected ? _player.loadAndPlayAsync(path) : _player.loadAsync(path);
+    final future = _queueProtected
+        ? _player.loadAndPlayAsync(path)
+        : _player.loadAsync(path);
     _loading = future;
     _refresh();
     final ok = await future;
@@ -339,8 +340,7 @@ class PlayerController extends ChangeNotifier {
     _audioChanged();
   }
 
-  void toggleCrossfeed() =>
-      setCrossfeed(enabled: !_player.crossfeedEnabled);
+  void toggleCrossfeed() => setCrossfeed(enabled: !_player.crossfeedEnabled);
 
   void setNightMode({bool? enabled, double? amount}) {
     if (_disposed) return;
@@ -351,8 +351,7 @@ class PlayerController extends ChangeNotifier {
     _audioChanged();
   }
 
-  void toggleNightMode() =>
-      setNightMode(enabled: !_player.nightModeEnabled);
+  void toggleNightMode() => setNightMode(enabled: !_player.nightModeEnabled);
 
   /// Salida S16 con dither TPDF (por defecto, f32).
   void setS16Output(bool enabled) {
@@ -471,8 +470,8 @@ class PlayerController extends ChangeNotifier {
 
   /// Cicla los paisajes: off → lluvia → marrón → vinilo → off.
   void cycleSoundscape() {
-    final next = SoundscapePreset.values[
-        (soundscape.index + 1) % SoundscapePreset.values.length];
+    final next = SoundscapePreset
+        .values[(soundscape.index + 1) % SoundscapePreset.values.length];
     setSoundscape(next, level: next == SoundscapePreset.off ? 0 : null);
   }
 
@@ -507,8 +506,8 @@ class PlayerController extends ChangeNotifier {
 
   /// Marca la posición actual de la pista audible.
   bool addMarkerHere([String name = '']) {
-    final path = snapshot.queueIndex >= 0 &&
-            snapshot.queueIndex < snapshot.queue.length
+    final path =
+        snapshot.queueIndex >= 0 && snapshot.queueIndex < snapshot.queue.length
         ? snapshot.queue[snapshot.queueIndex].path
         : '';
     if (path.isEmpty) return false;
@@ -553,6 +552,7 @@ class PlayerController extends ChangeNotifier {
     double start = 0,
     double end = 0,
     bool withDsp = true,
+    ExportFormat format = ExportFormat.wav16,
   }) async {
     if (_disposed) return false;
     final ok = await _player.renderWav(
@@ -561,6 +561,7 @@ class PlayerController extends ChangeNotifier {
       start: start,
       end: end,
       withDsp: withDsp,
+      format: format,
     );
     if (_disposed) return ok;
     if (!ok) _error = _player.lastError;
@@ -575,32 +576,36 @@ class PlayerController extends ChangeNotifier {
   /// Ajustes que se guardan en la sesión (decisión del arquitecto,
   /// 2026-11-21: el DSP vive en `SessionStore`, no en el estado del motor).
   AudioSettings audioSettings() => AudioSettings(
-        nineDEnabled: _player.nineDEnabled,
-        nineDSpeed: _player.nineDSpeed,
-        nineDDepth: _player.nineDDepth,
-        stereoWidth: _player.stereoWidth,
-        bassPunch: _player.bassPunch,
-        vocalCut: _player.vocalCut,
-        crossfeedEnabled: _player.crossfeedEnabled,
-        crossfeedLevel: _player.crossfeedLevel,
-        nightModeEnabled: _player.nightModeEnabled,
-        nightModeAmount: _player.nightModeAmount,
-        balance: _player.balance,
-        channelMode: _player.channelMode,
-        replayGainEnabled: _player.replayGainEnabled,
-        replayGainAlbum: _player.replayGainAlbum,
-        crossfade: _player.crossfade,
-        gapless: _player.gapless,
-        speed: _player.speed,
-        pitch: _player.pitch,
-        soundscape: _player.soundscape,
-        soundscapeLevel: _player.soundscapeLevel,
-      );
+    nineDEnabled: _player.nineDEnabled,
+    nineDSpeed: _player.nineDSpeed,
+    nineDDepth: _player.nineDDepth,
+    stereoWidth: _player.stereoWidth,
+    bassPunch: _player.bassPunch,
+    vocalCut: _player.vocalCut,
+    crossfeedEnabled: _player.crossfeedEnabled,
+    crossfeedLevel: _player.crossfeedLevel,
+    nightModeEnabled: _player.nightModeEnabled,
+    nightModeAmount: _player.nightModeAmount,
+    balance: _player.balance,
+    channelMode: _player.channelMode,
+    replayGainEnabled: _player.replayGainEnabled,
+    replayGainAlbum: _player.replayGainAlbum,
+    crossfade: _player.crossfade,
+    gapless: _player.gapless,
+    speed: _player.speed,
+    pitch: _player.pitch,
+    soundscape: _player.soundscape,
+    soundscapeLevel: _player.soundscapeLevel,
+  );
 
   /// Vuelca unos ajustes al motor con una sola notificación.
   void applyAudioSettings(AudioSettings settings) {
     if (_disposed) return;
-    _player.set9D(settings.nineDEnabled, settings.nineDSpeed, settings.nineDDepth);
+    _player.set9D(
+      settings.nineDEnabled,
+      settings.nineDSpeed,
+      settings.nineDDepth,
+    );
     _player.setStereoEnhance(settings.stereoWidth, settings.bassPunch);
     _player.setVocalCut(settings.vocalCut);
     _player.setCrossfeed(settings.crossfeedEnabled, settings.crossfeedLevel);

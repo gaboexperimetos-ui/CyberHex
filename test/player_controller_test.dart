@@ -182,7 +182,10 @@ void main() {
     expect(track.extension, 'mp3');
     expect(track.directory, '/musica');
     expect(track, LibraryTrack.fromPath('/musica/Artista - Tema.mp3'));
-    expect(track.hashCode, LibraryTrack.fromPath('/musica/Artista - Tema.mp3').hashCode);
+    expect(
+      track.hashCode,
+      LibraryTrack.fromPath('/musica/Artista - Tema.mp3').hashCode,
+    );
   });
 
   test('enqueue añade al final y el snapshot lo refleja', () {
@@ -230,8 +233,11 @@ void main() {
     expect(controller.playNext('/m/b.mp3'), isTrue);
     expect(fake.playNextCalls, 1);
     expect(fake.queuePaths, ['/m/a.flac', '/m/b.mp3', '/m/c.mp3']);
-    expect(controller.snapshot.queue.map((i) => i.title).toList(),
-        ['a', 'b', 'c']);
+    expect(controller.snapshot.queue.map((i) => i.title).toList(), [
+      'a',
+      'b',
+      'c',
+    ]);
   });
 
   test('moveQueueItem reordena sin perder la pista activa', () {
@@ -296,7 +302,11 @@ void main() {
     expect(error, isNull);
     expect(fake.loadAndPlayCalls, 1);
     // Las dos anteriores siguen y la nueva se añade al final.
-    expect(fake.queuePaths, ['/m/vieja1.flac', '/m/vieja2.flac', '/m/nueva.mp3']);
+    expect(fake.queuePaths, [
+      '/m/vieja1.flac',
+      '/m/vieja2.flac',
+      '/m/nueva.mp3',
+    ]);
     expect(controller.snapshot.queue, hasLength(3));
     expect(controller.snapshot.queueIndex, 2);
     expect(controller.snapshot.playing, isTrue);
@@ -461,7 +471,11 @@ void main() {
     expect(a.hashCode, b.hashCode);
     expect(a, isNot(c));
 
-    final withNineD = a.copyWith(nineDEnabled: true, nineDSpeed: 0.3, nineDDepth: 0.1);
+    final withNineD = a.copyWith(
+      nineDEnabled: true,
+      nineDSpeed: 0.3,
+      nineDDepth: 0.1,
+    );
     expect(withNineD.nineDEnabled, isTrue);
     expect(withNineD.nineDSpeed, 0.3);
     expect(withNineD.nineDDepth, 0.1);
@@ -497,7 +511,6 @@ void main() {
     expect(fake.nightModeCalls, 0);
     expect(fake.s16Calls, 0);
   });
-
 
   // -------------------------------------------------------------------
   // Fase 3: medición, mezcla fina y ajustes persistentes
@@ -603,31 +616,34 @@ void main() {
     expect(fake.soundscapeCalls, 5);
   });
 
-  test('marcadores: alta, consulta, borrado y marca en la posición actual', () async {
-    final fake = FakePlayer();
-    final controller = PlayerController(fake);
-    addTearDown(controller.dispose);
+  test(
+    'marcadores: alta, consulta, borrado y marca en la posición actual',
+    () async {
+      final fake = FakePlayer();
+      final controller = PlayerController(fake);
+      addTearDown(controller.dispose);
 
-    await controller.openFile('/m/tema.flac');
-    controller.seek(12.5);
+      await controller.openFile('/m/tema.flac');
+      controller.seek(12.5);
 
-    expect(controller.addMarkerHere('estribillo'), isTrue);
-    expect(controller.addMarker('/m/tema.flac', 3, 'intro'), isTrue);
-    expect(controller.addMarker('/m/tema.flac', -1, 'mala'), isFalse);
+      expect(controller.addMarkerHere('estribillo'), isTrue);
+      expect(controller.addMarker('/m/tema.flac', 3, 'intro'), isTrue);
+      expect(controller.addMarker('/m/tema.flac', -1, 'mala'), isFalse);
 
-    final marks = controller.markersOf('/m/tema.flac');
-    expect(marks.length, 2);
-    expect(marks.first.name, 'intro');
-    expect(marks.last.position, 12.5);
+      final marks = controller.markersOf('/m/tema.flac');
+      expect(marks.length, 2);
+      expect(marks.first.name, 'intro');
+      expect(marks.last.position, 12.5);
 
-    expect(controller.removeMarker('/m/tema.flac', 0), isTrue);
-    expect(controller.markersOf('/m/tema.flac').length, 1);
-    controller.clearMarkers('/m/tema.flac');
-    expect(controller.markersOf('/m/tema.flac'), isEmpty);
+      expect(controller.removeMarker('/m/tema.flac', 0), isTrue);
+      expect(controller.markersOf('/m/tema.flac').length, 1);
+      controller.clearMarkers('/m/tema.flac');
+      expect(controller.markersOf('/m/tema.flac'), isEmpty);
 
-    expect(controller.saveMarkers('/tmp/markers.json'), isTrue);
-    expect(fake.markerFiles, contains('save:/tmp/markers.json'));
-  });
+      expect(controller.saveMarkers('/tmp/markers.json'), isTrue);
+      expect(fake.markerFiles, contains('save:/tmp/markers.json'));
+    },
+  );
 
   test('temporizador de apagado, silencio y dispositivo de salida', () async {
     final fake = FakePlayer();
@@ -676,17 +692,37 @@ void main() {
     expect(fake.rendered.single.start, 1);
     expect(fake.rendered.single.end, 30);
     expect(fake.rendered.single.dsp, isTrue);
+    expect(fake.rendered.single.format, ExportFormat.wav16);
+
+    expect(
+      await controller.renderWav(
+        '/m/a.flac',
+        '/m/a.aiff',
+        format: ExportFormat.aiff,
+      ),
+      isTrue,
+    );
+    expect(fake.rendered.last.format, ExportFormat.aiff);
 
     fake.renderResult = false;
     fake.lastError = 'exportación: no se pudo crear el destino';
     expect(await controller.renderWav('/m/a.flac', '/no/wav'), isFalse);
-    expect(controller.snapshot.error, 'exportación: no se pudo crear el destino');
+    expect(
+      controller.snapshot.error,
+      'exportación: no se pudo crear el destino',
+    );
   });
 
   test('hojas CUE: lectura y análisis de texto', () {
     final fake = FakePlayer()
       ..cueTracks = const <CueTrack>[
-        CueTrack(file: '/m/disco.flac', start: 0, end: 201.5, title: 'Uno', number: 1),
+        CueTrack(
+          file: '/m/disco.flac',
+          start: 0,
+          end: 201.5,
+          title: 'Uno',
+          number: 1,
+        ),
         CueTrack(file: '/m/disco.flac', start: 201.5, title: 'Dos', number: 2),
       ];
     final controller = PlayerController(fake);

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:material_ui/material_ui.dart';
 
+import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
 import 'kit/ch_kit.dart';
@@ -18,9 +19,9 @@ enum ExportKind {
   final String hint;
 }
 
-/// Exportador de audio: elige **rango** de la pista actual y lo renderiza con
-/// `renderWav` (48 kHz, estéreo, S16, dither TPDF) aplicando el DSP que tenga
-/// puesto el motor: EQ, 9D y ancho estéreo incluidos.
+/// Exportador de audio: elige **rango**, **formato** (WAV 16/24, WAV float 32
+/// o AIFF) y renderiza con el DSP que tenga puesto el motor: EQ, 9D y ancho
+/// estéreo incluidos.
 class AudioExportSheet extends StatefulWidget {
   const AudioExportSheet({super.key, required this.controller});
 
@@ -44,6 +45,7 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
   static const double maxRingtoneSeconds = 30;
 
   ExportKind _kind = ExportKind.master;
+  ExportFormat _format = ExportFormat.wav16;
   bool _withDsp = true;
   double _start = 0;
   double _end = 0;
@@ -143,24 +145,65 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
                     ChoiceChip(
                       label: Text(
                         kind.label,
-                        style: const TextStyle(fontSize: 12),
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: _kind == kind
+                              ? palette.onAccent
+                              : palette.foreground,
+                        ),
                       ),
                       selected: _kind == kind,
-                      selectedColor: palette.accent.withValues(alpha: 0.24),
+                      selectedColor: palette.accent,
                       backgroundColor: palette.surfaceHigh,
                       side: BorderSide(
                         color: _kind == kind ? palette.accent : palette.border,
                       ),
-                      onSelected: (_) => setState(() {
-                        _kind = kind;
-                        _end = _clampEnd(_end);
-                      }),
+                      onSelected: (_) {
+                        chHaptic();
+                        setState(() {
+                          _kind = kind;
+                          _end = _clampEnd(_end);
+                        });
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: ChSpace.md),
+              Text('Formato', style: chTitle(palette, size: 13.5)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final format in ExportFormat.values)
+                    ChoiceChip(
+                      label: Text(
+                        format.label,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: _format == format
+                              ? palette.onAccent
+                              : palette.foreground,
+                        ),
+                      ),
+                      selected: _format == format,
+                      selectedColor: palette.accent,
+                      backgroundColor: palette.surfaceHigh,
+                      side: BorderSide(
+                        color: _format == format
+                            ? palette.accent
+                            : palette.border,
+                      ),
+                      onSelected: (_) {
+                        chHaptic();
+                        setState(() => _format = format);
+                      },
                     ),
                 ],
               ),
               const SizedBox(height: 4),
               Text(
-                '${_kind.hint}. WAV 48 kHz estéreo S16 con dither TPDF.',
+                '${_kind.hint}. ${_format.label} · 48 kHz estéreo.',
                 style: TextStyle(fontSize: 11, color: palette.muted),
               ),
               SwitchListTile(
@@ -168,9 +211,9 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
                 dense: true,
                 value: _withDsp,
                 onChanged: (value) => setState(() => _withDsp = value),
-                title: const Text(
+                title: Text(
                   'Aplicar EQ, 9D y ancho estéreo',
-                  style: TextStyle(fontSize: 13),
+                  style: chTitle(palette, size: 13.5),
                 ),
                 subtitle: Text(
                   _withDsp
@@ -227,17 +270,21 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
     }
 
     final suggested = _suggestedName(source);
-    const group = XTypeGroup(label: 'WAV', extensions: <String>['wav']);
+    final group = XTypeGroup(
+      label: _format.label,
+      extensions: <String>[_format.extension],
+    );
     final location = await getSaveLocation(
       suggestedName: suggested,
-      acceptedTypeGroups: const <XTypeGroup>[group],
+      acceptedTypeGroups: <XTypeGroup>[group],
     );
     if (location == null || !mounted) return;
 
     setState(() {
       _working = true;
       _status =
-          'Renderizando ${_clock(end - start)} con ${_withDsp ? 'DSP' : 'sin DSP'}…';
+          'Renderizando ${_clock(end - start)} en ${_format.label} con '
+          '${_withDsp ? 'DSP' : 'sin DSP'}…';
     });
 
     final ok = await _controller.renderWav(
@@ -246,6 +293,7 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
       start: start,
       end: end,
       withDsp: _withDsp,
+      format: _format,
     );
     if (!mounted) return;
     setState(() {
@@ -268,10 +316,11 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
         : File(source).uri.pathSegments.last
               .replaceAll(RegExp(r'\.[A-Za-z0-9]+$'), '');
     final safe = base.replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
+    final ext = _format.extension;
     if (_kind == ExportKind.ringtone) {
-      return 'tono-${safe.isEmpty ? 'cyberhex' : safe}.wav';
+      return 'tono-${safe.isEmpty ? 'cyberhex' : safe}.$ext';
     }
-    return '${safe.isEmpty ? 'cyberhex' : safe}-master.wav';
+    return '${safe.isEmpty ? 'cyberhex' : safe}-master.$ext';
   }
 
   static String _clock(double seconds) {
