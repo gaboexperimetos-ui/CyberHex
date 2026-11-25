@@ -8,6 +8,7 @@ import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../core/tag_editor.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Editor de etiquetas y carátula de la pista actual (o de todo el álbum).
 ///
@@ -199,32 +200,18 @@ class _TagEditorSheetState extends State<TagEditorSheet> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  const Expanded(
-                    child: Text(
-                      'Etiquetas y carátula',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Recargar del archivo',
-                    onPressed: _busy ? null : _load,
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
-                ],
-              ),
-              if (name.isNotEmpty)
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: palette.muted),
+              ChSheetHeader(
+                icon: Icons.sell_rounded,
+                title: 'Etiquetas y carátula',
+                palette: palette,
+                subtitle: name.isEmpty ? null : name,
+                trailing: IconButton(
+                  tooltip: 'Recargar del archivo',
+                  onPressed: _busy ? null : _load,
+                  icon: const Icon(Icons.refresh_rounded),
                 ),
-              const SizedBox(height: 14),
+              ),
+              const SizedBox(height: ChSpace.lg),
               if (!_loaded)
                 const Center(child: CircularProgressIndicator())
               else ...[

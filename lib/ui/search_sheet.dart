@@ -6,7 +6,7 @@ import '../core/library_search.dart';
 import '../core/player_controller.dart';
 import '../core/stats_store.dart';
 import '../theme.dart';
-import 'hex_cover.dart';
+import 'kit/ch_kit.dart';
 
 /// Búsqueda global: biblioteca escaneada e historial en una sola lista, con
 /// reproducción directa al tocar un resultado.
@@ -33,7 +33,7 @@ class SearchSheet extends StatefulWidget {
       backgroundColor: palette.surface,
       showDragHandle: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(ChRadius.lg)),
       ),
       builder: (_) => Padding(
         padding: EdgeInsets.only(
@@ -83,65 +83,102 @@ class _SearchSheetState extends State<SearchSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-              child: TextField(
-                controller: _query,
-                focusNode: _focus,
-                autofocus: true,
-                textInputAction: TextInputAction.search,
-                onChanged: (_) => setState(() {}),
-                onSubmitted: (_) {
-                  if (hits.isNotEmpty) unawaited(_play(hits.first.path));
-                },
-                decoration: InputDecoration(
-                  hintText: 'Busca en tu biblioteca e historial',
-                  prefixIcon: const Icon(Icons.search_rounded),
-                  suffixIcon: _query.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Limpiar',
-                          icon: const Icon(Icons.close_rounded),
-                          onPressed: () {
-                            _query.clear();
-                            setState(() {});
-                            _focus.requestFocus();
-                          },
+              padding: const EdgeInsets.fromLTRB(
+                ChSpace.lg,
+                0,
+                ChSpace.lg,
+                ChSpace.md,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      ChHexBadge(
+                        icon: Icons.manage_search_rounded,
+                        palette: palette,
+                        size: 38,
+                      ),
+                      const SizedBox(width: ChSpace.md),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Buscar', style: chTitle(palette, size: 16.5)),
+                            const SizedBox(height: 1),
+                            Text(
+                              emptyLibrary
+                                  ? 'Tu biblioteca e historial'
+                                  : '${hits.length} '
+                                        '${hits.length == 1 ? 'resultado' : 'resultados'}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: hits.isEmpty && !emptyLibrary
+                                    ? palette.muted
+                                    : palette.accent,
+                              ),
+                            ),
+                          ],
                         ),
-                  filled: true,
-                  fillColor: palette.surfaceHigh,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: palette.border),
+                      ),
+                    ],
                   ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(color: palette.border),
+                  const SizedBox(height: ChSpace.md),
+                  TextField(
+                    controller: _query,
+                    focusNode: _focus,
+                    autofocus: true,
+                    textInputAction: TextInputAction.search,
+                    onChanged: (_) => setState(() {}),
+                    onSubmitted: (_) {
+                      if (hits.isNotEmpty) unawaited(_play(hits.first.path));
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Busca en tu biblioteca e historial',
+                      prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                      suffixIcon: _query.text.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Limpiar',
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              onPressed: () {
+                                _query.clear();
+                                setState(() {});
+                                _focus.requestFocus();
+                              },
+                            ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ),
             Expanded(
               child: emptyLibrary
-                  ? _Empty(
+                  ? ChEmptyState(
                       palette: palette,
+                      icon: Icons.manage_search_rounded,
                       title: 'Nada que buscar todavía',
                       message:
                           'Escanea una carpeta en la Biblioteca y aquí podrás '
                           'encontrar cualquier pista al instante.',
                     )
                   : hits.isEmpty
-                  ? _Empty(
+                  ? ChEmptyState(
                       palette: palette,
+                      icon: Icons.search_off_rounded,
                       title: 'Sin resultados',
                       message: 'Ninguna pista coincide con «${_query.text}».',
                     )
                   : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
-                      itemCount: hits.length,
-                      separatorBuilder: (_, _) => Divider(
-                        height: 1,
-                        color: palette.border.withValues(alpha: 0.45),
+                      padding: const EdgeInsets.fromLTRB(
+                        ChSpace.md,
+                        0,
+                        ChSpace.md,
+                        ChSpace.lg,
                       ),
+                      itemCount: hits.length,
+                      separatorBuilder: (_, _) =>
+                          ChHairline(palette: palette, indent: 58),
                       itemBuilder: (context, index) => _HitTile(
                         hit: hits[index],
                         palette: palette,
@@ -156,6 +193,7 @@ class _SearchSheetState extends State<SearchSheet> {
   }
 
   Future<void> _play(String path) async {
+    chHaptic();
     final error = await widget.controller.openFile(path);
     if (!mounted) return;
     if (error == null) {
@@ -181,67 +219,46 @@ class _HitTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
+    return ChPressable(
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      leading: HexCover(seed: hit.seed, palette: palette, size: 42),
-      title: Text(
-        hit.title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: palette.foreground),
-      ),
-      subtitle: hit.subtitle.isEmpty
-          ? null
-          : Text(
-              hit.subtitle,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: palette.muted),
-            ),
-      trailing: Icon(
-        hit.recent ? Icons.history_rounded : Icons.play_arrow_rounded,
-        color: palette.muted,
-      ),
-    );
-  }
-}
-
-class _Empty extends StatelessWidget {
-  const _Empty({
-    required this.palette,
-    required this.title,
-    required this.message,
-  });
-
-  final CyberHexPalette palette;
-  final String title;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
+      radius: ChRadius.md,
+      semanticLabel: 'Reproducir ${hit.title}',
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        padding: const EdgeInsets.symmetric(
+          horizontal: ChSpace.xs,
+          vertical: ChSpace.sm + 1,
+        ),
+        child: Row(
           children: [
-            Icon(Icons.manage_search_rounded, size: 44, color: palette.muted),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: palette.foreground,
+            ChCoverThumb(seed: hit.seed, palette: palette, size: 42, hex: true),
+            const SizedBox(width: ChSpace.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    hit.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: chTitle(palette, size: 13.5),
+                  ),
+                  if (hit.subtitle.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      hit.subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11.5, color: palette.muted),
+                    ),
+                  ],
+                ],
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: palette.muted),
+            const SizedBox(width: ChSpace.sm),
+            Icon(
+              hit.recent ? Icons.history_rounded : Icons.play_arrow_rounded,
+              size: 20,
+              color: hit.recent ? palette.muted : palette.accent,
             ),
           ],
         ),

@@ -325,6 +325,69 @@ class ChSectionHeader extends StatelessWidget {
   }
 }
 
+/// Cabecera de hoja inferior: sello hexagonal, título, subtítulo y una acción
+/// opcional. Todas las hojas que se abren desde abajo la usan para que el
+/// mismo gesto se vea igual en toda la app.
+class ChSheetHeader extends StatelessWidget {
+  const ChSheetHeader({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.palette,
+    this.subtitle,
+    this.trailing,
+  });
+
+  final IconData icon;
+  final String title;
+  final CyberHexPalette palette;
+  final String? subtitle;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final hint = subtitle;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: <Widget>[
+        ChHexBadge(icon: icon, palette: palette, size: 40),
+        const SizedBox(width: ChSpace.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: chTitle(palette, size: 16.5),
+              ),
+              if (hint != null && hint.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 2),
+                Text(
+                  hint,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    height: 1.35,
+                    color: palette.muted,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (trailing != null) ...<Widget>[
+          const SizedBox(width: ChSpace.sm),
+          trailing!,
+        ],
+      ],
+    );
+  }
+}
+
 /// Línea de 1 px para separar sin dibujar cajas.
 class ChHairline extends StatelessWidget {
   const ChHairline({

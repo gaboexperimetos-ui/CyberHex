@@ -5,6 +5,7 @@ import '../core/player_api.dart';
 import '../core/player_controller.dart';
 import '../core/playlist_store.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Cola de reproducción: reordenar arrastrando, quitar deslizando, saltar
 /// tocando y el interruptor de «cola protegida».
@@ -106,6 +107,7 @@ class _QueueSheetState extends State<QueueSheet> {
   /// Cambia de cola: guarda la actual y carga la elegida en el motor.
   Future<void> _switchTo(int slot) async {
     if (slot == _queues.active) return;
+    chHaptic();
     _captureCurrent();
     _queues.setActive(slot);
     final target = _queues.activeSlot;
@@ -196,6 +198,7 @@ class _QueueSheetState extends State<QueueSheet> {
   }
 
   Widget _header(PlayerSnapshot snapshot) {
+    final palette = paletteOf(context);
     final count = snapshot.queue.length;
     return Row(
       children: [
@@ -204,16 +207,14 @@ class _QueueSheetState extends State<QueueSheet> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'Cola',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
+              ChSectionHeader('Cola', palette: palette, count: count),
+              const SizedBox(height: ChSpace.xs),
               Text(
                 count == 0
                     ? 'Sin pistas'
                     : '$count ${count == 1 ? 'pista' : 'pistas'} · '
                           'arrastra para ordenar, desliza para quitar',
-                style: TextStyle(fontSize: 12, color: paletteOf(context).muted),
+                style: TextStyle(fontSize: 11.5, color: palette.muted),
               ),
             ],
           ),
@@ -235,23 +236,13 @@ class _QueueSheetState extends State<QueueSheet> {
 
   Widget _empty() {
     final palette = paletteOf(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.queue_music_rounded, size: 42, color: palette.muted),
-          const SizedBox(height: 10),
-          Text('La cola está vacía', style: TextStyle(color: palette.muted)),
-          const SizedBox(height: 4),
-          Text(
-            _controller.queueProtected
-                ? 'Abre un archivo y se añadirá al final.'
-                : 'Abre un archivo para empezar a llenarla.',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: palette.muted),
-          ),
-        ],
-      ),
+    return ChEmptyState(
+      palette: palette,
+      icon: Icons.queue_music_rounded,
+      title: 'La cola está vacía',
+      message: _controller.queueProtected
+          ? 'Abre un archivo y se añadirá al final.'
+          : 'Abre un archivo para empezar a llenarla.',
     );
   }
 
@@ -278,13 +269,19 @@ class _QueueSheetState extends State<QueueSheet> {
                   item: item,
                   index: index,
                   active: active,
-                  onTap: active ? null : () => _controller.playAt(index),
+                  onTap: active
+                      ? null
+                      : () {
+                          chHaptic();
+                          _controller.playAt(index);
+                        },
                 ),
               );
             },
           ),
         ),
-        const Divider(height: 20),
+        const SizedBox(height: ChSpace.sm),
+        ChHairline(palette: paletteOf(context)),
         _protectedSwitch(),
       ],
     );
@@ -325,7 +322,8 @@ class _QueueSheetState extends State<QueueSheet> {
   /// Automix y aviso de cómo se comporta.
   List<Widget> _automixRows(PlayerSnapshot snapshot) {
     return <Widget>[
-      const Divider(height: 16),
+      const SizedBox(height: ChSpace.sm),
+      ChHairline(palette: paletteOf(context)),
       SwitchListTile.adaptive(
         contentPadding: EdgeInsets.zero,
         dense: true,
@@ -388,10 +386,10 @@ class _QueueTile extends StatelessWidget {
         width: 34,
         child: Center(
           child: active
-              ? Icon(Icons.graphic_eq_rounded, size: 20, color: palette.accent)
+              ? ChPlayingBars(color: palette.accent, size: 16)
               : Text(
                   '${index + 1}',
-                  style: TextStyle(fontSize: 12, color: palette.muted),
+                  style: chMono(palette, size: 11.5, color: palette.muted),
                 ),
         ),
       ),

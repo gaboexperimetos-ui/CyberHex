@@ -7,6 +7,7 @@ import '../core/player_controller.dart';
 import '../theme.dart';
 import 'eq_sheet.dart';
 import 'hearing_test_sheet.dart';
+import 'kit/ch_kit.dart';
 import 'visualizer_widget.dart';
 
 /// Laboratorio de audio: todo el DSP del núcleo en una hoja, con los valores a
@@ -130,31 +131,26 @@ class _AudioLabSheetState extends State<AudioLabSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Laboratorio de audio',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                  ChSheetHeader(
+                    icon: Icons.science_rounded,
+                    title: 'Laboratorio de audio',
+                    palette: palette,
+                    subtitle: snapshot.hasTrack
+                        ? snapshot.title
+                        : 'Todo el DSP del motor, con los valores a la vista',
+                    trailing: IconButton(
+                      tooltip: _style.next == VisualizerStyle.hexagon
+                          ? 'Cambiar a hexágonos'
+                          : 'Cambiar a barras',
+                      onPressed: () => setState(() => _style = _style.next),
+                      icon: Icon(
+                        _style == VisualizerStyle.bars
+                            ? Icons.equalizer_rounded
+                            : Icons.hexagon_outlined,
                       ),
-                      IconButton(
-                        tooltip: _style.next == VisualizerStyle.hexagon
-                            ? 'Cambiar a hexágonos'
-                            : 'Cambiar a barras',
-                        onPressed: () => setState(() => _style = _style.next),
-                        icon: Icon(
-                          _style == VisualizerStyle.bars
-                              ? Icons.equalizer_rounded
-                              : Icons.hexagon_outlined,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: ChSpace.md),
                   VisualizerWidget(
                     controller: _controller,
                     style: _style,

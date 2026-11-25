@@ -4,6 +4,7 @@ import '../core/eq_presets.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
 import 'hearing_test_sheet.dart';
+import 'kit/ch_kit.dart';
 
 /// Ecualizador real del núcleo: 36 bandas logarítmicas de 20 Hz a 20 kHz,
 /// con ±18 dB de recorrido. Las etiquetas salen de `ch_engine_eq_band_freq`,
@@ -35,36 +36,33 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
     final frequencies = widget.controller.eqBandFrequencies;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+        padding: const EdgeInsets.fromLTRB(
+          ChSpace.lg,
+          ChSpace.md,
+          ChSpace.lg,
+          ChSpace.lg,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Ecualizador',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => setState(widget.controller.resetEq),
-                  child: const Text('Plano'),
-                ),
-              ],
+            ChSectionHeader(
+              'Ecualizador',
+              palette: palette,
+              count: gains.length,
             ),
+            const SizedBox(height: ChSpace.xs),
             Text(
               '${gains.length} bandas · 20 Hz – 20 kHz · ±18 dB',
-              style: TextStyle(fontSize: 12, color: palette.muted),
+              style: TextStyle(fontSize: 11.5, color: palette.muted),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: ChSpace.md),
             SizedBox(
               height: 34,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: eqPresets.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 6),
+                separatorBuilder: (_, _) => const SizedBox(width: 6),
                 itemBuilder: (context, index) {
                   final preset = eqPresets[index];
                   return ActionChip(
@@ -76,6 +74,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                     backgroundColor: palette.surfaceHigh,
                     side: BorderSide(color: palette.border),
                     onPressed: () {
+                      chHaptic();
                       applyEqPreset(widget.controller, preset);
                       setState(() {});
                     },
@@ -83,7 +82,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                 },
               ),
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: ChSpace.xs),
             Align(
               alignment: Alignment.centerRight,
               child: TextButton.icon(
@@ -91,6 +90,7 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                   await HearingTestSheet.show(context, widget.controller);
                   if (mounted) setState(() {});
                 },
+                style: TextButton.styleFrom(foregroundColor: palette.accent),
                 icon: const Icon(Icons.hearing_rounded, size: 16),
                 label: const Text(
                   'Prueba de audición',
@@ -98,33 +98,40 @@ class _EqualizerSheetState extends State<EqualizerSheet> {
                 ),
               ),
             ),
-            SizedBox(
-              height: 236,
-              child: Scrollbar(
-                controller: _scroll,
-                child: SingleChildScrollView(
+            ChSurface(
+              radius: ChRadius.lg,
+              padding: const EdgeInsets.symmetric(
+                horizontal: ChSpace.xs,
+                vertical: ChSpace.sm,
+              ),
+              child: SizedBox(
+                height: 236,
+                child: Scrollbar(
                   controller: _scroll,
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      for (var i = 0; i < gains.length; i++)
-                        SizedBox(
-                          width: _bandWidth,
-                          child: _Band(
-                            label: _formatHz(frequencies[i]),
-                            value: gains[i],
-                            onChanged: (value) => setState(
-                              () => widget.controller.setBand(i, value),
+                  child: SingleChildScrollView(
+                    controller: _scroll,
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        for (var i = 0; i < gains.length; i++)
+                          SizedBox(
+                            width: _bandWidth,
+                            child: _Band(
+                              label: _formatHz(frequencies[i]),
+                              value: gains[i],
+                              onChanged: (value) => setState(
+                                () => widget.controller.setBand(i, value),
+                              ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: ChSpace.sm),
             Text(
               'Desliza en horizontal para recorrer todo el espectro.',
               style: TextStyle(fontSize: 11, color: palette.muted),

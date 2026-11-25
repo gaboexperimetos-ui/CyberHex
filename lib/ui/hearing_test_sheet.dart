@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../core/eq_presets.dart';
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Prueba de audición por bandas, sin generador de tonos.
 ///
@@ -128,17 +129,16 @@ class _HearingTestSheetState extends State<HearingTestSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Prueba de audición',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+            ChSheetHeader(
+              icon: Icons.hearing_rounded,
+              title: 'Prueba de audición',
+              palette: palette,
+              subtitle:
+                  'Se aísla una banda cada vez sobre la música que está '
+                  'sonando. Marca lo que oigas: al final se propone una curva '
+                  'suave.',
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Se aísla una banda cada vez sobre la música que está sonando. '
-              'Marca lo que oigas: al final se propone una curva suave.',
-              style: TextStyle(fontSize: 12, color: palette.muted, height: 1.4),
-            ),
-            const SizedBox(height: 18),
+            const SizedBox(height: ChSpace.lg),
             if (!_finished) ...[
               LinearProgressIndicator(
                 value: (_step + 1) / _testBands.length,

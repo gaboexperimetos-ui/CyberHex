@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../core/player_controller.dart';
 import '../theme.dart';
+import 'kit/ch_kit.dart';
 
 /// Qué se está exportando.
 enum ExportKind {
@@ -94,22 +95,15 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Exportar audio',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: palette.foreground,
-              ),
+            ChSheetHeader(
+              icon: Icons.save_alt_rounded,
+              title: 'Exportar audio',
+              palette: palette,
+              subtitle: hasTrack
+                  ? _title
+                  : 'Abre una pista para exportar un trozo.',
             ),
-            const SizedBox(height: 4),
-            Text(
-              hasTrack ? _title : 'Abre una pista para exportar un trozo.',
-              style: TextStyle(fontSize: 12, color: palette.muted),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 16),
+            const SizedBox(height: ChSpace.lg),
             if (hasTrack) ...[
               RangeSlider(
                 values: RangeValues(
@@ -147,7 +141,10 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
                 children: [
                   for (final kind in ExportKind.values)
                     ChoiceChip(
-                      label: Text(kind.label, style: const TextStyle(fontSize: 12)),
+                      label: Text(
+                        kind.label,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                       selected: _kind == kind,
                       selectedColor: palette.accent.withValues(alpha: 0.24),
                       backgroundColor: palette.surfaceHigh,
@@ -239,7 +236,8 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
 
     setState(() {
       _working = true;
-      _status = 'Renderizando ${_clock(end - start)} con ${_withDsp ? 'DSP' : 'sin DSP'}…';
+      _status =
+          'Renderizando ${_clock(end - start)} con ${_withDsp ? 'DSP' : 'sin DSP'}…';
     });
 
     final ok = await _controller.renderWav(
@@ -258,16 +256,17 @@ class _AudioExportSheetState extends State<AudioExportSheet> {
     });
     if (ok) {
       // El archivo existe: se confirma también con un aviso del sistema.
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exportado a ${location.path}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Exportado a ${location.path}')));
     }
   }
 
   String _suggestedName(String source) {
     final base = File(source).uri.pathSegments.isEmpty
         ? 'pista'
-        : File(source).uri.pathSegments.last.replaceAll(RegExp(r'\.[A-Za-z0-9]+$'), '');
+        : File(source).uri.pathSegments.last
+              .replaceAll(RegExp(r'\.[A-Za-z0-9]+$'), '');
     final safe = base.replaceAll(RegExp(r'[^A-Za-z0-9._ -]'), '_');
     if (_kind == ExportKind.ringtone) {
       return 'tono-${safe.isEmpty ? 'cyberhex' : safe}.wav';
