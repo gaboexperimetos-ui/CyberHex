@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CyberHex · todos los temas</title>
+<style>
+  :root{--paper:#0b0b0f;--ink:#e9e9f2;--muted:#9a9ab0;--line:rgba(255,255,255,.10);--accent:#22c55e}
+  *{box-sizing:border-box}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 15% -10%,rgba(34,197,94,.10),transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%,rgba(99,102,241,.12),transparent 55%),var(--paper);
+    color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;min-height:100vh}
+  header{padding:26px clamp(16px,4vw,56px) 6px;max-width:1360px;margin:0 auto}
+  header h1{margin:0 0 6px;font-size:clamp(22px,3.2vw,36px);font-weight:800;letter-spacing:-.4px;
+    background:linear-gradient(120deg,#fff,#8ef0b0 60%,#22c55e);-webkit-background-clip:text;background-clip:text;color:transparent}
+  header p{margin:0 0 16px;color:var(--muted);max-width:76ch;line-height:1.5}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:20;
+    padding:10px 0;background:linear-gradient(var(--paper),rgba(11,11,15,.85) 70%,transparent);backdrop-filter:blur(8px)}
+  .toggle{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;gap:3px}
+  .toggle button{appearance:none;border:0;background:transparent;color:var(--muted);padding:7px 16px;border-radius:999px;
+    font-size:13px;font-weight:650;cursor:pointer}
+  .toggle button[aria-pressed="true"]{background:var(--accent);color:#06210f}
+  main{max-width:1360px;margin:0 auto;padding:8px clamp(16px,4vw,56px) 80px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:clamp(16px,2.4vw,30px)}
+  .card{display:flex;flex-direction:column;gap:10px;align-items:center}
+  .card .frame{width:100%}
+  .card .phone{width:320px;max-width:100%}
+  .cap{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:center;text-align:center}
+  .cap b{font-size:14px}
+  .cap .hex{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--muted)}
+  .dot{width:12px;height:12px;border-radius:50%;border:1px solid rgba(255,255,255,.25)}
+  body.mobile .desktop{display:none}
+  body.pc .phone{display:none}
+  body.pc .card .frame{width:100%}
+
+  /* ---------- piezas ---------- */
+  .frame{background:var(--bg);color:var(--fg);font-family:var(--font);position:relative;overflow:hidden}
+  .eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:1.8px;text-transform:uppercase;color:var(--accent);opacity:.9}
+  .title{font-family:var(--display);font-size:26px;font-weight:800;line-height:1.05;letter-spacing:-.5px;margin:6px 0 2px;color:var(--fg)}
+  .sub{font-size:11.5px;color:var(--muted);margin:0 0 12px;line-height:1.4}
+  .cover{width:100%;aspect-ratio:1;border-radius:var(--r);position:relative;overflow:hidden;box-shadow:var(--shadow);background:var(--art)}
+  .cover .lbl{position:absolute;left:12px;bottom:10px;font-family:var(--mono);font-size:9.5px;letter-spacing:1.3px;color:#fff;
+    background:rgba(0,0,0,.28);padding:2px 6px;border-radius:4px}
+  .sec-h{display:flex;justify-content:space-between;align-items:baseline;margin:14px 0 6px}
+  .sec-h b{font-family:var(--display);font-size:14px;color:var(--fg)}
+  .sec-h span{font-family:var(--mono);font-size:9.5px;color:var(--muted);letter-spacing:1px}
+  .row{display:flex;gap:11px;align-items:center;padding:7px 9px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);margin-bottom:6px}
+  .thumb{width:38px;height:38px;border-radius:calc(var(--r) * .7);flex:0 0 auto;background:var(--art)}
+  .row .t{font-size:12.5px;font-weight:650;color:var(--fg);line-height:1.2}
+  .row .a{font-size:10.5px;color:var(--muted);margin-top:1px}
+  .mini{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .mini .cov{width:36px;height:36px;border-radius:calc(var(--r) * .7);background:var(--art);flex:0 0 auto}
+  .mini .t{font-size:12px;font-weight:700;color:var(--fg);line-height:1.15}
+  .mini .a{font-size:10px;color:var(--muted)}
+  .mini .go{margin-left:auto;color:var(--accent);font-weight:800}
+
+  /* ---------- teléfono ---------- */
+  .phone{width:400px;aspect-ratio:9/19;border-radius:34px;padding:9px;box-shadow:0 40px 80px -30px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.08)}
+  .phone .screen{position:absolute;inset:9px;border-radius:27px;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
+  .phone .status{display:flex;justify-content:space-between;padding:9px 15px 3px;font-size:11px;font-weight:700;color:var(--muted)}
+  .phone .body{flex:1;overflow:auto;padding:6px 14px 10px}
+  .phone .body::-webkit-scrollbar{width:0}
+  .phone .cover{margin:4px 0 10px}
+  .phone .mini{margin:8px 9px 9px}
+
+  /* ---------- escritorio ---------- */
+  .desktop{aspect-ratio:16/10;border-radius:14px;padding:8px;box-shadow:0 40px 90px -34px rgba(0,0,0,.85),0 0 0 1px rgba(255,255,255,.08)}
+  .desktop .screen{position:absolute;inset:8px;border-radius:9px;overflow:hidden;display:grid;grid-template-columns:170px 1fr;background:var(--bg)}
+  .rail{border-right:1px solid var(--line);padding:13px 11px;display:flex;flex-direction:column;gap:11px;background:color-mix(in srgb,var(--bg) 88%,var(--fg) 12%)}
+  .brand{font-family:var(--display);font-size:13px;font-weight:800;color:var(--fg)}
+  .brand small{display:block;font-family:var(--mono);font-size:8px;letter-spacing:1.5px;color:var(--accent);margin-top:2px}
+  .dnav{display:flex;flex-direction:column;gap:2px}
+  .dnav a{font-size:11.5px;color:var(--muted);padding:6px 8px;border-radius:var(--r);text-decoration:none}
+  .dnav a.on{background:var(--card);color:var(--fg);border:1px solid var(--line);font-weight:650}
+  .engine{margin-top:auto;font-family:var(--mono);font-size:8px;letter-spacing:1.3px;color:var(--muted);border:1px solid var(--line);border-radius:var(--r);padding:7px}
+  .engine b{display:block;color:var(--accent);font-size:9.5px;margin-top:2px}
+  .dmain{display:flex;flex-direction:column;min-width:0}
+  .dtop{display:flex;justify-content:space-between;align-items:flex-end;padding:13px 16px 7px;border-bottom:1px solid var(--line)}
+  .dtop .title{font-size:20px}
+  .dactions{display:flex;gap:5px}
+  .dactions span{width:23px;height:23px;border:1px solid var(--line);border-radius:var(--r);display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px}
+  .dcontent{flex:1;overflow:auto;padding:11px 16px}
+  .dgrid{display:grid;grid-template-columns:minmax(140px,190px) 1fr;gap:16px;align-items:start}
+  .desktop .mini{margin:8px 16px 11px}
+  .dright .sub{margin-bottom:6px}
+
+  /* ---------- temas ---------- */
+  .t-neon{--bg:#0F0F23;--fg:#F8FAFC;--muted:#94A3B8;--accent:#22C55E;--card:#1B1B30;--line:#312E81;--r:14px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#22C55E,#4338CA 60%,#1E1B4B);--shadow:0 18px 30px -18px rgba(0,0,0,.7)}
+  .t-amoled{--bg:#000000;--fg:#F4F6FA;--muted:#8C93A6;--accent:#22C55E;--card:#0A0A0C;--line:#232329;--r:14px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#22C55E,#0A0A0C 70%);--shadow:0 18px 30px -18px #000}
+  .t-light{--bg:#F7F7FB;--fg:#14142B;--muted:#5A5A75;--accent:#0E9F6E;--card:#FFFFFF;--line:#D7D7E5;--r:16px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#0E9F6E,#4338CA 60%,#6D28D9);--shadow:0 10px 24px -16px rgba(20,20,43,.4)}
+  .t-material{--bg:#14121A;--fg:#E7E0EC;--muted:#A9A2B8;--accent:#D0BCFF;--card:#1E1A26;--line:#3B3450;--r:18px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#D0BCFF,#6750A4 60%,#7D5260);--shadow:0 18px 30px -18px rgba(0,0,0,.7)}
+  .t-cyberpunk{--bg:#0B0713;--fg:#F5F0FA;--muted:#A99BBE;--accent:#F472B6;--card:#171024;--line:#3B2456;--r:12px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#F472B6,#0EA5E9 55%,#2B1050);--shadow:0 0 24px rgba(244,114,182,.35)}
+  .t-aurora{--bg:#140B2B;--fg:#FFFFFF;--muted:#C9B8E8;--accent:#22D3EE;--card:#1E1440;--line:#3A2A6B;--r:20px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#22D3EE,#7C3AED 50%,#EC4899);--shadow:0 24px 40px -20px rgba(124,58,237,.6)}
+  .t-soft{--bg:#F6F2FA;--fg:#1B1B21;--muted:#7A6F8C;--accent:#6750A4;--card:#FFFFFF;--line:#E0D6F0;--r:20px;
+    --font:"Poppins",ui-sans-serif,sans-serif;--display:"Righteous","Poppins",sans-serif;--mono:ui-monospace,monospace;
+    --art:linear-gradient(135deg,#D0BCFF,#B69DFB 50%,#FFD8E4);--shadow:0 10px 24px -16px rgba(103,80,164,.45)}
+  .t-cyberpunk .title,.t-neon .title,.t-amoled .title{text-shadow:0 0 16px rgba(255,255,255,.12)}
+  .note{margin-top:26px;padding:14px 16px;border:1px dashed var(--line);border-radius:14px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body class="mobile">
+<header>
+  <h1>CyberHex · todos los temas</h1>
+  <p>Los <b>7 temas reales</b> de la app, con su paleta exacta. Cambia entre <b>PC</b> y <b>móvil</b> para verlos en los dos formatos.</p>
+  <div class="bar">
+    <div class="toggle" role="group" aria-label="Formato">
+      <button id="btn-mobile" aria-pressed="true">Móvil</button>
+      <button id="btn-pc" aria-pressed="false">PC</button>
+    </div>
+  </div>
+</header>
+<main>
+  <div class="grid" id="grid"></div>
+  <div class="note">Estos son los mismos colores que usa CyberHex en <code>Ajustes → Tema</code>. Dime cuál quieres afinar y lo ajusto en el código.</div>
+</main>
+
+<script>
+const THEMES = [
+  {k:'neon', n:'CyberHex Neon', b:'#0F0F23', a:'#22C55E', br:'oscuro',
+   bg:'#0F0F23', fg:'#F8FAFC', mu:'#94A3B8', ac:'#22C55E', ca:'#1B1B30', li:'#312E81',
+   art:'linear-gradient(135deg,#22C55E,#4338CA 60%,#1E1B4B)', sh:'0 18px 30px -18px rgba(0,0,0,.7)'},
+  {k:'amoled', n:'AMOLED Negro Puro', b:'#000000', a:'#22C55E', br:'oscuro',
+   bg:'#000000', fg:'#F4F6FA', mu:'#8C93A6', ac:'#22C55E', ca:'#0A0A0C', li:'#232329',
+   art:'linear-gradient(135deg,#22C55E,#0A0A0C 70%)', sh:'0 18px 30px -18px #000'},
+  {k:'light', n:'Claro', b:'#F7F7FB', a:'#0E9F6E', br:'claro',
+   bg:'#F7F7FB', fg:'#14142B', mu:'#5A5A75', ac:'#0E9F6E', ca:'#FFFFFF', li:'#D7D7E5',
+   art:'linear-gradient(135deg,#0E9F6E,#4338CA 60%,#6D28D9)', sh:'0 10px 24px -16px rgba(20,20,43,.4)'},
+  {k:'material', n:'Material You', b:'#14121A', a:'#D0BCFF', br:'oscuro',
+   bg:'#14121A', fg:'#E7E0EC', mu:'#A9A2B8', ac:'#D0BCFF', ca:'#1E1A26', li:'#3B3450',
+   art:'linear-gradient(135deg,#D0BCFF,#6750A4 60%,#7D5260)', sh:'0 18px 30px -18px rgba(0,0,0,.7)'},
+  {k:'cyberpunk', n:'Cyberpunk', b:'#0B0713', a:'#F472B6', br:'oscuro',
+   bg:'#0B0713', fg:'#F5F0FA', mu:'#A99BBE', ac:'#F472B6', ca:'#171024', li:'#3B2456',
+   art:'linear-gradient(135deg,#F472B6,#0EA5E9 55%,#2B1050)', sh:'0 0 24px rgba(244,114,182,.35)'},
+  {k:'aurora', n:'Aurora', b:'#140B2B', a:'#22D3EE', br:'oscuro',
+   bg:'#140B2B', fg:'#FFFFFF', mu:'#C9B8E8', ac:'#22D3EE', ca:'#1E1440', li:'#3A2A6B',
+   art:'linear-gradient(135deg,#22D3EE,#7C3AED 50%,#EC4899)', sh:'0 24px 40px -20px rgba(124,58,237,.6)'},
+  {k:'soft', n:'Suave', b:'#F6F2FA', a:'#6750A4', br:'claro',
+   bg:'#F6F2FA', fg:'#1B1B21', mu:'#7A6F8C', ac:'#6750A4', ca:'#FFFFFF', li:'#E0D6F0',
+   art:'linear-gradient(135deg,#D0BCFF,#B69DFB 50%,#FFD8E4)', sh:'0 10px 24px -16px rgba(103,80,164,.45)'}
+];
+
+const rows = t => [['Blue in Green','Miles Davis · Kind of Blue'],['Teardrop','Massive Attack · Mezzanine'],['Nº 5','Aphex Twin · Drukqs']]
+  .map(r=>`<div class="row"><div class="thumb"></div><div><div class="t">${r[0]}</div><div class="a">${r[1]}</div></div></div>`).join('');
+const mini = t => `<div class="mini"><div class="cov"></div><div><div class="t">Teardrop</div><div class="a">Massive Attack</div></div><div class="go">❚❚</div></div>`;
+
+function phone(t){ return `
+  <div class="frame phone t-${t.k}"><div class="screen">
+    <div class="status"><span>9:41</span><span>▮▮▮ ◔ ▰</span></div>
+    <div class="body">
+      <div class="eyebrow">CyberHex · audioteca</div>
+      <div class="title">Tu música,<br>tu máquina.</div>
+      <p class="sub">3 discos nuevos en tu biblioteca</p>
+      <div class="cover"><div class="lbl">SIDE A · 33⅓</div></div>
+      <div class="sec-h"><b>Sigue escuchando</b><span>12</span></div>
+      ${rows(t)}
+    </div>
+    ${mini(t)}
+  </div></div>`; }
+
+function desktop(t){ return `
+  <div class="frame desktop t-${t.k}"><div class="screen">
+    <aside class="rail">
+      <div class="brand">CYBERHEX<small>AUDIO ENGINE</small></div>
+      <nav class="dnav"><a class="on">Inicio</a><a>Biblioteca</a><a>Listas</a><a>Radios</a><a>Ajustes</a></nav>
+      <div class="engine">ENGINE<b>ZIG · C23</b></div>
+    </aside>
+    <div class="dmain">
+      <div class="dtop">
+        <div><div class="eyebrow">CyberHex · audioteca</div><div class="title">Tu música, tu máquina.</div></div>
+        <div class="dactions"><span>⌕</span><span>⚙</span><span>⋮</span></div>
+      </div>
+      <div class="dcontent">
+        <div class="dgrid">
+          <div class="cover"><div class="lbl">SIDE A · 33⅓</div></div>
+          <div class="dright">
+            <p class="sub">3 discos nuevos en tu biblioteca</p>
+            <div class="sec-h"><b>Sigue escuchando</b><span>12</span></div>
+            ${rows(t)}
+          </div>
+        </div>
+      </div>
+      ${mini(t)}
+    </div>
+  </div></div>`; }
+
+const grid = document.getElementById('grid');
+grid.innerHTML = THEMES.map(t => `
+  <div class="card">
+    ${desktop(t)}
+    ${phone(t)}
+    <div class="cap">
+      <span class="dot" style="background:${t.a}"></span>
+      <b>${t.n}</b>
+      <span class="hex">${t.b} · ${t.br}</span>
+    </div>
+  </div>`).join('');
+
+const bm = document.getElementById('btn-mobile'), bp = document.getElementById('btn-pc');
+function setMode(pc){
+  document.body.classList.toggle('pc', pc);
+  document.body.classList.toggle('mobile', !pc);
+  bm.setAttribute('aria-pressed', String(!pc));
+  bp.setAttribute('aria-pressed', String(pc));
+}
+bm.onclick = () => setMode(false);
+bp.onclick = () => setMode(true);
+</script>
+</body>
+</html>
