@@ -32,7 +32,9 @@ enum CyberHexThemeId {
   amoled('AMOLED Negro Puro'),
   light('Claro'),
   materialYou('Material You'),
-  cyberpunk('Cyberpunk');
+  cyberpunk('Cyberpunk'),
+  aurora('Aurora'),
+  soft('Suave');
 
   const CyberHexThemeId(this.label);
 
@@ -230,6 +232,42 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
     brightness: Brightness.dark,
   );
 
+  /// Aurora (dirección C): cristal sobre malla violeta–rosa–cian. Fondo
+  /// índigo profundo, acento cian y superficies violáceas.
+  static const CyberHexPalette aurora = CyberHexPalette(
+    id: CyberHexThemeId.aurora,
+    background: Color(0xFF140B2B),
+    surface: Color(0xFF1E1440),
+    surfaceHigh: Color(0xFF2A1B5E),
+    primary: Color(0xFF7C3AED),
+    secondary: Color(0xFFEC4899),
+    accent: Color(0xFF22D3EE),
+    onAccent: Color(0xFF06212B),
+    foreground: Color(0xFFFFFFFF),
+    muted: Color(0xFFC9B8E8),
+    border: Color(0xFF3A2A6B),
+    error: Color(0xFFFF6B81),
+    brightness: Brightness.dark,
+  );
+
+  /// Suave (dirección E): claro, pastel y redondo. Fondo lavanda, superficies
+  /// blancas y acento violeta.
+  static const CyberHexPalette soft = CyberHexPalette(
+    id: CyberHexThemeId.soft,
+    background: Color(0xFFF6F2FA),
+    surface: Color(0xFFFFFFFF),
+    surfaceHigh: Color(0xFFEDE7F6),
+    primary: Color(0xFF6750A4),
+    secondary: Color(0xFFB69DFB),
+    accent: Color(0xFF6750A4),
+    onAccent: Color(0xFFFFFFFF),
+    foreground: Color(0xFF1B1B21),
+    muted: Color(0xFF7A6F8C),
+    border: Color(0xFFE0D6F0),
+    error: Color(0xFFD93025),
+    brightness: Brightness.light,
+  );
+
   /// Paleta de un tema.
   static CyberHexPalette of(CyberHexThemeId id) => switch (id) {
     CyberHexThemeId.neon => neon,
@@ -237,6 +275,8 @@ class CyberHexPalette extends ThemeExtension<CyberHexPalette> {
     CyberHexThemeId.light => light,
     CyberHexThemeId.materialYou => materialYou,
     CyberHexThemeId.cyberpunk => cyberpunk,
+    CyberHexThemeId.aurora => aurora,
+    CyberHexThemeId.soft => soft,
   };
 
   /// Negro o blanco según el brillo del acento (contraste legible).

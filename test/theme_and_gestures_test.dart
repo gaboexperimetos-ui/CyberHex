@@ -31,14 +31,24 @@ Uint8List _pixels(int r, int g, int b, {int count = 4, int alpha = 255}) {
 
 void main() {
   group('CyberHexPalette', () {
-    test('hay cinco temas, con nombre y brillo', () {
-      expect(CyberHexThemeId.values.length, 5);
+    test('hay siete temas, con nombre y brillo', () {
+      expect(CyberHexThemeId.values.length, 7);
       expect(CyberHexThemeId.neon.label, 'CyberHex Neon');
       expect(CyberHexThemeId.amoled.label, 'AMOLED Negro Puro');
       expect(CyberHexThemeId.cyberpunk.label, 'Cyberpunk');
+      expect(CyberHexThemeId.aurora.label, 'Aurora');
+      expect(CyberHexThemeId.soft.label, 'Suave');
       expect(
         CyberHexPalette.of(CyberHexThemeId.light).brightness,
         Brightness.light,
+      );
+      expect(
+        CyberHexPalette.of(CyberHexThemeId.soft).brightness,
+        Brightness.light,
+      );
+      expect(
+        CyberHexPalette.of(CyberHexThemeId.aurora).brightness,
+        Brightness.dark,
       );
       expect(
         CyberHexPalette.of(CyberHexThemeId.cyberpunk).accent,
@@ -49,6 +59,8 @@ void main() {
         const Color(0xFF000000),
       );
       expect(CyberHexThemeId.fromName('cyberpunk'), CyberHexThemeId.cyberpunk);
+      expect(CyberHexThemeId.fromName('aurora'), CyberHexThemeId.aurora);
+      expect(CyberHexThemeId.fromName('soft'), CyberHexThemeId.soft);
       expect(
         CyberHexThemeId.fromName('materialYou'),
         CyberHexThemeId.materialYou,
@@ -89,6 +101,8 @@ void main() {
 
       theme.cycleTheme();
       expect(theme.themeId, CyberHexThemeId.light);
+      theme.cycleTheme();
+      theme.cycleTheme();
       theme.cycleTheme();
       theme.cycleTheme();
       theme.cycleTheme();
