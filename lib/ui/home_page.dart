@@ -460,6 +460,24 @@ class _Hero extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final narrow = constraints.maxWidth < 520;
+          final title = Text(
+            'Tu biblioteca empieza aquí',
+            style: chTitle(palette, size: narrow ? 23 : 30),
+          );
+          final gradientTitle = ShaderMask(
+            blendMode: BlendMode.srcIn,
+            shaderCallback: (Rect bounds) => LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: <Color>[
+                palette.foreground,
+                Color.lerp(palette.foreground, palette.accent, 0.6)!,
+                palette.accent,
+              ],
+              stops: const <double>[0, 0.6, 1],
+            ).createShader(bounds),
+            child: title,
+          );
           final copy = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -468,12 +486,9 @@ class _Hero extends StatelessWidget {
                 'SIN PISTA',
                 style: chEyebrow(palette, size: 9.5, color: palette.accent),
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Tu biblioteca empieza aquí',
-                style: chTitle(palette, size: narrow ? 20 : 24),
-              ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 8),
+              gradientTitle,
+              const SizedBox(height: 8),
               Text(
                 'Elige una carpeta: CyberHex la recorre en tu equipo, '
                 'sin subir nada a ningún sitio.',
@@ -510,16 +525,17 @@ class _Hero extends StatelessWidget {
             icon: const Icon(Icons.folder_open_rounded, size: 18),
             label: const Text('Escanear'),
           );
+          final badge = ChHexBadge(
+            icon: Icons.graphic_eq_rounded,
+            palette: palette,
+            size: narrow ? 76 : 116,
+          );
           if (narrow) {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                ChHexBadge(
-                  icon: Icons.graphic_eq_rounded,
-                  palette: palette,
-                  size: 58,
-                ),
+                badge,
                 const SizedBox(height: ChSpace.md),
                 copy,
                 const SizedBox(height: ChSpace.md),
@@ -529,11 +545,7 @@ class _Hero extends StatelessWidget {
           }
           return Row(
             children: <Widget>[
-              ChHexBadge(
-                icon: Icons.graphic_eq_rounded,
-                palette: palette,
-                size: 92,
-              ),
+              badge,
               const SizedBox(width: ChSpace.lg),
               Expanded(child: copy),
               const SizedBox(width: ChSpace.md),

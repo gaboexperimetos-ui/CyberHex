@@ -448,6 +448,41 @@ class _PlayerPageState extends State<PlayerPage>
             cacheWidth: 720,
             errorBuilder: (_, _, _) => const SizedBox.shrink(),
           ),
+        // Sin carátula, el fondo se construye con la paleta: dos halos y un
+        // brillo diagonal para que no quede un plano liso.
+        if (cover == null) ...<Widget>[
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  radius: 0.9,
+                  colors: <Color>[
+                    palette.accent.withValues(
+                      alpha: palette.isDark ? 0.20 : 0.12,
+                    ),
+                    palette.accent.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  radius: 1.1,
+                  center: const Alignment(0.9, 0.9),
+                  colors: <Color>[
+                    palette.secondary.withValues(
+                      alpha: palette.isDark ? 0.22 : 0.12,
+                    ),
+                    palette.secondary.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
         DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(

@@ -92,6 +92,42 @@ class ChAmbient extends StatelessWidget {
             ),
           ),
         ),
+        // Tercer halo, pequeño y alto a la derecha: da profundidad y evita que
+        // el degradado se lea como un plano liso.
+        Positioned(
+          right: -140,
+          top: -180,
+          width: 460,
+          height: 460,
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  colors: <Color>[
+                    palette.primary.withValues(alpha: glow * 0.8),
+                    palette.primary.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Brillo diagonal muy sutil: simula una lámina de cristal.
+        IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: <Color>[
+                  Colors.white.withValues(alpha: dark ? 0.035 : 0.05),
+                  Colors.white.withValues(alpha: 0),
+                ],
+                stops: const <double>[0, 0.55],
+              ),
+            ),
+          ),
+        ),
         if (grid) HexGridBackground(palette: palette),
         // Viñeta: oscurece los bordes para que el contenido flote.
         IgnorePointer(
