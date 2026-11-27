@@ -18,6 +18,23 @@ Formato:
 
 ---
 
+## 2026-11-27 · turno · Grafo del programa para leerlo sin gastar tokens
+
+- **PEDIDO:** añadir “graphy phy” al proyecto para poder leer el programa sin
+  gastar tantísimo token.
+- **HECHO:** `tools/codegraph.py` (solo librería estándar) lee los `import` /
+  `@import` / `#include` reales de Dart, Zig y C, y escribe
+  `docs/ui/graph.html`: un único HTML autocontenido con layout de física
+  (repulsión + muelles) en canvas. Nodos = ficheros (tamaño por líneas, color
+  por carpeta), aristas = imports. Incluye arrastre, zoom, filtro, panel con
+  líneas/KB/grado y las listas de “importa” / “importado por”.
+- **VERIFICADO:** `python3 tools/codegraph.py` → 107 nodos, 255 aristas,
+  75 imports externos; `node --check` sobre el JS embebido, sin errores.
+- **NO VERIFICABLE AQUÍ:** el aspecto real en pantalla (no puedo ver imágenes).
+- **COMMITS:** el de este turno.
+- **ABIERTO:** afinar cristal/radios de Aurora y Suave; espejar el grafo en NOVA
+  si se quiere la misma vista para `automaticaion-bida`.
+
 ## 2026-11-21 · turno 11 · ABI completo, absorciones y primera interfaz
 
 - **PEDIDO:** cuatro pasos: (1) comprobar que local y GitHub son iguales,
