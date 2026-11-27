@@ -92,6 +92,7 @@ def resolve(target: str, src: Path, files: dict[str, Path], root: Path) -> str |
 def build(root: Path, dirs: list[str]) -> dict:
     files = collect(root, dirs)
     nodes, edges, external = [], [], 0
+    ffi_users: list[str] = []
 
     for rel, path in files.items():
         text = read(path)
@@ -120,6 +121,20 @@ def build(root: Path, dirs: list[str]) -> dict:
                 continue
             if hit != rel:
                 edges.append({"s": rel, "t": hit})
+
+        # El puente Dart -> nucleo es FFI, no un import: se detecta aparte.
+        if kind == "dart" and ("dart:ffi" in text or "DynamicLibrary" in text):
+            ffi_users.append(rel)
+
+    # Arista de enlace FFI hacia la cabecera del nucleo.
+    header = next(
+        (h for h in ("core/include/cyberhex_core.h",) if h in files),
+        next((h for h in files if h.endswith(".h")), None),
+    )
+    if header:
+        for rel in ffi_users:
+            if rel != header:
+                edges.append({"s": rel, "t": header})
 
     # Deduplica aristas y calcula grado.
     seen, uniq = set(), []
